@@ -2251,6 +2251,36 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
 - **Rejected.** The credit in the Engine room: it would change three pages and their captures
   the night before publication, for a fact the licence file of each package already carries.
 
+## Analytics (ALG-128)
+
+### D18.2 Cloudflare Web Analytics, in the production build only
+
+- **Context.** The owner wants visits counted on the public site (decision of 2026-10-20,
+  ALG-127), with Cloudflare Web Analytics as on blok (`78c2ba8`: `config.extra.cf_web_analytics`
+  and `BLOK_PROD=1`). Never in forge previews or any other build.
+- **Where the token lives.** `CF_WEB_ANALYTICS_TOKEN` in `src/lib/analytics.ts`, the token the
+  owner posted on ALG-127. It is a public value (it ships in every page), so a constant in the
+  repository, not a secret or a CI variable. An empty token emits nothing. Typed `string` so
+  `astro check` accepts both values.
+- **The gate.** `ANALYTICS_ON` = `analyticsOn(PUBLIC_RELEASE, token)`: `PUBLIC_RELEASE === "true"`
+  at build time and a non-empty token, a pure function that `scripts/test/analytics.test.mjs`
+  covers. The same switch as the deploy (D-R1): the Build step in `ci.yml` sets it with the
+  Deploy step's own condition, copied word for word (push or manual run on `main`; keep them
+  identical), so only the build that ships has it; branches, PRs and `preview` never set it, nor
+  local builds unless the developer exports it or puts it in a `.env` file. The Build step then fails both ways: a build without the switch that contains
+  the beacon, and a release build with a page whose beacon is missing or has no token. The Deploy condition is unchanged.
+- **Where.** `src/components/Analytics.astro` (Cloudflare's tag, `defer`) in the three HTML
+  shells: `Base.astro`, the root `index.astro` and `404.astro`. The Content-Security-Policy
+  of D19.2, which came after, allows the beacon's two hosts (D19.3).
+- **What the site says.** The Engine room said "no analytics" in three languages. Its hosting
+  line follows `ANALYTICS_ON`: unchanged when off; when on, it says Cloudflare Web Analytics
+  counts visits without cookies or fingerprinting, and what the browser sends Cloudflare for
+  it (page address, referrer, browser type, load times, IP address), as `privacy-engineer`
+  advised: no banner is needed without cookies or storage, but the transfer is disclosed.
+- **Rejected.** A CI variable for the token: one more setting for the owner to manage, for a
+  value that is public anyway. Gating on Astro's production mode: `npm run build` is
+  production mode on every machine, previews included.
+
 ## v1.3.3 (ALG-134): hardening after the launch
 
 ### D19.1 The account ID asked from Cloudflare and masked, never read from `vars`
@@ -2296,10 +2326,27 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   inline script, an inline event handler or a `javascript:` URL appears, a second policy, a
   `script-src-elem` or a `script-src-attr`
   appears, or `script-src` holds anything but `'self'`, `'none'` and hashes (a keyword such as
-  `'unsafe-inline'` or `'strict-dynamic'`, a host, a scheme, a wildcard): an
+  `'unsafe-inline'` or `'strict-dynamic'`, a host, a scheme, a wildcard; since D19.3, one host
+  is allowed, the analytics beacon's): an
   edit to an inline script then fails CI instead of breaking the theme on the live site.
 - **Rejected.** `'unsafe-inline'` for scripts: it gives up most of what a CSP is for, for three
   stable scripts. Moving the three scripts to files: the theme script must run before first
   paint, inline. Astro's experimental CSP: it puts the policy in a `<meta>`, which cannot carry
   `frame-ancestors`, and adds a feature flag for three hashes. `upgrade-insecure-requests`: every
   URL is already same-origin and HSTS covers HTTPS; it would break `wrangler dev` over HTTP.
+
+### D19.3 The CSP allows the analytics beacon's two hosts, and nothing else (ALG-140)
+
+- **Context.** D18.2 (the Cloudflare Web Analytics beacon) and D19.2 (the CSP) were built in
+  parallel; merged as they were, the browser would block the beacon on every page.
+- **Choice.** Two sources added to `public/_headers`, exactly: `https://static.cloudflareinsights.com`
+  in `script-src` (the beacon's file, an external script, so no hash) and
+  `https://cloudflareinsights.com` in `connect-src` (where the beacon posts its report).
+  `scripts/check-csp.mjs` now allows those two and nothing else: `script-src` may hold
+  `'self'`, `'none'`, hashes and that one host; `connect-src` only `'self'`, `'none'` and the
+  report host. Any other host, a wildcard, a scheme, a path or `http://` fails CI, and a test covers
+  each. Off (every build but the deployed one) the pages carry no beacon, so the two sources
+  allow nothing that is there.
+- **Rejected.** `https://*.cloudflareinsights.com` or the bare scheme `https:`: wider than the
+  two hosts the beacon uses. Serving `beacon.min.js` from the site: Cloudflare updates it,
+  and the report would still go to `cloudflareinsights.com`.

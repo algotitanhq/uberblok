@@ -64,3 +64,12 @@ test("flags a second policy, an overriding directive and weakening sources", () 
 test("reads a _headers file with CRLF line endings", () => {
   assert.match(policy("/*\r\n  Content-Security-Policy: script-src 'self'\r\n"), /^script-src 'self'$/);
 });
+
+test("allows exactly the two Cloudflare Web Analytics hosts, nowhere else", () => {
+  const ok = `/*\n  Content-Security-Policy: script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com\n`;
+  assert.deepEqual(check(ok, [["a.html", '<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon=\'{"token":"x"}\'></script>']]), []);
+  const bad = `/*\n  Content-Security-Policy: script-src 'self' https://cloudflareinsights.com https://static.cloudflareinsights.com/ http://static.cloudflareinsights.com https://*.cloudflareinsights.com; connect-src 'self' https://static.cloudflareinsights.com https://example.com *\n`;
+  const p = check(bad, []);
+  assert.equal(p.length, 7, p.join("\n"));
+  for (const s of ["script-src allows https://cloudflareinsights.com", "script-src allows https://static.cloudflareinsights.com/", "http://static", "https://*.", "connect-src allows https://static.cloudflareinsights.com", "connect-src allows https://example.com", "connect-src allows *"]) assert.ok(p.some((x) => x.includes(s)), s);
+});

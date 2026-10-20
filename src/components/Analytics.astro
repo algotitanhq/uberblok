@@ -1,0 +1,7 @@
+---
+// The Cloudflare Web Analytics beacon, in every HTML shell; nothing unless ANALYTICS_ON.
+import { ANALYTICS_ON, CF_WEB_ANALYTICS_TOKEN } from "../lib/analytics";
+const beacon = JSON.stringify({ token: CF_WEB_ANALYTICS_TOKEN });
+---
+
+{ANALYTICS_ON && <script is:inline defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon={beacon}></script>}

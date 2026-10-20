@@ -1850,3 +1850,38 @@ The report of ALG-134. Decisions D19.1 and D19.2.
 - The organization variable `CLOUDFLARE_ACCOUNT_ID` is no longer read by this repository; it
   can stay for other sites, which should follow D19.1 rather than read it.
 - `style-src` keeps `'unsafe-inline'` (D19.2).
+
+## Analytics beacon, gated (ALG-128, 2026-10-20)
+
+Cloudflare Web Analytics in the production build only (DECISIONS.md D18.2), with the site's
+real token (posted by the owner on ALG-127). CI sets `PUBLIC_RELEASE=true` for the build only
+when the Deploy step ships it: the repository variable is `true` since the first public release,
+so the push of this change to `main` deploys the beacon; branches, PRs and `preview` never have it.
+
+**Proof** (`npm run build`, 44 HTML pages each):
+
+| Build | Pages with the beacon |
+|---|---|
+| real token, `PUBLIC_RELEASE=true` | 44 / 44 |
+| real token, `PUBLIC_RELEASE` unset (as `preview`) | 0 / 44 |
+| empty token (a local edit, not committed), `PUBLIC_RELEASE=true` | 0 / 44, and the Build step's release guard fails it |
+
+The CI Build step checks both directions: no beacon in a build that is not deployed, and in a
+release build no page without a beacon carrying a token. Its `PUBLIC_RELEASE` uses the Deploy step's condition word for
+word, `workflow_dispatch` included (the first deploy is a manual run, `RELEASE.md` step 4).
+`scripts/test/analytics.test.mjs` covers the rule (`analyticsOn`): on, off without the switch,
+off with an empty token. With the beacon on, the Engine room's hosting line names Cloudflare Web
+Analytics in EN, FR and ES (the FR typography check passes). `npm test`: 225 pass.
+
+**Debts.** None new.
+
+**Rebased on ALG-134 (ALG-140, 2026-10-21).** The CSP landed first, so the beacon would have
+been blocked: `public/_headers` now allows `https://static.cloudflareinsights.com` in
+`script-src` and `https://cloudflareinsights.com` in `connect-src`, and `scripts/check-csp.mjs`
+allows exactly those two (D19.3; 1 new test, `npm test`: 235 pass). The Build step's
+`PUBLIC_RELEASE` condition again equals Deploy's word for word (ALG-134 removed
+`vars.CLOUDFLARE_ACCOUNT_ID != ''` from Deploy). Builds: release 44/44 pages with the beacon,
+otherwise 0/44; `check-csp` passes on both. Release build served by `wrangler dev` 4.142.0 with
+`_headers`, 44 pages in Chromium: the CSP header on all 44, 0 `securitypolicyviolation`, the
+beacon loaded on 44 and its report sent on 44; the only console errors (88) are Cloudflare
+refusing the report's CORS for `localhost`, expected off the site's own host.

@@ -55,7 +55,22 @@ jobs:
       - name: Install
         run: npm ci
       - name: Build
-        run: npm run build
+        # The analytics beacon (src/lib/analytics.ts) needs PUBLIC_RELEASE=true at build
+        # time: only for the build that the Deploy step below ships, so this condition is
+        # the Deploy step's own (keep the two identical). Any other build must have no beacon.
+        env:
+          PUBLIC_RELEASE: ${{ vars.PUBLIC_RELEASE == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'true' || '' }}
+        run: |
+          npm run build
+          if [ "$PUBLIC_RELEASE" != true ] && grep -rl cloudflareinsights dist; then
+            echo "analytics beacon in a build that is not deployed" >&2; exit 1
+          fi
+          if [ "$PUBLIC_RELEASE" = true ]; then
+            missing=$(find dist -name '*.html' -exec grep -L 'data-cf-beacon=.*[0-9a-f]\{32\}' {} + || true)
+            if [ -n "$missing" ]; then
+              echo "$missing"; echo "release build: pages above lack the analytics beacon" >&2; exit 1
+            fi
+          fi
       - name: Check every permalink in the built site
         run: node scripts/check-permalinks.mjs "$RUNNER_TEMP/openzfs" "$OPENZFS_SHA" $(find dist -name '*.html')
       - name: Check every source reference in the built site against SOURCES.md

@@ -42,4 +42,6 @@ visible to every repository. Never add repository-level copies: they would overr
 organization's. The owner's only step is the Go on the first public release, which sets the
 repository variable `PUBLIC_RELEASE=true` on the public repository (the new copy). From then
 on, every merge to `main` deploys the site to `<name>.storagebits.workers.dev`, where `<name>`
-is the `name` in `wrangler.jsonc` (`uberblok`).
+is the `name` in `wrangler.jsonc` (`uberblok`). The deploy step reads only the token: it asks
+Cloudflare for the token's one account, masks its ID, then runs `wrangler`; it never reads the
+variable, whose value would show in clear in the log (`DECISIONS.md` D19.1).

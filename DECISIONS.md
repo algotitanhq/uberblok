@@ -2253,24 +2253,29 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
 
 ## v1.3.3 (ALG-134): hardening after the launch
 
-### D19.1 The account ID from a secret, not an `::add-mask::` step
+### D19.1 The account ID asked from Cloudflare and masked, never read from `vars`
 
 - **Context.** The Deploy step's log showed `CLOUDFLARE_ACCOUNT_ID` in clear: it came from
   `vars`, and the runner prints each run step's `env` and script, expressions filled in, in the
   step's header. The brief proposed a first step `echo "::add-mask::${{ vars.CLOUDFLARE_ACCOUNT_ID }}"`.
-- **Choice.** `wrangler` reads the account ID from the repository secret
-  `CLOUDFLARE_ACCOUNT_ID`; secrets are masked on every log line, headers included, from the
-  start of the job. The variable of the same name stays, and only in the deploy condition, which
-  is unchanged, as the brief asks (a secret cannot appear in an `if:`). A condition is not
-  printed in a normal log; a re-run with debug logging prints it expanded, the variable's value
-  included, so debug re-runs stay off on this public repository (see the debt in the build log). If the secret is
-  missing, the step stops with an error naming it, before `wrangler` runs. The owner adds the
-  secret, same value, before the merge that redeploys (`RELEASE.md` step 4, `docs/dev.md`).
-- **Rejected.** The `::add-mask::` step: its own header prints the expanded command, so the ID
-  would show once more in that step, unmasked. Passing the value through the step's `env`
-  instead: the header prints `env` too. Letting `wrangler` find the account from the token: that
-  needs a permission to list the token's accounts, which the dedicated token ("Workers Scripts:
-  Edit") is not known to have, and it can be tried only by a deploy. The ID in `wrangler.jsonc`: it would be in the public tree.
+  Since ALG-136 the keys live in the `algotitanhq` organization: the secret
+  `CLOUDFLARE_API_TOKEN` and the *variable* `CLOUDFLARE_ACCOUNT_ID`, with no repository-level
+  copies (ALG-137).
+- **Choice.** No step reads the variable. The Deploy step gets only the token; it calls
+  `GET /client/v4/accounts` with it, keeps the ID if the token sees exactly one account (else it
+  stops with an error), registers it with `::add-mask::$account` (the header shows the shell
+  variable's name, not its value) and exports it as `CLOUDFLARE_ACCOUNT_ID` for `wrangler`. The
+  deploy condition is `PUBLIC_RELEASE` alone, so not even a debug re-run prints the ID. Nothing
+  new is needed from the owner. Proved on the branch with a temporary probe step (commit
+  `94ce144`, run 39503479503, then removed): "token visible", "accounts seen: 1, success: true",
+  the ID printed as `***`, and no 32-hex string in the whole log.
+- **Rejected.** The `::add-mask::` step fed from `vars`: its own header prints the expanded
+  command, so the ID would show once more, unmasked. Passing the value through the step's `env`:
+  the header prints `env` too. An organization secret `CLOUDFLARE_ACCOUNT_ID` (the first
+  version of this PR asked for a repository one, which ALG-137 forbids): one more key for the
+  owner to set and keep in step with the variable, for a value the token already gives. Letting
+  `wrangler` find the account by itself: same lookup, but the ID would not be masked before
+  `wrangler` prints anything. The ID in `wrangler.jsonc`: it would be in the public tree.
 
 ### D19.2 Security headers in `public/_headers`, a CSP with script hashes
 

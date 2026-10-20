@@ -81,15 +81,3 @@ jobs:
           export CLOUDFLARE_ACCOUNT_ID="$account"
           message="$(git log -1 --format=%s | head -c 100)"
           npx --yes "wrangler@${WRANGLER_VERSION}" deploy --message "$message"
-      - name: Probe (temporary, ALG-134) the token's account lookup, masked, no deploy
-        if: github.ref == 'refs/heads/alg-134-hardening' && github.event_name == 'push'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          [ -n "$CLOUDFLARE_API_TOKEN" ] && echo "token visible" || { echo "token not visible"; exit 1; }
-          body="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/accounts)"
-          echo "accounts seen: $(echo "$body" | jq '.result | length'), success: $(echo "$body" | jq .success)"
-          account="$(echo "$body" | jq -r 'if .success and (.result | length) == 1 then .result[0].id else empty end')"
-          [ -n "$account" ] || exit 1
-          echo "::add-mask::$account"
-          echo "account (must read ***): $account"

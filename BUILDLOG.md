@@ -1831,7 +1831,7 @@ The report of ALG-134. Decisions D19.1 and D19.2.
   a sweep of the 44 pages (EN, FR, ES and the root redirect) with a `securitypolicyviolation`
   listener, every 3D view opened (Hall, tree, vdevs) and the theme button pressed, 0 violations
   and 0 console errors (the table is in the issue's `headers-check` document).
-- `scripts/check-csp.mjs` passes on the build and runs in CI; 8 tests.
+- `scripts/check-csp.mjs` passes on the build and runs in CI; 9 tests.
 - Lighthouse mobile on the Hall, local through `wrangler dev`: 99/100/100/100 in EN, FR and ES,
   with `csp-xss` and `has-hsts` now passing; the same server without `_headers` also gives 99
   (LCP 2.0 s), so the headers cost nothing. ALG-125 measured 100 on the live HTTPS site; to

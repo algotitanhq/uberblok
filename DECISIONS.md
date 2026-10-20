@@ -2287,9 +2287,10 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   hashed. The 3D chunks, fonts and images are files under `/_astro/`, so `'self'` covers them;
   no `eval`, no worker, no `data:` or `blob:` URL in the build. `scripts/check-csp.mjs`, a CI
   step after the build, fails if an inline script has no hash in the policy, a hash matches no
-  inline script, an inline event handler or a `javascript:` URL appears, a second policy or a
-  `script-src-elem` appears, or a source that weakens `script-src` (`'unsafe-inline'`,
-  `'unsafe-eval'`, a scheme, a wildcard) enters it: an
+  inline script, an inline event handler or a `javascript:` URL appears, a second policy, a
+  `script-src-elem` or a `script-src-attr`
+  appears, or `script-src` holds anything but `'self'`, `'none'` and hashes (a keyword such as
+  `'unsafe-inline'` or `'strict-dynamic'`, a host, a scheme, a wildcard): an
   edit to an inline script then fails CI instead of breaking the theme on the live site.
 - **Rejected.** `'unsafe-inline'` for scripts: it gives up most of what a CSP is for, for three
   stable scripts. Moving the three scripts to files: the theme script must run before first

@@ -30,7 +30,7 @@ test("fails without a policy", () => {
 });
 
 test("catches event handlers in every form, and javascript: URLs", () => {
-  for (const html of ['<b onclick=x()>', '<b onclick = "x()">', '<a title="a > b" onclick="x()">', '<a href="javascript:x()">']) {
+  for (const html of ['<a xlink:href="javascript:x()">', '<a href="java&#115;cript:x()">', '<b onclick=x()>', '<b onclick = "x()">', '<a title="a > b" onclick="x()">', '<a href="javascript:x()">']) {
     assert.equal(check(headers(""), [["a.html", html]]).length, 1, html);
   }
   assert.deepEqual(check(headers(""), [["a.html", '<a title="onclick=x" data-x="a > b">t</a>']]), []);
@@ -38,12 +38,27 @@ test("catches event handlers in every form, and javascript: URLs", () => {
 
 test("hashes an inline script with a data-src attribute", () => {
   assert.equal(check(headers(""), [["a.html", `<script data-src="x">${A}</script>`]]).length, 1);
+  assert.equal(check(headers(""), [["a.html", `<script data-note=" src=x">${A}</script>`]]).length, 1);
+});
+
+test("runs as a command and reports the pages it checked", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const d = mkdtempSync(join(tmpdir(), "csp-"));
+  writeFileSync(join(d, "_headers"), headers(sha256(A)));
+  writeFileSync(join(d, "a.html"), `<script>${A}</script>`);
+  const out = execFileSync(process.execPath, [new URL("../check-csp.mjs", import.meta.url).pathname, join(d, "_headers"), join(d, "a.html")], { encoding: "utf8" });
+  assert.match(out, /^1 pages, every inline script allowed by its hash/);
 });
 
 test("flags a second policy, an overriding directive and weakening sources", () => {
   const h = `/*\n  Content-Security-Policy: script-src 'self' 'unsafe-eval' https: *; script-src-elem 'self'\n/en/*\n  Content-Security-Policy: script-src 'none'\n`;
   const p = check(h, []);
   for (const s of ["rule /en/*", "script-src-elem", "'unsafe-eval'", "https:", "allows *"]) assert.ok(p.some((x) => x.includes(s)), s);
+  const q = check(`/*\n  Content-Security-Policy: script-src 'self' cdn.example.com https://*.example.com; SCRIPT-SRC-ATTR 'unsafe-inline'\n`, []);
+  for (const s of ["cdn.example.com", "https://*.example.com", "script-src-attr"]) assert.ok(q.some((x) => x.includes(s)), s);
 });
 
 test("reads a _headers file with CRLF line endings", () => {

@@ -3,16 +3,17 @@
 // (DECISIONS.md D19.2):
 //   - the `/*` rule carries the only Content-Security-Policy, with a script-src
 //     and no script-src-elem or script-src-attr (which would override it), and
-//     script-src holds no source that weakens it ('unsafe-inline', 'unsafe-eval',
-//     a scheme, a wildcard, 'strict-dynamic');
+//     script-src holds only 'self', 'none' and sha256 hashes (no 'unsafe-inline',
+//     'unsafe-eval', host, scheme or wildcard);
 //   - every inline <script> of a built page has its sha256 in script-src, and
 //     every hash in script-src belongs to an inline script (none stale);
 //   - no page carries an inline event handler (on...=) or a javascript: URL,
 //     which no hash allows.
 // Network is never touched.
 // Usage: node scripts/check-csp.mjs public/_headers FILE.html...
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 export const sha256 = (text) => `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
 
@@ -33,14 +34,21 @@ export function policies(headers) {
 export const policy = (headers) => policies(headers).find((p) => p.rule === "/*")?.value ?? null;
 
 const directive = (csp, name) =>
-  csp.split(";").map((s) => s.trim().split(/\s+/)).find((t) => t[0] === name)?.slice(1) ?? null;
+  csp.split(";").map((s) => s.trim().split(/\s+/)).find((t) => t[0].toLowerCase() === name)?.slice(1) ?? null;
 
 export const scriptSources = (csp) => directive(csp, "script-src");
 
-const WEAK = /^('unsafe-inline'|'unsafe-eval'|'unsafe-hashes'|'wasm-unsafe-eval'|'strict-dynamic'|\*|[a-z][a-z0-9+.-]*:)$/i;
+// The only sources script-src may hold: anything else (a keyword, a host, a scheme) widens it.
+const STRICT = /^('self'|'none'|'sha256-[A-Za-z0-9+/]+=*')$/;
+
+const decode = (s) =>
+  s.replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);?/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&colon;/gi, ":").replace(/&tab;|&newline;/gi, "");
 
 export function inlineScripts(html) {
-  return [...html.matchAll(/<script\b(?![^>]*\ssrc\s*=)([^>]*)>([\s\S]*?)<\/script>/gi)]
+  return [...html.matchAll(/<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/script>/gi)]
+    .filter((m) => !/\ssrc\s*=/i.test(m[1].replace(/"[^"]*"|'[^']*'/g, '""')))
     .filter((m) => !/type="application\/(ld\+)?json"/i.test(m[1]))
     .map((m) => m[2]);
 }
@@ -53,7 +61,7 @@ export function check(headers, pages) {
   const sources = scriptSources(csp);
   if (!sources) return [...problems, "no script-src in the Content-Security-Policy"];
   for (const d of ["script-src-elem", "script-src-attr"]) if (directive(csp, d)) problems.push(`${d} overrides script-src`);
-  for (const s of sources) if (WEAK.test(s)) problems.push(`script-src allows ${s}`);
+  for (const s of sources) if (!STRICT.test(s)) problems.push(`script-src allows ${s}`);
   const allowed = new Set(sources.filter((s) => s.startsWith("'sha256-")));
   const used = new Set();
   for (const [file, html] of pages) {
@@ -67,14 +75,14 @@ export function check(headers, pages) {
     for (const tag of tags.match(/<[a-z](?:[^>"']|"[^"]*"|'[^']*')*>/gi) ?? []) {
       const bare = tag.replace(/"[^"]*"|'[^']*'/g, '""');
       for (const m of bare.matchAll(/\s(on[a-z]+)\s*=/gi)) problems.push(`${file}: inline event handler ${m[1]}`);
-      if (/\s(?:href|src|action|formaction)\s*=\s*["']?\s*javascript:/i.test(tag)) problems.push(`${file}: javascript: URL`);
+      if (/[\s:](?:href|src|action|formaction)\s*=\s*["']?\s*javascript:/i.test(decode(tag).replace(/[\t\n\r]/g, ""))) problems.push(`${file}: javascript: URL`);
     }
   }
   for (const h of allowed) if (!used.has(h)) problems.push(`script-src hash ${h} matches no inline script`);
   return problems;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const [headersFile, ...files] = process.argv.slice(2);
   if (!headersFile || files.length === 0) {
     console.error("usage: check-csp.mjs public/_headers FILE.html...");

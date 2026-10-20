@@ -36,8 +36,10 @@ branch is served this way while it is in review, then taken down after its merge
 
 ## Switching the deploy on
 
-After the owner's Go on the first public release, the owner sets the Cloudflare keys
-(repository secret `CLOUDFLARE_API_TOKEN`, an API token with "Workers Scripts: Edit" on the
-account, dedicated to Uberblok; repository variable `CLOUDFLARE_ACCOUNT_ID`), then the
-repository variable `PUBLIC_RELEASE=true` is set. From then on, every merge to `main`
-deploys.
+The Cloudflare keys come from the `algotitanhq` organization (secret `CLOUDFLARE_API_TOKEN`,
+an API token with "Workers Scripts: Edit" on the account; variable `CLOUDFLARE_ACCOUNT_ID`),
+visible to every repository. Never add repository-level copies: they would override the
+organization's. The owner's only step is the Go on the first public release, which sets the
+repository variable `PUBLIC_RELEASE=true` on the public repository (the new copy). From then
+on, every merge to `main` deploys the site to `<name>.storagebits.workers.dev`, where `<name>`
+is the `name` in `wrangler.jsonc` (`uberblok`).

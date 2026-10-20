@@ -5,9 +5,12 @@ name: ci
 # and test only: previews are private, on the build machine (`preview`, see docs/dev.md).
 # Deploy: `wrangler deploy` on a push to main (or a manual run on main, for the
 # first deploy, RELEASE.md step 4), and only once the repository
-# variable PUBLIC_RELEASE is "true" (set after the owner's Go on the first public
-# release, with the Cloudflare keys). Until then it is skipped, even if
-# CLOUDFLARE_ACCOUNT_ID is set. No workflow uploads preview versions.
+# variable PUBLIC_RELEASE is "true" (the owner's only step: the Go on the first public
+# release sets it on the public repository). Until then it is skipped, even though
+# CLOUDFLARE_ACCOUNT_ID is visible. The Cloudflare keys, the secret CLOUDFLARE_API_TOKEN
+# and the variable CLOUDFLARE_ACCOUNT_ID, come from the algotitanhq organization; never
+# add repository-level copies (they would override the organization's). The site is
+# <name>.storagebits.workers.dev (name in wrangler.jsonc). No workflow uploads preview versions.
 on:
   push:
   pull_request:

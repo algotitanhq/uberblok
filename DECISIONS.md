@@ -2265,7 +2265,8 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   `GET /client/v4/accounts` with it, keeps the ID if the token sees exactly one account (else it
   stops with an error), registers it with `::add-mask::$account` (the header shows the shell
   variable's name, not its value) and exports it as `CLOUDFLARE_ACCOUNT_ID` for `wrangler`. The
-  deploy condition is `PUBLIC_RELEASE` alone, so not even a debug re-run prints the ID. Nothing
+  deploy condition no longer reads `CLOUDFLARE_ACCOUNT_ID` (`PUBLIC_RELEASE`, `main`, a push or
+  a manual run), so not even a debug re-run prints the ID. Nothing
   new is needed from the owner. Proved on the branch with a temporary probe step (commit
   `94ce144`, run 39503479503, then removed): "token visible", "accounts seen: 1, success: true",
   the ID printed as `***`, and no 32-hex string in the whole log.

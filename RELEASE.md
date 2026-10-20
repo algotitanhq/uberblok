@@ -92,6 +92,7 @@ runs CI without deploying: `PUBLIC_RELEASE` is not set there yet.
 
 The Cloudflare keys come from the `algotitanhq` organization: the secret
 `CLOUDFLARE_API_TOKEN` and the variable `CLOUDFLARE_ACCOUNT_ID`, visible to every repository.
+The deploy reads only the token: it gets the account ID from Cloudflare and masks it (D19.1).
 After step 3, the owner's Go sets the repository variable `PUBLIC_RELEASE=true`, in the public
 repository only (the new copy), as in `docs/dev.md` ("Switching the deploy on"). Never
 add repository-level copies of the keys: they would override the organization's. Then the

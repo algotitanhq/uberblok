@@ -1821,8 +1821,8 @@ The report of ALG-134. Decisions D19.1 and D19.2.
 **What works**
 
 - The deploy no longer reads the variable `CLOUDFLARE_ACCOUNT_ID`: it asks Cloudflare for the
-  token's one account and masks its ID before `wrangler` runs; the condition is `PUBLIC_RELEASE`
-  alone. Proved on the branch (temporary probe, run 39503479503): 1 account seen, the ID shown
+  token's one account and masks its ID before `wrangler` runs; the condition no longer reads
+  the variable. Proved on the branch (temporary probe, run 39503479503): 1 account seen, the ID shown
   as `***`, no 32-hex string in the log. Nothing new is needed from the owner. Rebased on
   ALG-137 (keys from the organization), so both merge, and deploy, once.
 - `public/_headers` is in `dist/` and served on every path by `wrangler dev` (4.142.0): HSTS,
@@ -1844,6 +1844,9 @@ The report of ALG-134. Decisions D19.1 and D19.2.
 
 - Run 39495463987 (the first deploy, before this PR) still shows the account ID in clear in
   its Deploy header: its logs are to be deleted (Actions, that run, "Delete all logs").
+- Deploy runs in the build job, after `npm ci` and the build, with the token in its env; a
+  separate deploy job fed the built `dist/` (and `wrangler` from the lockfile) would keep
+  install scripts away from the token (`security-auditor`, medium; older than this PR).
 - The organization variable `CLOUDFLARE_ACCOUNT_ID` is no longer read by this repository; it
   can stay for other sites, which should follow D19.1 rather than read it.
 - `style-src` keeps `'unsafe-inline'` (D19.2).

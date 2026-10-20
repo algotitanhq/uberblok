@@ -6,9 +6,9 @@ name: ci
 # Deploy: `wrangler deploy` on a push to main (or a manual run on main, for the
 # first deploy, RELEASE.md step 4), and only once the repository
 # variable PUBLIC_RELEASE is "true" (the owner's only step: the Go on the first public
-# release sets it on the public repository). Until then it is skipped, even though
-# CLOUDFLARE_ACCOUNT_ID is visible. The Cloudflare keys, the secret CLOUDFLARE_API_TOKEN
-# and the variable CLOUDFLARE_ACCOUNT_ID, come from the algotitanhq organization; never
+# release sets it on the public repository). Until then it is skipped. The Cloudflare keys,
+# the secret CLOUDFLARE_API_TOKEN and the variable CLOUDFLARE_ACCOUNT_ID (not read here),
+# come from the algotitanhq organization; never
 # add repository-level copies (they would override the organization's). The site is
 # <name>.storagebits.workers.dev (name in wrangler.jsonc). No workflow uploads preview versions.
 # No step reads the variable CLOUDFLARE_ACCOUNT_ID: a run step's log header prints its env
@@ -71,8 +71,11 @@ jobs:
             echo "::error::The secret CLOUDFLARE_API_TOKEN is not visible to this repository"
             exit 1
           fi
-          account="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/accounts \
-            | jq -r 'if .success and (.result | length) == 1 then .result[0].id else empty end')"
+          if ! accounts="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/accounts)"; then
+            echo "::error::Cloudflare did not answer the account lookup"
+            exit 1
+          fi
+          account="$(echo "$accounts" | jq -r 'if .success and (.result | length) == 1 and (.result[0].id | type) == "string" then .result[0].id else empty end')"
           if [ -z "$account" ]; then
             echo "::error::The token does not see exactly one Cloudflare account"
             exit 1

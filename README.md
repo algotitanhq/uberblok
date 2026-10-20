@@ -88,7 +88,6 @@ The site itself has no settings. Deployment is configured in GitHub and Cloudfla
 | `CLOUDFLARE_API_TOKEN` | organization secret (`algotitanhq`) | GitHub Actions | API token with "Workers Scripts: Edit" on the one account that hosts the Worker; the deploy step asks Cloudflare for that account and masks its ID in the logs. |
 | `CLOUDFLARE_ACCOUNT_ID` | organization variable (`algotitanhq`) | GitHub Actions | Not read by this workflow: a value from `vars` would show in clear in the logs. |
 | `wrangler.jsonc` | file | repository | Cloudflare Workers with static assets serving `dist/`; `preview_urls` is off. |
-| `wrangler.jsonc` | file | repository | Cloudflare Workers with static assets serving `dist/`; `preview_urls` is off. |
 
 Everything goes through GitHub Actions (`.github/workflows/ci.yml`): tests, excerpt check,
 build, permalink and source checks on the built site; branches stop there. The deploy step

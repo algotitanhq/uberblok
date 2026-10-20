@@ -1813,3 +1813,34 @@ The report of ALG-129. Decision D18.1.
 **Debts** (after publication): from the release gate, the 768 px FR/ES nav, wrangler in
 `devDependencies`, a separate deploy job; `site` in `astro.config.mjs` names the expected
 `workers.dev` URL and is checked against the real one after the first deploy, with the README URL.
+
+## v1.3.3, hardening after the launch (2026-10-20)
+
+The report of ALG-134. Decisions D19.1 and D19.2.
+
+**What works**
+
+- The deploy reads `CLOUDFLARE_ACCOUNT_ID` from a secret, masked in every log line; the deploy
+  condition is unchanged. It needs the owner to add that secret before the next deploy; without
+  it the step stops with an error naming the secret.
+- `public/_headers` is in `dist/` and served on every path by `wrangler dev` (4.142.0): HSTS,
+  `nosniff`, the referrer policy, `X-Frame-Options: DENY`, a `Permissions-Policy` and the CSP;
+  `/_headers` itself is not served (404). `wrangler.jsonc` still has `assets` and no `main`; no
+  `_worker.js`, no `functions/`.
+- Under that CSP: `scripts/verify.mjs` on the whole visit, 457 captures, 0 console errors;
+  a sweep of the 44 pages (EN, FR, ES and the root redirect) with a `securitypolicyviolation`
+  listener, every 3D view opened (Hall, tree, vdevs) and the theme button pressed, 0 violations
+  and 0 console errors (the table is in the issue's `headers-check` document).
+- `scripts/check-csp.mjs` passes on the build and runs in CI; 8 tests.
+- Lighthouse mobile on the Hall, local through `wrangler dev`: 99/100/100/100 in EN, FR and ES,
+  with `csp-xss` and `has-hsts` now passing; the same server without `_headers` also gives 99
+  (LCP 2.0 s), so the headers cost nothing. ALG-125 measured 100 on the live HTTPS site; to
+  re-measure there after the merge deploy.
+- gitleaks 8.30.1 on the tree and the history: no leak.
+
+**Debts**
+
+- The deploy condition still reads the variable `CLOUDFLARE_ACCOUNT_ID`: a re-run with debug
+  logging would print it expanded. Kept as the brief asks; gating on `PUBLIC_RELEASE` alone (the
+  step already checks the secret) would close it, and the variable could then go.
+- `style-src` keeps `'unsafe-inline'` (D19.2).

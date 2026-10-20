@@ -2261,7 +2261,9 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
 - **Choice.** `wrangler` reads the account ID from the repository secret
   `CLOUDFLARE_ACCOUNT_ID`; secrets are masked on every log line, headers included, from the
   start of the job. The variable of the same name stays, and only in the deploy condition, which
-  is unchanged (a secret cannot appear in an `if:`; a condition is not printed). If the secret is
+  is unchanged, as the brief asks (a secret cannot appear in an `if:`). A condition is not
+  printed in a normal log; a re-run with debug logging prints it expanded, the variable's value
+  included, so debug re-runs stay off on this public repository (see the debt in the build log). If the secret is
   missing, the step stops with an error naming it, before `wrangler` runs. The owner adds the
   secret, same value, before the merge that redeploys (`RELEASE.md` step 4, `docs/dev.md`).
 - **Rejected.** The `::add-mask::` step: its own header prints the expanded command, so the ID
@@ -2285,7 +2287,9 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   hashed. The 3D chunks, fonts and images are files under `/_astro/`, so `'self'` covers them;
   no `eval`, no worker, no `data:` or `blob:` URL in the build. `scripts/check-csp.mjs`, a CI
   step after the build, fails if an inline script has no hash in the policy, a hash matches no
-  inline script, an inline event handler appears, or `'unsafe-inline'` enters `script-src`: an
+  inline script, an inline event handler or a `javascript:` URL appears, a second policy or a
+  `script-src-elem` appears, or a source that weakens `script-src` (`'unsafe-inline'`,
+  `'unsafe-eval'`, a scheme, a wildcard) enters it: an
   edit to an inline script then fails CI instead of breaking the theme on the live site.
 - **Rejected.** `'unsafe-inline'` for scripts: it gives up most of what a CSP is for, for three
   stable scripts. Moving the three scripts to files: the theme script must run before first

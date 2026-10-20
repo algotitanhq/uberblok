@@ -1,0 +1,14 @@
+# Response headers for every page and asset, applied by Cloudflare Workers static
+# assets (no Worker code). DECISIONS.md D19.2.
+# script-src: the site's own files plus the hash of each inline script
+# (src/layouts/Base.astro, src/pages/index.astro); CI checks the hashes against
+# the build (scripts/check-csp.mjs), so a changed inline script fails CI, not the visit.
+# style-src keeps 'unsafe-inline': Astro scopes styles in <style> blocks and the
+# figures are SVG with style attributes, which hashes cannot cover.
+/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-Hs/RY/v2n+d9X4n+GGZiWG4Qb0Ts1fPmZJ4ykpSL760=' 'sha256-ubQG1vYTiTC4zDqE/IhDP94+l+Jzv7v1MpB4ybf7m+4=' 'sha256-ceZvjtAQQclop+tGGLgD3VPQOknsb/TT2MCn9HM+Sgo='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

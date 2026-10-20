@@ -2250,3 +2250,45 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   font licence (SIL OFL 1.1, Fraunces, Inter, Instrument Serif) goes in the README credits.
 - **Rejected.** The credit in the Engine room: it would change three pages and their captures
   the night before publication, for a fact the licence file of each package already carries.
+
+## v1.3.3 (ALG-134): hardening after the launch
+
+### D19.1 The account ID from a secret, not an `::add-mask::` step
+
+- **Context.** The Deploy step's log showed `CLOUDFLARE_ACCOUNT_ID` in clear: it came from
+  `vars`, and the runner prints each run step's `env` and script, expressions filled in, in the
+  step's header. The brief proposed a first step `echo "::add-mask::${{ vars.CLOUDFLARE_ACCOUNT_ID }}"`.
+- **Choice.** `wrangler` reads the account ID from the repository secret
+  `CLOUDFLARE_ACCOUNT_ID`; secrets are masked on every log line, headers included, from the
+  start of the job. The variable of the same name stays, and only in the deploy condition, which
+  is unchanged (a secret cannot appear in an `if:`; a condition is not printed). If the secret is
+  missing, the step stops with an error naming it, before `wrangler` runs. The owner adds the
+  secret, same value, before the merge that redeploys (`RELEASE.md` step 4, `docs/dev.md`).
+- **Rejected.** The `::add-mask::` step: its own header prints the expanded command, so the ID
+  would show once more in that step, unmasked. Passing the value through the step's `env`
+  instead: the header prints `env` too. Letting `wrangler` find the account from the token: that
+  needs a permission to list the token's accounts, which the dedicated token ("Workers Scripts:
+  Edit") is not known to have, and it can be tried only by a deploy. The ID in `wrangler.jsonc`: it would be in the public tree.
+
+### D19.2 Security headers in `public/_headers`, a CSP with script hashes
+
+- **Context.** The public site had no security header (ALG-125, `static-check`). It is static
+  assets only, no Worker code, and stays so.
+- **Choice.** `public/_headers`, copied to `dist/` and applied by Workers static assets to every
+  path: HSTS (one year, subdomains, no preload), `nosniff`, `strict-origin-when-cross-origin`,
+  `X-Frame-Options: DENY` with `frame-ancestors 'none'`, a `Permissions-Policy` that turns off
+  camera, microphone, geolocation, payment and USB, and a CSP. The CSP allows only the site's
+  own origin for everything; `script-src` adds the sha256 of each of the three inline scripts
+  (`Base.astro`: the theme before first paint and the theme button; `index.astro`: the
+  language redirect), so no `'unsafe-inline'` for scripts. `style-src` keeps `'unsafe-inline'`:
+  Astro's `<style>` blocks and some 28 000 `style` attributes in the SVG figures cannot be
+  hashed. The 3D chunks, fonts and images are files under `/_astro/`, so `'self'` covers them;
+  no `eval`, no worker, no `data:` or `blob:` URL in the build. `scripts/check-csp.mjs`, a CI
+  step after the build, fails if an inline script has no hash in the policy, a hash matches no
+  inline script, an inline event handler appears, or `'unsafe-inline'` enters `script-src`: an
+  edit to an inline script then fails CI instead of breaking the theme on the live site.
+- **Rejected.** `'unsafe-inline'` for scripts: it gives up most of what a CSP is for, for three
+  stable scripts. Moving the three scripts to files: the theme script must run before first
+  paint, inline. Astro's experimental CSP: it puts the policy in a `<meta>`, which cannot carry
+  `frame-ancestors`, and adds a feature flag for three hashes. `upgrade-insecure-requests`: every
+  URL is already same-origin and HSTS covers HTTPS; it would break `wrangler dev` over HTTP.

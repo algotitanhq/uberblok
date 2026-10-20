@@ -83,14 +83,18 @@ The site itself has no settings. Deployment is configured in GitHub and Cloudfla
 | Key | Kind | Where | Role |
 |---|---|---|---|
 | `PUBLIC_RELEASE` | repository variable | GitHub Actions | The deploy step runs only when it is `true`. |
-| `CLOUDFLARE_ACCOUNT_ID` | repository variable | GitHub Actions | The Cloudflare account that hosts the Worker. |
+| `CLOUDFLARE_ACCOUNT_ID` | repository variable | GitHub Actions | Set, it allows the deploy step (with `PUBLIC_RELEASE`); its value is not used. |
+| `CLOUDFLARE_ACCOUNT_ID` | repository secret | GitHub Actions | The Cloudflare account that hosts the Worker, passed to `wrangler`; a secret, so masked in the logs. |
 | `CLOUDFLARE_API_TOKEN` | repository secret | GitHub Actions | API token with "Workers Scripts: Edit", dedicated to Uberblok. |
 | `wrangler.jsonc` | file | repository | Cloudflare Workers with static assets serving `dist/`; `preview_urls` is off. |
 
 Everything goes through GitHub Actions (`.github/workflows/ci.yml`): tests, excerpt check,
 build, permalink and source checks on the built site; branches stop there. The deploy step
 (`wrangler deploy`) runs only on `main`, on a push or a manual run of the workflow, with the
-three keys above set. The site is deployed to Cloudflare Workers from `main`.
+keys above set. The site is deployed to Cloudflare Workers from `main`, at
+<https://uberblok.storagebits.workers.dev>. `public/_headers` sets its security headers
+(HSTS, a Content-Security-Policy, no framing); CI checks the policy against every inline script
+of the build.
 
 Notes on the team's own build machine: [`docs/dev.md`](docs/dev.md).
 

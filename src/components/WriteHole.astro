@@ -1,0 +1,213 @@
+---
+// Static figure of the RAID-Z room: a RAID-5 stripe updated in place, cut by a
+// power failure, beside a RAID-Z block written to free space. No script: the
+// figure is three states of each, side by side. The RAID-Z half rests on
+// copy-on-write and the txg commit (copy-on-write and transaction groups
+// rooms), not on code in vdev_raidz.c; the caption says so.
+import type { Lang } from "../lib/rooms";
+import { fr } from "../lib/fr";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+type Cell = [string, string]; // label, kind: d (data), p (parity), n (new), x (wrong), k (skip), e (free), o (old, kept)
+interface Row {
+  caption: string;
+  cells: Cell[];
+}
+const T = {
+  en: {
+    figure: "The write hole, and why RAID-Z has none",
+    r5: "RAID-5: the stripe is updated in place",
+    rz: "RAID-Z: the new block gets a new stripe",
+    r5rows: [
+      "Before: D1 is part of a stripe shared with D0 and D2; P is their parity.",
+      "Read D0, D2 (or the old D1 and P), compute P′, write D1′ over D1. The power fails before P′ is written.",
+      "After the reboot, P no longer matches D0, D1′, D2, and nothing says so. When disk 0 dies, D0 is rebuilt from the wrong parity: garbage, silently.",
+    ],
+    rzrows: [
+      "Before: the block (A0, A1 and their parity PA) is one stripe of its own.",
+      "The new version (B0, B1, PB) goes to free space as a stripe of its own, parity computed from it alone. The power fails mid-write: B1 never lands.",
+      "After the reboot, the last committed uberblock still points to the old block, untouched. The half-written stripe is referenced by nothing: it is free space.",
+    ],
+  },
+  fr: {
+    figure: "Le trou d’écriture, et pourquoi RAID-Z n’en a pas",
+    r5: "RAID-5 : la bande est mise à jour sur place",
+    rz: "RAID-Z : le nouveau bloc a une nouvelle bande",
+    r5rows: [
+      "Avant : D1 fait partie d’une bande partagée avec D0 et D2 ; P est leur parité.",
+      "Lire D0, D2 (ou l’ancien D1 et P), calculer P′, écrire D1′ par-dessus D1. Le courant est coupé avant l’écriture de P′.",
+      "Au redémarrage, P ne correspond plus à D0, D1′, D2, et rien ne le signale. Quand le disque 0 meurt, D0 est reconstruit à partir de la mauvaise parité : du bruit, en silence.",
+    ],
+    rzrows: [
+      "Avant : le bloc (A0, A1 et leur parité PA) forme une bande à lui seul.",
+      "La nouvelle version (B0, B1, PB) va dans de l’espace libre, en une bande à elle seule, sa parité calculée à partir d’elle seule. Le courant est coupé en pleine écriture : B1 n’arrive jamais.",
+      "Au redémarrage, le dernier uberblock validé désigne toujours l’ancien bloc, intact. La bande à moitié écrite n’est désignée par rien : c’est de l’espace libre.",
+    ],
+  },
+  es: {
+    figure: "El agujero de escritura («write hole») y por qué RAID-Z no lo tiene",
+    r5: "RAID-5: la banda se actualiza in situ",
+    rz: "RAID-Z: el bloque nuevo recibe una banda nueva",
+    r5rows: [
+      "Antes: D1 forma parte de una banda compartida con D0 y D2; P es su paridad.",
+      "Leer D0, D2 (o el antiguo D1 y P), calcular P′, escribir D1′ sobre D1. La corriente se corta antes de que se escriba P′.",
+      "Tras el reinicio, P ya no coincide con D0, D1′, D2, y nada lo indica. Cuando el disco 0 muere, D0 se reconstruye a partir de la paridad errónea: basura, en silencio.",
+    ],
+    rzrows: [
+      "Antes: el bloque (A0, A1 y su paridad PA) forma una banda propia.",
+      "La versión nueva (B0, B1, PB) va al espacio libre como una banda propia, con la paridad calculada solo a partir de ella. La corriente se corta en mitad de la escritura: B1 nunca llega.",
+      "Tras el reinicio, el último uberblock confirmado sigue apuntando al bloque antiguo, intacto. Nada hace referencia a la banda a medio escribir: es espacio libre.",
+    ],
+  },
+}[lang];
+const f = (s: string) => (lang === "fr" ? fr(s) : s);
+const r5: Row[] = [
+  { caption: T.r5rows[0], cells: [["D0", "d"], ["D1", "d"], ["D2", "d"], ["P", "p"]] },
+  { caption: T.r5rows[1], cells: [["D0", "d"], ["D1′", "n"], ["D2", "d"], ["P", "p"]] },
+  { caption: T.r5rows[2], cells: [["D0", "x"], ["D1′", "n"], ["D2", "d"], ["P", "x"]] },
+];
+// RAID-Z: two rows of sectors on a 4-child raidz1: the old block (2 data
+// sectors, P, and the skip sector that rounds it to 4, as mapAlloc(8K, 12, 4, 1)
+// computes), then free space where the new version goes.
+const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
+  { caption: T.rzrows[0], old: [["PA", "p"], ["A0", "d"], ["A1", "d"], ["", "k"]], neu: [["", "e"], ["", "e"], ["", "e"], ["", "e"]] },
+  { caption: T.rzrows[1], old: [["PA", "p"], ["A0", "d"], ["A1", "d"], ["", "k"]], neu: [["PB", "n"], ["B0", "n"], ["", "e"], ["", "e"]] },
+  { caption: T.rzrows[2], old: [["PA", "o"], ["A0", "o"], ["A1", "o"], ["", "k"]], neu: [["", "e"], ["", "e"], ["", "e"], ["", "e"]] },
+];
+---
+
+<figure class="wh" aria-label={f(T.figure)}>
+  <div class="side">
+    <h3>{f(T.r5)}</h3>
+    <ol>
+      {
+        r5.map((row) => (
+          <li>
+            <div class="disks" aria-hidden="true">
+              {row.cells.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
+            </div>
+            <p>{f(row.caption)}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+  <div class="side">
+    <h3>{f(T.rz)}</h3>
+    <ol>
+      {
+        rz.map((row) => (
+          <li>
+            <div class="disks two" aria-hidden="true">
+              {row.old.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
+              {row.neu.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
+            </div>
+            <p>{f(row.caption)}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</figure>
+
+<style>
+  .wh {
+    margin: var(--space-6) 0 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-5);
+    max-width: 64rem;
+  }
+  .side {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--space-4);
+  }
+  h3 {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+    margin-bottom: var(--space-3);
+  }
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-4);
+  }
+  li {
+    display: grid;
+    grid-template-columns: 11rem 1fr;
+    gap: var(--space-3);
+    align-items: start;
+  }
+  li p {
+    font-size: var(--step--1);
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
+  .disks {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+  }
+  .c {
+    display: grid;
+    place-items: center;
+    height: 1.6rem;
+    border-radius: 3px;
+    border: 1px solid var(--line-strong);
+    background: var(--surface-2);
+    color: var(--fg);
+  }
+  .c.p {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .c.n {
+    border-color: var(--fg);
+    background: var(--bg);
+  }
+  .c.x {
+    border-color: var(--bad);
+    background: var(--bad-soft);
+    color: var(--bad);
+  }
+  .c.o {
+    border-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .c.k {
+    background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line-strong) 4px 5px);
+  }
+  .c.e {
+    border: 1px dashed var(--line);
+    background: transparent;
+  }
+  @media (max-width: 56rem) {
+    .wh {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 30rem) {
+    li {
+      grid-template-columns: 1fr;
+      gap: var(--space-2);
+    }
+    .disks {
+      max-width: 12rem;
+    }
+  }
+</style>

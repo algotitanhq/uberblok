@@ -1,0 +1,703 @@
+---
+// The figure of the send / receive room: the tree of tank/fs@s4 with the
+// logical birth txg of every block pointer, traversed from the from-snapshot
+// the visitor picks (or none); the stream of records the traversal produces,
+// each with its drr_checksum; and the receiver, which checks each header and
+// dispatches each record by type until its files equal @s4's. src/lib/send.ts
+// (a transcription of traverse_visitbp, send_cb, do_dump, dump_record and the
+// receive checks) decides every outcome, and src/lib/send-view.ts draws it, at
+// build time for the finished stream (readable without JavaScript) and in the
+// browser frame by frame. Refs: ANALYSIS.md, room "send / receive";
+// simplifications: DECISIONS.md D9.2.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { snapshots, send, receive, streamBytes, contentOf } from "../lib/send";
+import { tree, strip, receiver, counters, table, history, describe, summary, lastFrame, type SrStrings } from "../lib/send-view";
+import { SEND_STRINGS } from "../lib/send-strings";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const SEND = "module/zfs/dmu_send.c";
+const RECV = "module/zfs/dmu_recv.c";
+const refs = {
+  visitbp: gh("module/zfs/dmu_traverse.c", 277, 278),
+  sendCbDnode: gh(SEND, 1098, 1108),
+  sendCbMeta: gh(SEND, 1109, 1120),
+  sendCbData: gh(SEND, 1140, 1146),
+  dumpDnode: gh(SEND, 732, 742),
+  end: gh(SEND, 2619, 2626),
+  recvBegin: gh(RECV, 1304, 1306),
+  recvEnd: gh(RECV, 3000, 3007),
+  recvCheck: gh(RECV, 2861, 2866),
+  dispatch: gh(RECV, 3188, 3213),
+};
+const S = { ...Object.fromEntries(Object.entries(SEND_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as SrStrings;
+const t = UI[lang];
+const snaps = snapshots();
+const to = snaps[3];
+const froms = [null, ...snaps.slice(0, 3)];
+const sends = froms.map((f) => send(to, f));
+const FROM0 = 2;
+const snd = sends[FROM0];
+const rcv = receive(contentOf(froms[FROM0]!.root), streamBytes(snd.records));
+const t0 = lastFrame(snd, rcv);
+---
+
+<figure class="sr" data-send data-strings={JSON.stringify(S)} data-from={FROM0} aria-label={S.figure}>
+  <div class="sr-bar" hidden>
+    <div class="buttons" role="group" aria-label={S.fromLabel}>
+      <span class="glabel">{S.fromLabel}</span>
+      {
+        froms.map((f, i) => (
+          <button class="btn" type="button" data-from={i} aria-pressed={i === FROM0 ? "true" : "false"}>
+            {f ? S.fromSnap.replace("{name}", f.name).replace("{txg}", String(f.txg)) : S.fromNone}
+          </button>
+        ))
+      }
+    </div>
+    <div class="buttons actions">
+      <button class="btn btn--primary" type="button" data-act="play">{S.play}</button>
+      <button class="btn" type="button" data-act="step">{S.step}</button>
+      <button class="btn" type="button" data-act="end">{S.showAll}</button>
+      <button class="btn" type="button" data-act="restart">{S.restart}</button>
+      <button class="btn btn--danger" type="button" data-flip aria-pressed="false">{S.flip}</button>
+    </div>
+  </div>
+  <p class="visually-hidden" data-summary>{summary(S, snd)}</p>
+
+  <details class="sr-history" open>
+    <summary>{S.historyLabel}</summary>
+    <Fragment set:html={history(S, snaps)} />
+  </details>
+
+  <div class="sr-grid">
+    <section class="panel source" aria-labelledby={`sr-src-${lang}`}>
+      <h3 id={`sr-src-${lang}`}>{S.sourceLabel}</h3>
+      <p class="counters" data-counters set:html={counters(S, snd, t0)} />
+      <div class="tree-wrap" data-tree set:html={tree(S, snd, t0)} />
+      <ul class="legend" aria-hidden="true">
+        <li><span class="bp data visit"><span class="t">a2′</span><sub>20</sub></span>{S.legendVisit}</li>
+        <li><span class="bp data skip"><span class="t">a0</span><sub>10</sub></span>{S.legendSkip}</li>
+        <li><span class="bp data pruned"><span class="t">a1</span><sub>10</sub></span>{S.legendPruned}</li>
+        <li><span class="bp data hole visit"><span class="t">{S.hole}</span><sub>30</sub></span>{S.legendHole}</li>
+      </ul>
+    </section>
+    <section class="panel stream" aria-labelledby={`sr-str-${lang}`}>
+      <h3 id={`sr-str-${lang}`}>{S.streamLabel}</h3>
+      <div data-strip set:html={strip(S, snd, rcv, t0)} />
+    </section>
+    <section class="panel recv" aria-labelledby={`sr-rcv-${lang}`}>
+      <h3 id={`sr-rcv-${lang}`}>{S.receiverLabel}</h3>
+      <div data-receiver set:html={receiver(S, snd, rcv, t0)} />
+    </section>
+  </div>
+
+  <p class="sr-now" data-now aria-live="polite" hidden></p>
+  <noscript><p class="muted">{S.noScript}</p></noscript>
+
+  <div class="sr-table" data-table tabindex="0" role="region" aria-label={t.scrollTable} set:html={table(S, sends, FROM0)} />
+
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={describe(S, snd, rcv)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, wait, reducedMotion } from "../lib/svg";
+  import { snapshots, send, receive, streamBytes, contentOf, flipBit, type Send, type Received } from "../lib/send";
+  import { tree, strip, receiver, counters, table, describe, summary, frameLine, lastFrame, type SrStrings } from "../lib/send-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-send]")) {
+    const S = strings<SrStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const snaps = snapshots();
+    const to = snaps[3];
+    const froms = [null, ...snaps.slice(0, 3)];
+    const sends = froms.map((f) => send(to, f));
+    let fi = Number(root.dataset.from);
+    let flip = false;
+    let run = 0;
+    let busy = false;
+
+    /** The receive of the chosen stream, damaged on the way if asked: the first WRITE's payload, else the first record after BEGIN. */
+    function receiveIt(snd: Send): Received {
+      const stream = streamBytes(snd.records);
+      const w = snd.records.findIndex((r) => r.type === "WRITE");
+      const start = froms[fi] ? contentOf(froms[fi]!.root) : {};
+      return receive(start, flip ? flipBit(stream, w >= 0 ? w : 1) : stream);
+    }
+    let snd: Send = sends[fi];
+    let rcv: Received = receiveIt(snd);
+    let t = lastFrame(snd, rcv);
+
+    function compute() {
+      snd = sends[fi];
+      rcv = receiveIt(snd);
+    }
+
+    function say(text: string) {
+      const el = q("[data-now]");
+      el.hidden = false;
+      el.innerHTML = text;
+    }
+
+    function controls() {
+      const last = lastFrame(snd, rcv);
+      for (const b of root.querySelectorAll<HTMLElement>("[data-from]")) if (b.tagName === "BUTTON") b.setAttribute("aria-pressed", String(Number(b.dataset.from) === fi));
+      q("[data-flip]").setAttribute("aria-pressed", String(flip));
+      // Controls that do not apply are aria-disabled, never disabled, so that the focused button keeps
+      // the focus: every control but Start again while the stream plays, Show the end once it is shown.
+      // Next step at the end starts the stream again from BEGIN. With reduced motion, Play shows the end
+      // at once, so it does not apply once the end is shown either.
+      for (const b of root.querySelectorAll<HTMLButtonElement>(".sr-bar button:not([data-act=restart])")) {
+        if (busy || ((b.dataset.act === "end" || (b.dataset.act === "play" && reducedMotion())) && t >= last)) b.setAttribute("aria-disabled", "true");
+        else b.removeAttribute("aria-disabled");
+      }
+    }
+
+    function draw() {
+      q("[data-tree]").innerHTML = tree(S, snd, t);
+      q("[data-strip]").innerHTML = strip(S, snd, rcv, t);
+      q("[data-receiver]").innerHTML = receiver(S, snd, rcv, t);
+      q("[data-counters]").innerHTML = counters(S, snd, t);
+      controls();
+    }
+
+    function render() {
+      draw();
+      q("[data-table]").innerHTML = table(S, sends, fi);
+      q("[data-summary]").textContent = summary(S, snd);
+      q("[data-describe]").innerHTML = describe(S, snd, rcv);
+    }
+
+    /** The newest card of the strip slides in. */
+    function pulse(before: number) {
+      if (reducedMotion()) return;
+      const cards = root.querySelectorAll<HTMLElement>("[data-strip] .rec");
+      for (let i = before; i < cards.length; i++) cards[i].animate([{ opacity: 0, transform: "translateY(-8px)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+      const cur = root.querySelector<HTMLElement>("[data-tree] .cur");
+      cur?.animate([{ outline: "2px solid var(--accent)" }, { outline: "2px solid transparent" }], { duration: 420 });
+    }
+
+    /** Frame n; announced in the live region unless Play is running (one announcement at its end). */
+    function stepTo(n: number, quiet = false) {
+      const before = root.querySelectorAll("[data-strip] .rec").length;
+      t = n;
+      draw();
+      pulse(before);
+      if (!quiet) say(frameLine(S, snd, rcv, t));
+    }
+
+    async function play() {
+      const me = ++run;
+      const last = lastFrame(snd, rcv);
+      if (reducedMotion()) {
+        stepTo(last, true);
+        say(`${frameLine(S, snd, rcv, t)} ${summary(S, snd)}`);
+        return;
+      }
+      busy = true;
+      if (t >= last) {
+        stepTo(0, true);
+        await wait(420);
+        if (me !== run) return;
+      } else controls();
+      while (t < last) {
+        stepTo(t + 1, true);
+        await wait(t > snd.steps.length ? 300 : 420);
+        if (me !== run) return;
+      }
+      busy = false;
+      controls();
+      say(`${frameLine(S, snd, rcv, t)} ${summary(S, snd)}`);
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el)) return;
+      const d = el.dataset;
+      if (d.act === "restart") {
+        run++;
+        busy = false;
+        stepTo(0);
+        return;
+      }
+      if (busy || el.getAttribute("aria-disabled") === "true") return;
+      if (d.from !== undefined) {
+        fi = Number(d.from);
+        compute();
+        t = lastFrame(snd, rcv);
+        render();
+        say(summary(S, snd));
+      } else if (el.hasAttribute("data-flip")) {
+        flip = !flip;
+        compute();
+        t = lastFrame(snd, rcv);
+        render();
+        say(frameLine(S, snd, rcv, t));
+      } else if (d.act === "step") stepTo(t >= lastFrame(snd, rcv) ? 0 : t + 1);
+      else if (d.act === "end") stepTo(lastFrame(snd, rcv));
+      else if (d.act === "play") void play();
+    });
+
+    render();
+    q(".sr-bar").hidden = false;
+  }
+</script>
+
+<style>
+  .sr {
+    margin: var(--space-6) 0 0;
+  }
+  .sr-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+  }
+  .sr-bar[hidden],
+  .sr-now[hidden] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .glabel {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    margin-right: var(--space-2);
+  }
+  .sr-bar .btn[aria-pressed="true"]::before {
+    content: "✓ ";
+    color: var(--accent);
+  }
+  .sr-bar .btn[disabled],
+  .sr-bar .btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .sr-bar .btn--danger {
+    border-color: var(--bad);
+    color: var(--bad);
+  }
+  .sr-history {
+    font-size: var(--step--1);
+    margin-bottom: var(--space-4);
+  }
+  .sr-history summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-1);
+  }
+  .sr-history :global(ol) {
+    list-style: none;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-1);
+  }
+  .sr-history :global(.txg) {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    display: inline-block;
+    min-width: 4.5em;
+  }
+  .sr-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--space-3) var(--space-4);
+    min-width: 0;
+  }
+  .panel h3 {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+    margin-bottom: var(--space-2);
+  }
+  .counters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    margin: 0 0 var(--space-3);
+  }
+  .counters :global(b) {
+    color: var(--fg);
+  }
+  /* The tree: nested lists, each block pointer a chip with its birth txg. */
+  .tree-wrap :global(ul) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .tree-wrap :global(ul ul) {
+    padding-left: var(--space-4);
+    border-left: 1px solid var(--line);
+    margin-left: var(--space-2);
+  }
+  .tree-wrap :global(li) {
+    margin-top: var(--space-2);
+  }
+  .tree-wrap :global(.row) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    align-items: center;
+  }
+  .tree-wrap :global(.leaves),
+  .tree-wrap :global(.slots) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+  .tree-wrap :global(.arrow) {
+    color: var(--fg-faint);
+  }
+  .bp,
+  .tree-wrap :global(.bp) {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: 0.2em 0.45em;
+    background: var(--surface-2);
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .bp :global(sub),
+  .tree-wrap :global(.bp sub) {
+    font-weight: 400;
+    color: var(--fg-muted);
+    font-size: 0.75em;
+  }
+  .tree-wrap :global(.bp .cmp) {
+    font-weight: 400;
+    font-size: 0.72em;
+    margin-left: 0.35em;
+    color: var(--fg-muted);
+  }
+  .tree-wrap :global(.bp.todo) {
+    border-style: dotted;
+  }
+  .bp.visit,
+  .tree-wrap :global(.bp.visit) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .bp.skip,
+  .tree-wrap :global(.bp.skip) {
+    color: var(--fg-muted);
+    background: transparent;
+    border-style: dashed;
+  }
+  .bp.pruned,
+  .tree-wrap :global(.bp.pruned) {
+    color: var(--fg-faint);
+    background: transparent;
+    border-color: var(--line);
+    font-weight: 400;
+  }
+  .bp.pruned sub,
+  .tree-wrap :global(.bp.pruned sub) {
+    color: var(--fg-faint);
+  }
+  .bp.hole .t,
+  .tree-wrap :global(.bp.hole .t) {
+    font-style: italic;
+    font-weight: 400;
+  }
+  .tree-wrap :global(.bp.cur),
+  .tree-wrap :global(.slot.cur) {
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
+  }
+  .tree-wrap :global(.slot) {
+    display: inline-flex;
+    gap: 0.35em;
+    align-items: baseline;
+    font-size: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.1em 0.55em;
+    color: var(--fg-muted);
+  }
+  .tree-wrap :global(.slot .o) {
+    font-family: var(--font-mono);
+    color: var(--fg-faint);
+  }
+  .tree-wrap :global(.slot.file) {
+    color: var(--fg);
+  }
+  .tree-wrap :global(.slot.met) {
+    border-color: var(--accent);
+  }
+  .legend {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-4) 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .legend li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  /* The stream: a strip of records, top to bottom. */
+  .stream :global(.strip) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .stream :global(.rec) {
+    display: grid;
+    grid-template-columns: 1.4em auto 1fr auto;
+    gap: 0 var(--space-2);
+    align-items: baseline;
+    font-size: 0.78rem;
+    border: 1px solid var(--line-strong);
+    border-left-width: 4px;
+    border-radius: 4px;
+    padding: 0.25em 0.5em;
+    background: var(--surface-2);
+  }
+  .stream :global(.rec .n) {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--fg-faint);
+    text-align: right;
+  }
+  .stream :global(.rec .ty) {
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .stream :global(.rec .args) {
+    color: var(--fg-muted);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .stream :global(.rec .ck) {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--fg-muted);
+  }
+  .stream :global(.rec .ck.none) {
+    font-family: var(--font-body);
+    font-style: italic;
+    color: var(--fg-faint);
+  }
+  .stream :global(.rec.begin),
+  .stream :global(.rec.end) {
+    border-left-color: var(--fg-muted);
+  }
+  .stream :global(.rec.object) {
+    border-left-color: var(--code-type);
+  }
+  .stream :global(.rec.write) {
+    border-left-color: var(--accent);
+  }
+  .stream :global(.rec.free),
+  .stream :global(.rec.freeobjects) {
+    border-left-color: var(--code-function);
+  }
+  .stream :global(.rec.done) {
+    background: transparent;
+    border-color: var(--line);
+  }
+  .stream :global(.rec.done .ty)::after {
+    content: " ✓";
+    color: var(--ok);
+    font-weight: 400;
+  }
+  .stream :global(.rec.lost) {
+    border-color: var(--bad);
+    border-style: dashed;
+  }
+  .stream :global(.rec.bad) {
+    border-color: var(--bad);
+    background: var(--bad-soft);
+  }
+  /* The receiver: its files, block by block. */
+  .recv :global(.holds) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    margin: 0 0 var(--space-2);
+  }
+  .recv :global(.files) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .recv :global(.files li) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    align-items: center;
+  }
+  .recv :global(.fname) {
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .recv :global(.o) {
+    font-size: 0.72rem;
+    color: var(--fg-faint);
+  }
+  .recv :global(.blks) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    flex-basis: 100%;
+  }
+  .recv :global(.blk) {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: 0.15em 0.45em;
+  }
+  .recv :global(.blk.hole) {
+    font-style: italic;
+    color: var(--fg-faint);
+    border-style: dashed;
+  }
+  .recv :global(.blk.new),
+  .recv :global(li.new .fname) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .recv :global(.verdict) {
+    margin: var(--space-3) 0 0;
+    font-size: var(--step--1);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius);
+  }
+  .recv :global(.verdict.ok) {
+    background: var(--ok-soft);
+    color: var(--fg);
+    border-left: 3px solid var(--ok);
+  }
+  .recv :global(.verdict.bad) {
+    background: var(--bad-soft);
+    border-left: 3px solid var(--bad);
+  }
+  .sr-now {
+    margin: var(--space-4) 0 0;
+    font-size: var(--step--1);
+    max-width: 52rem;
+    min-height: 3em;
+    border-left: 2px solid var(--accent);
+    padding-left: var(--space-3);
+  }
+  .sr-now :global(b) {
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .sr :global(a.see) {
+    font-size: 0.85em;
+    color: var(--fg-muted);
+  }
+  .sr-table {
+    margin-top: var(--space-5);
+    overflow-x: auto;
+  }
+  .sr-table :global(table) {
+    border-collapse: collapse;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    width: 100%;
+    max-width: 40rem;
+  }
+  .sr-table :global(caption) {
+    text-align: left;
+    color: var(--fg-muted);
+    padding-bottom: var(--space-2);
+  }
+  .sr-table :global(th),
+  .sr-table :global(td) {
+    padding: 0.35em 0.6em 0.35em 0;
+    text-align: left;
+    vertical-align: bottom;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--line);
+  }
+  .sr-table :global(thead th) {
+    font-weight: 500;
+    color: var(--fg-muted);
+  }
+  .sr-table :global(tr.cur th),
+  .sr-table :global(tr.cur td) {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version :global(ol) {
+    padding-left: 1.4em;
+    display: grid;
+    gap: var(--space-1);
+  }
+  .text-version :global(h4) {
+    margin: var(--space-3) 0 var(--space-1);
+    font-size: var(--step-0);
+    font-weight: 600;
+  }
+  @media (max-width: 64rem) {
+    .sr-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .source {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (max-width: 40rem) {
+    .sr-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .panel {
+      padding: var(--space-2) var(--space-3);
+    }
+    .tree-wrap :global(ul ul) {
+      padding-left: var(--space-2);
+      margin-left: var(--space-1);
+    }
+  }
+</style>

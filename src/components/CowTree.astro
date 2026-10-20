@@ -1,0 +1,663 @@
+---
+// Figure 1 of the copy-on-write room: rewrite one data block and watch the
+// change climb to the uberblock, the old tree left intact until the commit.
+// Every step maps to code listed in ANALYSIS.md (room "Copy-on-write"):
+//   new address      zio_write_compress, zio.c L2102-L2104
+//   checksum in bp   zio_checksum_compute, zio_checksum.c L417
+//   parent dirtied   dbuf_dirty(parent, tx), dbuf.c L2552
+//   commit           vdev_uberblock_sync, vdev_label.c L1782-L1784
+//   free or keep     dsl_dataset_block_kill, dsl_dataset.c L294, L332-L345
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const refs = {
+  alloc: gh("module/zfs/zio.c", 2102, 2104),
+  cksum: gh("module/zfs/zio_checksum.c", 411, 417),
+  ripple: gh("module/zfs/dbuf.c", 2552),
+  commit: gh("module/zfs/vdev_label.c", 1782, 1784),
+  free: gh("module/zfs/dsl_dataset.c", 294),
+  dead: gh("module/zfs/dsl_dataset.c", 332, 345),
+  pick: gh("module/zfs/vdev_label.c", 1547, 1551),
+};
+const S = {
+  en: {
+    figure: "A file’s block tree under one uberblock",
+    modify: "Data block to modify",
+    next: "Next step",
+    play: "Play",
+    crash: "Cut the power",
+    snapshot: "Take a snapshot",
+    snapshotTaken: "Snapshot of txg {txg} taken",
+    reset: "Reset",
+    step: "Step {n} of 5",
+    idle: "The pool is at txg {txg}. Choose a data block, then step through its rewrite.",
+    s1: "D{k} is rewritten. zio_write_compress zeroes its block pointer, so the new D{k} gets a new address, {addr}. The old D{k}, at {old}, is not touched.",
+    s2: "The pointer to D{k} lives inside {p}. That pointer now holds a new address and the fletcher4 checksum of the new D{k}, so {p} has changed too: it is written to a new address, {addr}, like any other block.",
+    s3: "Same for R, the top of the tree: a new copy at {addr} points to the new {p}. The uberblock of txg {txg} still reaches the old tree, unchanged.",
+    s4: "The uberblock of txg {txg1} goes to slot {slot} of the ring ({txg1} mod 32). That one write is the commit: from now on the pool is the new tree. Blocks that did not change are shared by both trees.",
+    s5free: "The replaced blocks were born after the last snapshot, so dsl_dataset_block_kill frees them: {list}.",
+    s5dead: "A snapshot still uses the replaced blocks born before it ({list}): they go on the dataset’s deadlist and stay on disk, intact, in grey.",
+    s5mixed: "Blocks born before the snapshot go on the deadlist and stay ({kept}); the others are freed ({freed}).",
+    crashed: "Power lost before the uberblock of txg {txg1} was written. On import, ZFS takes the newest valid uberblock, txg {txg}, and its tree is intact: nothing it reaches was overwritten. The new blocks are reachable from nothing. No fsck, no journal replay for this.",
+    see: "see the code",
+    table: "Block pointers of the newest tree",
+    from: "Pointer",
+    dva: "Address",
+    birth: "Birth",
+    cksum: "Checksum",
+    tableNote: "Changed pointers are marked. Checksums are real fletcher4 values over the demo blocks (last 8 hex digits of 64 shown).",
+    ub: "uberblock",
+    changed: "changed",
+    prevUb: "previous",
+    keptBySnap: "snapshot",
+    aria: "Tree: uberblock at txg {txg}, root R, indirect blocks I0 and I1, data blocks D0 to D3.",
+  },
+  fr: {
+    figure: "L’arbre de blocs d’un fichier sous un uberblock",
+    modify: "Bloc de données à modifier",
+    next: "Étape suivante",
+    play: "Lecture",
+    crash: "Couper le courant",
+    snapshot: "Prendre un instantané",
+    snapshotTaken: "Instantané du txg {txg} pris",
+    reset: "Recommencer",
+    step: "Étape {n} sur 5",
+    idle: "Le pool est au txg {txg}. Choisissez un bloc de données, puis suivez sa réécriture pas à pas.",
+    s1: "D{k} est réécrit. zio_write_compress remet à zéro son pointeur de bloc : le nouveau D{k} reçoit une nouvelle adresse, {addr}. L’ancien D{k}, en {old}, n’est pas touché.",
+    s2: "Le pointeur vers D{k} est rangé dans {p}. Ce pointeur contient désormais une nouvelle adresse et la somme fletcher4 du nouveau D{k} : {p} a donc changé lui aussi, et il est écrit à une nouvelle adresse, {addr}, comme tout bloc.",
+    s3: "Même chose pour R, le sommet de l’arbre : une nouvelle copie en {addr} pointe vers le nouveau {p}. L’uberblock du txg {txg} atteint toujours l’ancien arbre, inchangé.",
+    s4: "L’uberblock du txg {txg1} est écrit dans la case {slot} de l’anneau ({txg1} mod 32). Cette seule écriture est la validation : désormais, le pool, c’est le nouvel arbre. Les blocs qui n’ont pas changé sont partagés par les deux arbres.",
+    s5free: "Les blocs remplacés sont nés après le dernier instantané : dsl_dataset_block_kill les libère ({list}).",
+    s5dead: "Un instantané utilise encore les blocs remplacés nés avant lui ({list}) : ils passent dans la deadlist du dataset et restent sur le disque, intacts, en gris.",
+    s5mixed: "Les blocs nés avant l’instantané passent dans la deadlist et restent ({kept}) ; les autres sont libérés ({freed}).",
+    crashed: "Courant coupé avant l’écriture de l’uberblock du txg {txg1}. À l’import, ZFS prend l’uberblock valide le plus récent, celui du txg {txg}, et son arbre est intact : rien de ce qu’il atteint n’a été écrasé. Les nouveaux blocs ne sont atteints par rien. Pas de fsck, pas de rejeu de journal pour cela.",
+    see: "voir le code",
+    table: "Pointeurs de bloc de l’arbre le plus récent",
+    from: "Pointeur",
+    dva: "Adresse",
+    birth: "Naissance",
+    cksum: "Somme de contrôle",
+    tableNote: "Les pointeurs modifiés sont marqués. Les sommes sont de vraies valeurs fletcher4 calculées sur les blocs de démonstration (8 derniers chiffres hexadécimaux sur 64).",
+    ub: "uberblock",
+    changed: "modifié",
+    prevUb: "précédent",
+    keptBySnap: "instantané",
+    aria: "Arbre : uberblock au txg {txg}, racine R, blocs indirects I0 et I1, blocs de données D0 à D3.",
+  },
+  es: {
+    figure: "El árbol de bloques de un archivo bajo un uberblock",
+    modify: "Bloque de datos que modificar",
+    next: "Paso siguiente",
+    play: "Iniciar",
+    crash: "Cortar la corriente",
+    snapshot: "Tomar una instantánea",
+    snapshotTaken: "Instantánea del txg {txg} tomada",
+    reset: "Reiniciar",
+    step: "Paso {n} de 5",
+    idle: "El pool está en el txg {txg}. Elige un bloque de datos y sigue su reescritura paso a paso.",
+    s1: "D{k} se reescribe. zio_write_compress pone a cero su puntero de bloque, así que el nuevo D{k} recibe una nueva dirección, {addr}. El antiguo D{k}, en {old}, no se toca.",
+    s2: "El puntero a D{k} está dentro de {p}. Ese puntero contiene ahora una nueva dirección y la suma fletcher4 del nuevo D{k}, así que {p} también ha cambiado: se escribe en una nueva dirección, {addr}, como cualquier otro bloque.",
+    s3: "Lo mismo ocurre con R, la cima del árbol: una nueva copia en {addr} apunta al nuevo {p}. El uberblock del txg {txg} sigue alcanzando el árbol antiguo, sin cambios.",
+    s4: "El uberblock del txg {txg1} va a la ranura {slot} del anillo ({txg1} mod 32). Esa única escritura es la confirmación: a partir de ahora, el pool es el árbol nuevo. Los bloques que no cambiaron los comparten ambos árboles.",
+    s5free: "Los bloques sustituidos nacieron después de la última instantánea, así que dsl_dataset_block_kill los libera: {list}.",
+    s5dead: "Una instantánea sigue usando los bloques sustituidos nacidos antes que ella ({list}): pasan a la deadlist del dataset y siguen en el disco, intactos, en gris.",
+    s5mixed: "Los bloques nacidos antes de la instantánea pasan a la deadlist y se quedan ({kept}); los demás se liberan ({freed}).",
+    crashed: "La corriente se cortó antes de que se escribiera el uberblock del txg {txg1}. Al importar, ZFS toma el uberblock válido más reciente, el del txg {txg}, y su árbol está intacto: nada de lo que alcanza se ha sobrescrito. Nada alcanza los bloques nuevos. Para esto no hace falta fsck ni reproducir ningún diario.",
+    see: "ver el código",
+    table: "Punteros de bloque del árbol más reciente",
+    from: "Puntero",
+    dva: "Dirección",
+    birth: "Nacimiento",
+    cksum: "Suma de comprobación",
+    tableNote: "Los punteros modificados están marcados. Las sumas son valores fletcher4 reales calculados sobre los bloques de demostración (se muestran los 8 últimos dígitos hexadecimales de 64).",
+    ub: "uberblock",
+    changed: "modificado",
+    prevUb: "anterior",
+    keptBySnap: "instantánea",
+    aria: "Árbol: uberblock en el txg {txg}, raíz R, bloques indirectos I0 e I1, bloques de datos D0 a D3.",
+  },
+}[lang];
+const t = UI[lang];
+const textVersion = {
+  en: [
+    "The tree has an uberblock at the top, a root indirect block R, two indirect blocks I0 and I1, and four data blocks D0 to D3. Each block pointer holds the child’s address, its birth txg and its checksum.",
+    "Rewriting a data block writes a new copy at a new address; the old copy stays where it is.",
+    "Its parent now needs a new pointer (new address, new checksum), so the parent is copied too, and so on up to R.",
+    "Writing the new uberblock to the next slot of the ring is the commit. Before it, a power cut leaves the old tree intact and current; after it, the new tree is the pool.",
+    "Replaced blocks are freed, unless a snapshot still references them: then they stay on the deadlist.",
+  ],
+  fr: [
+    "L’arbre a un uberblock au sommet, un bloc indirect racine R, deux blocs indirects I0 et I1, et quatre blocs de données D0 à D3. Chaque pointeur de bloc contient l’adresse de l’enfant, son txg de naissance et sa somme de contrôle.",
+    "Réécrire un bloc de données écrit une nouvelle copie à une nouvelle adresse ; l’ancienne copie reste en place.",
+    "Son parent a alors besoin d’un nouveau pointeur (nouvelle adresse, nouvelle somme) : le parent est copié à son tour, et ainsi de suite jusqu’à R.",
+    "Écrire le nouvel uberblock dans la case suivante de l’anneau est la validation. Avant elle, une coupure de courant laisse l’ancien arbre intact et courant ; après elle, le nouvel arbre est le pool.",
+    "Les blocs remplacés sont libérés, sauf si un instantané les référence encore : ils restent alors dans la deadlist.",
+  ],
+  es: [
+    "El árbol tiene un uberblock en la cima, un bloque indirecto raíz R, dos bloques indirectos I0 e I1, y cuatro bloques de datos D0 a D3. Cada puntero de bloque contiene la dirección del hijo, su txg de nacimiento y su suma de comprobación.",
+    "Reescribir un bloque de datos escribe una copia nueva en una dirección nueva; la copia antigua se queda donde está.",
+    "Su padre necesita entonces un puntero nuevo (dirección nueva, suma nueva), así que el padre también se copia, y así sucesivamente hasta R.",
+    "Escribir el nuevo uberblock en la ranura siguiente del anillo es la confirmación. Antes de ella, un corte de corriente deja el árbol antiguo intacto y vigente; después de ella, el árbol nuevo es el pool.",
+    "Los bloques sustituidos se liberan, salvo que una instantánea siga haciendo referencia a ellos: entonces se quedan en la deadlist.",
+  ],
+}[lang];
+---
+
+<figure class="cow" data-cow data-strings={JSON.stringify({ ...S, refs })}>
+  <div class="layout">
+    <div class="canvas">
+      <svg viewBox="0 0 420 356" role="img" aria-label={S.figure}></svg>
+      <noscript><p class="muted">{t.noScript}</p></noscript>
+    </div>
+    <div class="side">
+      <div class="controls" hidden>
+        <fieldset class="segmented">
+          <legend>{S.modify}</legend>
+          {
+            [0, 1, 2, 3].map((k) => (
+              <label>
+                <input type="radio" name={`cow-leaf-${lang}`} value={k} checked={k === 2} />D{k}
+              </label>
+            ))
+          }
+        </fieldset>
+        <div class="buttons">
+          <button class="btn btn--primary" type="button" data-act="next">{S.next}</button>
+          <button class="btn" type="button" data-act="play">{S.play}</button>
+          <button class="btn" type="button" data-act="crash" disabled>{S.crash}</button>
+          <button class="btn" type="button" data-act="snap">{S.snapshot}</button>
+          <button class="btn" type="button" data-act="reset">{S.reset}</button>
+        </div>
+      </div>
+      <p class="stepno" aria-hidden="true"></p>
+      <p class="narration" aria-live="polite"></p>
+    </div>
+  </div>
+  <div class="ptrs" hidden tabindex="0" role="region" aria-label={S.table}>
+    <table>
+      <caption>{S.table}</caption>
+      <thead>
+        <tr><th scope="col">{S.from}</th><th scope="col">{S.dva}</th><th scope="col">{S.birth}</th><th scope="col">{S.cksum}</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="note">{S.tableNote}</p>
+  </div>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <ol>{textVersion.map((x) => <li>{x}</li>)}</ol>
+  </details>
+</figure>
+
+<script>
+  import { s, h, strings, fill, wait } from "../lib/svg";
+  import { fletcher4, block, shortCksum, type Cksum } from "../lib/fletcher4";
+
+  type St = "live" | "new" | "old" | "snap" | "freed" | "prevub";
+  interface V {
+    key: string;
+    id: string;
+    ver: number;
+    birth: number;
+    addr: number;
+    kids: string[];
+    bytes: Uint8Array;
+    cksum: Cksum;
+    state: St;
+  }
+  type S = Record<string, string> & { refs: Record<string, string> };
+
+  const POS: Record<string, [number, number]> = {
+    ub: [152, 8], r: [152, 98], i0: [56, 188], i1: [248, 188],
+    d0: [8, 278], d1: [104, 278], d2: [200, 278], d3: [296, 278],
+  };
+  const PARENT: Record<string, string> = { d0: "i0", d1: "i0", d2: "i1", d3: "i1", i0: "r", i1: "r", r: "ub" };
+  const W = 78, H = 46, OFF = 16;
+  const label = (id: string) => (id === "ub" ? "UB" : id.toUpperCase());
+  const hex = (a: number) => `0:${a.toString(16)}`;
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-cow]")) {
+    const t = strings<S>(root);
+    const svg = root.querySelector("svg")!;
+    const narration = root.querySelector<HTMLElement>(".narration")!;
+    const stepno = root.querySelector<HTMLElement>(".stepno")!;
+    const tbody = root.querySelector("tbody")!;
+    const btn = (a: string) => root.querySelector<HTMLButtonElement>(`[data-act="${a}"]`)!;
+    const radios = [...root.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+
+    let vs: V[] = [];
+    let txg = 41;
+    let step = 0;
+    let leaf = 2;
+    let nextAddr = 0x40000;
+    let snapTxg = 0;
+    let busy = false;
+
+    const get = (key: string) => vs.find((v) => v.key === key)!;
+    const head = (id: string) => [...vs].reverse().find((v) => v.id === id && (v.state === "live" || v.state === "new"))!;
+
+    function encode(kids: string[]): Uint8Array {
+      // A parent's bytes are its block pointers: address, birth, checksum.
+      const buf = new Uint8Array(kids.length * 48);
+      const dv = new DataView(buf.buffer);
+      kids.forEach((k, i) => {
+        const c = get(k);
+        dv.setBigUint64(i * 48, BigInt(c.addr), true);
+        dv.setBigUint64(i * 48 + 8, BigInt(c.birth), true);
+        c.cksum.forEach((w, j) => dv.setBigUint64(i * 48 + 16 + j * 8, w, true));
+      });
+      return buf;
+    }
+
+    function make(id: string, ver: number, birth: number, addr: number, kids: string[], state: St): V {
+      const bytes = id.startsWith("d") ? block(`${label(id)} version ${ver}, txg ${birth}`) : encode(kids);
+      const v = { key: `${id}@${ver}`, id, ver, birth, addr, kids, bytes, cksum: fletcher4(bytes), state };
+      vs.push(v);
+      return v;
+    }
+
+    function init() {
+      vs = [];
+      txg = 41;
+      step = 0;
+      nextAddr = 0x40000;
+      snapTxg = 0;
+      const births = [38, 40, 39, 41];
+      const addrs = [0x12000, 0x2a000, 0x1c000, 0x31000];
+      births.forEach((b, k) => make(`d${k}`, 1, b, addrs[k], [], "live"));
+      make("i0", 1, 40, 0x2c000, ["d0@1", "d1@1"], "live");
+      make("i1", 1, 41, 0x33000, ["d2@1", "d3@1"], "live");
+      make("r", 1, 41, 0x35000, ["i0@1", "i1@1"], "live");
+      make("ub", 1, 41, 41 % 32, ["r@1"], "live");
+    }
+
+    const vars = (extra: Record<string, string | number> = {}) => ({
+      txg, txg1: txg + 1, k: leaf, slot: (txg + 1) % 32, p: label(PARENT[`d${leaf}`]), ...extra,
+    });
+
+    function say(text: string, ref?: string) {
+      narration.replaceChildren(text);
+      if (ref) narration.append(" ", h("a", { href: ref }, `(${t.see})`));
+    }
+
+    function draw() {
+      svg.replaceChildren();
+      const shown = vs.filter((v) => v.state !== "freed");
+      const offsets = new Map<string, number>();
+      const seen: Record<string, number> = {};
+      for (const v of shown) {
+        seen[v.id] = (seen[v.id] ?? -1) + 1;
+        offsets.set(v.key, Math.min(seen[v.id], 2) * OFF);
+      }
+      // A card with a newer version in front of it shows a one-line label in
+      // the strip that stays visible above the front card.
+      const behind = new Set(shown.filter((v) => shown.some((w) => w.id === v.id && w !== v && offsets.get(w.key)! > offsets.get(v.key)!)).map((v) => v.key));
+      const at = (v: V): [number, number] => {
+        const [x, y] = POS[v.id], o = offsets.get(v.key)!;
+        return [x + o, y + o];
+      };
+      const edges = s("g", { class: "edges" });
+      const cards = s("g", { class: "cards" });
+      for (const v of shown) {
+        const [x, y] = at(v);
+        for (const k of v.kids) {
+          const c = get(k);
+          if (c.state === "freed") continue;
+          const [cx, cy] = at(c);
+          edges.append(s("path", { d: `M ${x + W / 2} ${y + H} C ${x + W / 2} ${y + H + 22}, ${cx + W / 2} ${cy - 22}, ${cx + W / 2} ${cy}`, class: `edge edge--${v.state}` }));
+        }
+        const tag = v.state === "snap" ? t.keptBySnap : v.state === "prevub" ? t.prevUb : `txg ${v.birth}`;
+        const sub = v.id === "ub" ? `slot ${v.addr}` : hex(v.addr);
+        // The opaque underlay hides the outline of the card behind (the new card's fill is translucent).
+        const g = s("g", { class: `card card--${v.state}`, transform: `translate(${x} ${y})` },
+          s("rect", { width: W, height: H, rx: 4, class: "under" }),
+          s("rect", { width: W, height: H, rx: 4 }),
+        );
+        if (behind.has(v.key)) g.append(s("text", { x: 6, y: 12, class: "strip" }, `${label(v.id)} · ${tag}`));
+        else
+          g.append(
+            s("text", { x: 8, y: 18, class: "name" }, label(v.id)),
+            s("text", { x: W - 7, y: 18, class: "tag", "text-anchor": "end" }, tag),
+            s("text", { x: 8, y: 36, class: "addr" }, sub),
+          );
+        cards.append(g);
+      }
+      svg.append(edges, cards);
+      svg.setAttribute("aria-label", fill(t.aria, vars()));
+      table();
+      const writing = step > 0 && step < 5;
+      btn("crash").disabled = busy || !(step >= 1 && step <= 3);
+      btn("next").disabled = busy;
+      btn("play").disabled = busy;
+      btn("snap").disabled = busy || writing || snapTxg > 0;
+      btn("snap").textContent = snapTxg ? fill(t.snapshotTaken, { txg: snapTxg }) : t.snapshot;
+      btn("reset").disabled = busy;
+      radios.forEach((r) => (r.disabled = busy || writing));
+      stepno.textContent = writing || step === 5 ? fill(t.step, { n: step }) : "";
+    }
+
+    function table() {
+      const rows: HTMLTableRowElement[] = [];
+      const walk = (p: V) => {
+        for (const k of p.kids) {
+          const c = get(k);
+          const changed = c.state === "new" || ((step === 4 || step === 5) && c.ver > 1 && c.birth === txg);
+          rows.push(
+            h("tr", { class: changed ? "changed" : undefined },
+              h("th", { scope: "row" }, `${p.id === "ub" ? t.ub : label(p.id)} → ${label(c.id)}`, changed ? h("span", { class: "visually-hidden" }, ` (${t.changed})`) : ""),
+              h("td", {}, hex(c.addr)),
+              h("td", {}, String(c.birth)),
+              h("td", {}, h("code", {}, `…${shortCksum(c.cksum)}`)),
+            ),
+          );
+          if (c.kids.length) walk(c);
+        }
+      };
+      walk(head("ub"));
+      tbody.replaceChildren(...rows);
+    }
+
+    function rewrite(id: string, kids: string[]) {
+      const old = head(id);
+      old.state = "old";
+      const v = make(id, old.ver + 1, txg + 1, nextAddr, kids, "new");
+      nextAddr += 0x2000;
+      return { v, old };
+    }
+
+    function advance() {
+      const d = `d${leaf}`, p = PARENT[d];
+      if (step === 0 || step === 5) {
+        if (step === 5) step = 0;
+        const { v, old } = rewrite(d, []);
+        step = 1;
+        say(fill(t.s1, vars({ addr: hex(v.addr), old: hex(old.addr) })), t.refs.alloc);
+      } else if (step === 1) {
+        const kids = head(p).kids.map((k) => (get(k).id === d ? head(d).key : k));
+        const { v } = rewrite(p, kids);
+        step = 2;
+        say(fill(t.s2, vars({ addr: hex(v.addr) })), t.refs.cksum);
+      } else if (step === 2) {
+        const kids = head("r").kids.map((k) => (get(k).id === p ? head(p).key : k));
+        const { v } = rewrite("r", kids);
+        step = 3;
+        say(fill(t.s3, vars({ addr: hex(v.addr) })), t.refs.ripple);
+      } else if (step === 3) {
+        const old = head("ub");
+        // Only the previous uberblock is drawn; older ones are still in the ring.
+        for (const v of vs) if (v.id === "ub" && v.state === "prevub") v.state = "freed";
+        old.state = "prevub";
+        const v = make("ub", old.ver + 1, txg + 1, (txg + 1) % 32, [head("r").key], "new");
+        v.addr = (txg + 1) % 32;
+        step = 4;
+        say(fill(t.s4, vars()), t.refs.commit);
+        txg += 1;
+        for (const x of vs) if (x.state === "new") x.state = "live";
+      } else if (step === 4) {
+        const replaced = vs.filter((v) => v.state === "old");
+        const kept = replaced.filter((v) => snapTxg && v.birth <= snapTxg);
+        const freed = replaced.filter((v) => !kept.includes(v));
+        kept.forEach((v) => (v.state = "snap"));
+        freed.forEach((v) => (v.state = "freed"));
+        const names = (l: V[]) => l.map((v) => label(v.id)).join(", ");
+        step = 5;
+        if (kept.length && freed.length) say(fill(t.s5mixed, { kept: names(kept), freed: names(freed) }), t.refs.dead);
+        else if (kept.length) say(fill(t.s5dead, { list: names(kept) }), t.refs.dead);
+        else say(fill(t.s5free, { list: names(freed) }), t.refs.free);
+      }
+      draw();
+    }
+
+    function crash() {
+      vs = vs.filter((v) => v.state !== "new");
+      for (const v of vs) if (v.state === "old") v.state = "live";
+      say(fill(t.crashed, vars()), t.refs.pick);
+      step = 0;
+      draw();
+    }
+
+    btn("next").addEventListener("click", advance);
+    btn("crash").addEventListener("click", crash);
+    btn("snap").addEventListener("click", () => {
+      snapTxg = txg;
+      draw();
+    });
+    btn("reset").addEventListener("click", () => {
+      init();
+      say(fill(t.idle, vars()));
+      draw();
+    });
+    btn("play").addEventListener("click", async () => {
+      busy = true;
+      draw();
+      do {
+        advance();
+        busy = true;
+        draw();
+        await wait(1400);
+      } while (step !== 5);
+      busy = false;
+      draw();
+      btn("next").focus();
+    });
+    radios.forEach((r) =>
+      r.addEventListener("change", () => {
+        leaf = Number(r.value);
+        if (step === 5) step = 0;
+        say(fill(t.idle, vars()));
+        draw();
+      }),
+    );
+
+    init();
+    say(fill(t.idle, vars()));
+    root.querySelector<HTMLElement>(".controls")!.hidden = false;
+    root.querySelector<HTMLElement>(".ptrs")!.hidden = false;
+    draw();
+  }
+</script>
+
+<style>
+  .cow {
+    margin: var(--space-6) 0 0;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 34rem) minmax(0, 1fr);
+    gap: var(--space-6);
+    align-items: start;
+  }
+  .canvas {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+  }
+  svg {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 420 / 356;
+    display: block;
+  }
+  svg :global(.edge) {
+    fill: none;
+    stroke: var(--line-strong);
+    stroke-width: 1.5;
+  }
+  svg :global(.edge--new) {
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+  svg :global(.edge--old),
+  svg :global(.edge--snap),
+  svg :global(.edge--prevub) {
+    stroke: var(--old);
+    stroke-dasharray: 3 3;
+  }
+  svg :global(.card rect) {
+    fill: var(--surface-2);
+    stroke: var(--line-strong);
+    stroke-width: 1.5;
+    transition:
+      fill var(--dur-2) var(--ease),
+      stroke var(--dur-2) var(--ease);
+  }
+  svg :global(.card rect.under) {
+    fill: var(--surface);
+    stroke: none;
+  }
+  svg :global(.card text) {
+    font-family: var(--font-body);
+    fill: var(--fg);
+  }
+  svg :global(.card .name) {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  svg :global(.card .tag) {
+    font-size: 11px;
+    fill: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  svg :global(.card .strip) {
+    font-size: 10px;
+    font-weight: 500;
+  }
+  svg :global(.card .addr) {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    fill: var(--fg-muted);
+  }
+  svg :global(.card--new rect) {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+  svg :global(.card--new) {
+    animation: appear var(--dur-3) var(--ease);
+  }
+  svg :global(.card--old rect),
+  svg :global(.card--snap rect),
+  svg :global(.card--prevub rect) {
+    fill: var(--surface);
+    stroke: var(--old);
+    stroke-dasharray: 4 3;
+  }
+  svg :global(.card--old text),
+  svg :global(.card--snap text),
+  svg :global(.card--prevub text) {
+    fill: var(--fg-muted);
+  }
+  @keyframes appear {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+  }
+  .controls {
+    display: grid;
+    gap: var(--space-4);
+  }
+  .controls[hidden],
+  .ptrs[hidden] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .stepno {
+    margin-top: var(--space-5);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+    color: var(--accent);
+    min-height: 1.4em;
+  }
+  .narration {
+    margin-top: var(--space-2);
+    min-height: 7.5em;
+    max-width: 38rem;
+  }
+  .ptrs {
+    margin-top: var(--space-5);
+    max-width: 40rem;
+    overflow-x: auto;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+  }
+  caption {
+    text-align: left;
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+    color: var(--fg-muted);
+    padding-bottom: var(--space-2);
+  }
+  .ptrs :global(th),
+  .ptrs :global(td) {
+    text-align: left;
+    padding: 0.35em 0.75em 0.35em 0;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .ptrs :global(thead th) {
+    color: var(--fg-muted);
+    font-weight: 500;
+  }
+  .ptrs :global(tbody th) {
+    font-weight: 500;
+  }
+  .ptrs :global(td:nth-child(2)),
+  .ptrs :global(td:nth-child(4)) {
+    font-family: var(--font-mono);
+  }
+  .ptrs :global(tr.changed th),
+  .ptrs :global(tr.changed td) {
+    color: var(--accent);
+  }
+  .ptrs :global(tr.changed th::before) {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-right: 0.5em;
+    vertical-align: middle;
+  }
+  .note {
+    margin-top: var(--space-2);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version ol {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-2);
+  }
+  @media (max-width: 56rem) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

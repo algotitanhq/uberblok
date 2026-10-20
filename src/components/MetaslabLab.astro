@@ -1,0 +1,803 @@
+---
+// The figure of the Metaslabs and space maps room: a vdev cut into metaslabs,
+// metaslab 2 zoomed with its in-core trees, its space map as a tape of 64-bit
+// words, the bit layout of a selected entry, and the condense test. The
+// visitor writes and deletes files, syncs, loads and condenses;
+// src/lib/metaslab.ts (a transcription of metaslab.c and space_map.c) decides
+// every outcome, and src/lib/metaslab-view.ts draws it, at build time for the
+// opening state (readable without JavaScript) and in the browser after. Refs:
+// ANALYSIS.md, room "Metaslabs and space maps"; simplifications: DECISIONS.md D7.2.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { opening } from "../lib/metaslab";
+import { MS_STRINGS } from "../lib/metaslab-strings";
+import { vdev, bar, legend, trees, files, tape, tapeMeta, bits, check, describe, summary, type MsStrings } from "../lib/metaslab-view";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const M = "module/zfs/metaslab.c";
+const SMC = "module/zfs/space_map.c";
+const refs = {
+  df: gh(M, 1905, 1931),
+  freeing: gh(M, 5518, 5528),
+  condense: gh(M, 3994, 4013),
+  sync: gh(M, 4397, 4404),
+  early: gh(M, 4279, 4284),
+  defer: gh(M, 4624, 4638),
+  load: gh(SMC, 401, 416),
+  should: gh(M, 3836, 3861),
+  intro: gh(SMC, 529, 543),
+  pad: gh(SMC, 615, 631),
+  words: gh(SMC, 712, 734),
+  layout: gh("include/sys/space_map.h", 104, 140),
+};
+const S0 = MS_STRINGS[lang];
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as MsStrings;
+const t = UI[lang];
+const s0 = opening();
+const sel0 = s0.tape.length - 1;
+const sizes = [4, 32, 160];
+---
+
+<figure class="msl" data-msl data-strings={JSON.stringify(S)} aria-label={S.figure}>
+  <div class="msl-bar" hidden>
+    <div class="buttons" role="group" aria-label={S.writeLabel}>
+      <span class="glabel">{S.writeLabel}</span>
+      {sizes.map((n) => <button class="btn" type="button" data-act="write" data-size={n}>{lang === "fr" ? `${n} Mio` : lang === "es" ? `${n}\u00a0MiB` : `${n} MiB`}</button>)}
+    </div>
+    <div class="buttons">
+      <button class="btn btn--primary" type="button" data-act="sync" data-sync>{S.syncBtn.replace("{txg}", String(s0.txg))}</button>
+      <button class="btn" type="button" data-act="rewrite">{S.rewriteBtn}</button>
+      <button class="btn" type="button" data-act="load">{S.loadBtn}</button>
+      <button class="btn" type="button" data-act="condense">{S.condenseBtn}</button>
+      <button class="btn" type="button" data-act="reset">{S.reset}</button>
+    </div>
+  </div>
+  <p class="visually-hidden" data-summary>{summary(s0, S)}</p>
+
+  <div class="msl-vdev" aria-hidden="true">
+    <p class="cap">{S.vdevLabel}</p>
+    <div data-vdev set:html={vdev(s0, S)} />
+  </div>
+
+  <div class="msl-ms">
+    <p class="cap" aria-hidden="true">{S.msLabel}</p>
+    <div data-ms set:html={bar(s0, S)} />
+    <Fragment set:html={legend(S)} />
+  </div>
+
+  <div class="msl-grid">
+    <section class="panel" aria-labelledby={`msl-trees-${lang}`}>
+      <h3 id={`msl-trees-${lang}`}>{S.treesLabel}</h3>
+      <div data-trees set:html={trees(s0, S)} />
+    </section>
+    <section class="panel" aria-labelledby={`msl-files-${lang}`}>
+      <h3 id={`msl-files-${lang}`}>{S.filesLabel}</h3>
+      <div data-files set:html={files(s0, S, false)} />
+    </section>
+  </div>
+
+  <section class="panel tape" aria-labelledby={`msl-tape-${lang}`}>
+    <h3 id={`msl-tape-${lang}`}>{S.tapeLabel}</h3>
+    <p class="meta" data-tapemeta>{tapeMeta(s0, S)}</p>
+    <div data-tape set:html={tape(s0, S, false, sel0)} />
+    <div class="bits" data-bits set:html={bits(s0, S, sel0)} />
+  </section>
+
+  <section class="panel check" aria-labelledby={`msl-check-${lang}`}>
+    <h3 id={`msl-check-${lang}`}>{S.checkLabel}</h3>
+    <div data-check set:html={check(s0, S)} />
+  </section>
+
+  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <section class="msl-log" aria-labelledby={`msl-log-${lang}`} hidden>
+    <h3 id={`msl-log-${lang}`}>{S.logLabel}</h3>
+    <p class="visually-hidden" data-status aria-live="polite"></p>
+    <ol data-log><li class="muted">{S.logEmpty}</li></ol>
+  </section>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={describe(s0, S)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, wait, reducedMotion, fill } from "../lib/svg";
+  import { opening, write, del, sync, load, churn, condenseNow, replay, clone, MIB, type Ms, type Ev } from "../lib/metaslab";
+  import { vdev, bar, trees, files, tape, tapeMeta, bits, check, describe, summary, eventLine, eventClass, shownEntries, type MsStrings } from "../lib/metaslab-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-msl]")) {
+    const S = strings<MsStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const logEl = q("[data-log]");
+    let s: Ms = opening();
+    let sel: number | null = s.tape.length - 1;
+    let run = 0;
+    let busy = false;
+
+    const keyOf = (el: Element | null) => {
+      if (!(el instanceof HTMLElement) || !root.contains(el)) return null;
+      if (el.dataset.act) return `[data-act="${el.dataset.act}"]${el.dataset.size ? `[data-size="${el.dataset.size}"]` : ""}`;
+      if (el.dataset.del) return `[data-del="${el.dataset.del}"]`;
+      if (el.dataset.e) return `[data-e="${el.dataset.e}"]`;
+      return null;
+    };
+
+    function render(focusKey: string | null = keyOf(document.activeElement)) {
+      q("[data-vdev]").innerHTML = vdev(s, S);
+      q("[data-ms]").innerHTML = bar(s, S);
+      q("[data-trees]").innerHTML = trees(s, S);
+      q("[data-files]").innerHTML = files(s, S, true);
+      q("[data-tapemeta]").textContent = tapeMeta(s, S);
+      q("[data-tape]").innerHTML = tape(s, S, true, sel);
+      q("[data-bits]").innerHTML = bits(s, S, sel);
+      q("[data-check]").innerHTML = check(s, S);
+      q("[data-summary]").textContent = summary(s, S);
+      q("[data-describe]").innerHTML = describe(s, S);
+      q("[data-sync]").textContent = fill(S.syncBtn, { txg: s.txg });
+      if (focusKey) {
+        const el = root.querySelector<HTMLElement>(focusKey);
+        if (el && !(el as HTMLButtonElement).disabled) el.focus({ preventScroll: true });
+        else q("[data-sync]").focus({ preventScroll: true });
+      }
+    }
+
+    /** The last entry that is not a debug word, or the last word. */
+    const lastEntry = () => {
+      for (let i = s.tape.length - 1; i >= 0; i--) if (s.tape[i].kind !== "debug") return i;
+      return s.tape.length ? s.tape.length - 1 : null;
+    };
+
+    async function log(ev: Ev[], before: number) {
+      const me = ++run;
+      // New words on the tape slide in, one after the other.
+      if (!reducedMotion() && s.tape.length > before && s.length > 0) {
+        const cells = [...root.querySelectorAll<HTMLElement>("[data-e]")].filter((c) => Number(c.dataset.e) >= before);
+        cells.forEach((c, i) => c.animate([{ opacity: 0, transform: "translateY(-10px)" }, { opacity: 1, transform: "none" }], { duration: 380, delay: Math.min(i, 24) * 45, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)", fill: "backwards" }));
+      }
+      logEl.replaceChildren();
+      const lines = ev.map((e) => eventLine(S, e));
+      q("[data-status]").textContent = lines.map((l) => l.replace(/<[^>]+>/g, "")).join(" ").split(` ${S.see}`).join("");
+      for (let i = 0; i < ev.length; i++) {
+        const li = document.createElement("li");
+        li.className = eventClass(ev[i]);
+        li.innerHTML = lines[i];
+        logEl.append(li);
+        if (ev.length < 12) {
+          await wait(60);
+          if (me !== run) return;
+        }
+      }
+    }
+
+    function act(f: () => Ev[]) {
+      const before = s.tape.length;
+      const truncated = s.length;
+      const ev = f();
+      const appended = s.tape.length !== before || s.length !== truncated;
+      if (appended) sel = lastEntry();
+      render();
+      void log(ev, s.length < truncated ? 0 : before);
+    }
+
+    /** Load, drawn: the tree is emptied, then rebuilt entry by entry as the tape is replayed. */
+    async function loadDrawn() {
+      const ev = load(clone(s));
+      if (ev[0].k !== "load" || reducedMotion()) return act(() => load(s));
+      busy = true;
+      const me = ++run;
+      const n = s.tape.length;
+      const steps = Math.min(n, 36);
+      const view = clone(s);
+      view.defer = [[], []];
+      for (let k = 0; k <= steps; k++) {
+        const upto = Math.round((k / steps) * n);
+        view.allocatable = k === 0 ? [] : replay(s.tape, upto);
+        q("[data-ms]").innerHTML = bar(view, S);
+        for (const c of root.querySelectorAll<HTMLElement>("[data-e]")) c.classList.toggle("replayed", Number(c.dataset.e) < upto);
+        await wait(k === 0 ? 260 : 55);
+        if (me !== run) {
+          busy = false;
+          return;
+        }
+      }
+      busy = false;
+      act(() => load(s));
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el) || (busy && el.dataset.act !== "reset")) return;
+      const d = el.dataset;
+      if (d.act === "write") act(() => write(s, Number(d.size) * MIB));
+      else if (d.act === "sync") act(() => sync(s));
+      else if (d.act === "rewrite") act(() => churn(s));
+      else if (d.act === "load") void loadDrawn();
+      else if (d.act === "condense") act(() => condenseNow(s));
+      else if (d.act === "reset") {
+        run++;
+        busy = false;
+        s = opening();
+        sel = s.tape.length - 1;
+        logEl.innerHTML = `<li class="muted">${S.logEmpty}</li>`;
+        q("[data-status]").textContent = "";
+        render();
+      } else if (d.del) act(() => del(s, d.del!));
+      else if (d.e) {
+        sel = Number(d.e);
+        q("[data-tape]").innerHTML = tape(s, S, true, sel);
+        q("[data-bits]").innerHTML = bits(s, S, sel);
+        // The one live region says what the selected entry's bits mean.
+        q("[data-status]").textContent = (q("[data-bits]").textContent ?? "").replace(/\s+/g, " ").trim();
+        root.querySelector<HTMLElement>(`[data-e="${sel}"]`)?.focus({ preventScroll: true });
+      }
+    });
+
+    // Arrow keys move along the tape.
+    root.addEventListener("keydown", (e) => {
+      const el = e.target as HTMLElement;
+      if (!el.dataset?.e || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+      const shown = shownEntries(s);
+      const i = shown[shown.indexOf(Number(el.dataset.e)) + (e.key === "ArrowRight" ? 1 : -1)];
+      if (i === undefined) return;
+      e.preventDefault();
+      root.querySelector<HTMLElement>(`[data-e="${i}"]`)?.click();
+    });
+
+    render(null);
+    q(".msl-bar").hidden = false;
+    q(".msl-log").hidden = false;
+  }
+</script>
+
+<style>
+  .msl {
+    margin: var(--space-6) 0 0;
+  }
+  .msl-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+  }
+  .msl-bar[hidden],
+  .msl-log[hidden] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .glabel {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    margin-right: var(--space-2);
+  }
+  .cap {
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    margin-bottom: var(--space-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .msl-vdev {
+    margin-bottom: var(--space-5);
+  }
+  .msl-vdev :global(.vdev-cells) {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 3px;
+  }
+  .msl-vdev :global(.ms) {
+    position: relative;
+    height: 22px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .msl-vdev :global(.ms.on) {
+    border-color: var(--accent);
+  }
+  .msl-vdev :global(.fillbar) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--accent-soft);
+    border-right: 1px solid var(--accent);
+  }
+  .msl-vdev :global(.id) {
+    position: relative;
+    display: block;
+    text-align: center;
+    font-size: 0.65rem;
+    line-height: 20px;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .msl-vdev :global(.ms.on .id) {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .msl-ms :global(.msbox) {
+    position: relative;
+    padding-top: 14px;
+  }
+  .msl-ms :global(.ms-svg) {
+    display: block;
+    width: 100%;
+    height: 48px;
+  }
+  .msl-ms :global(.flabels) {
+    position: absolute;
+    top: 14px;
+    left: 0;
+    right: 0;
+    height: 48px;
+  }
+  .msl-ms :global(.flabel) {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .msl-ms :global(.ticks) {
+    position: relative;
+    height: 1.4rem;
+    border-top: 0;
+  }
+  .msl-ms :global(.tickl) {
+    position: absolute;
+    top: 3px;
+    transform: translateX(-50%);
+    font-size: 0.7rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .msl-ms :global(.tickl.first) {
+    transform: none;
+  }
+  .msl-ms :global(.tickl.last) {
+    transform: translateX(-100%);
+  }
+  .msl-ms :global(.cursor) {
+    position: absolute;
+    top: 2px;
+    width: 0;
+    height: 0;
+    margin-left: -5px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 9px solid var(--fg);
+    transition: left var(--dur-3) var(--ease);
+  }
+  .msl-ms :global(.used) {
+    fill: var(--line-strong);
+  }
+  .msl-ms :global(.free) {
+    fill: var(--surface-2);
+  }
+  .msl-ms :global(.allocating) {
+    fill: var(--accent);
+  }
+  .msl-ms :global(.freeing) {
+    fill: var(--bad);
+  }
+  .msl-ms :global(.hbg) {
+    fill: var(--bad-soft);
+  }
+  .msl-ms :global(.hl) {
+    stroke: var(--bad);
+    stroke-width: 3;
+  }
+  .msl-ms :global(.deferred) {
+    fill: var(--ok);
+    fill-opacity: 0.3;
+    stroke: var(--ok);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .msl-ms :global(.fext) {
+    fill: none;
+    stroke: var(--surface);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+  .msl-ms :global(.frame) {
+    fill: none;
+    stroke: var(--line-strong);
+    vector-effect: non-scaling-stroke;
+  }
+  .msl-ms :global(.ms-legend) {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-2) 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+  }
+  .msl-ms :global(.ms-legend li) {
+    display: inline-flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .msl-ms :global(.sw) {
+    width: 1.1rem;
+    height: 0.8rem;
+    border-radius: 2px;
+    display: inline-block;
+  }
+  .msl-ms :global(.sw.free) {
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+  }
+  .msl-ms :global(.sw.used) {
+    background: var(--line-strong);
+  }
+  .msl-ms :global(.sw.allocating) {
+    background: var(--accent);
+  }
+  .msl-ms :global(.sw.freeing) {
+    background: repeating-linear-gradient(45deg, var(--bad) 0 2px, var(--bad-soft) 2px 5px);
+  }
+  .msl-ms :global(.sw.deferred) {
+    background: var(--ok-soft);
+    border: 1px solid var(--ok);
+  }
+  .msl-ms :global(.sw.cur) {
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 9px solid var(--fg);
+    border-radius: 0;
+  }
+  .msl-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--space-3) var(--space-4);
+    min-width: 0;
+  }
+  .panel.tape,
+  .panel.check {
+    margin-top: var(--space-3);
+  }
+  .panel h3 {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    font-size: var(--step-0);
+    font-weight: 600;
+  }
+  .panel :global(.none) {
+    font-size: var(--step--1);
+    color: var(--fg-faint);
+  }
+  .panel :global(.trees),
+  .panel :global(.files),
+  .panel :global(.tests) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+  }
+  .panel :global(.files li) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    min-height: 44px;
+  }
+  .panel :global(.fid) {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    min-width: 1.8em;
+  }
+  .panel :global(.files li.pending .fid) {
+    color: var(--accent);
+  }
+  .panel :global(.files li.deleting) {
+    color: var(--fg-muted);
+  }
+  .panel :global(.files li.deleting .fid) {
+    color: var(--bad);
+    text-decoration: line-through;
+  }
+  .panel :global(.fmeta) {
+    color: var(--fg-muted);
+    flex: 1 1 12rem;
+  }
+  .panel :global(.btn--small) {
+    min-height: 44px;
+    padding-inline: var(--space-3);
+    font-size: var(--step--1);
+  }
+  .panel :global(.btn--small[disabled]) {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .meta {
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    margin-bottom: var(--space-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .tape :global(.tape-cells) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .tape :global(.earlier) {
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    display: flex;
+    align-items: center;
+    padding-inline: var(--space-2);
+    min-height: 44px;
+  }
+  .tape :global(.tc) {
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    line-height: 1.2;
+    color: var(--fg);
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    width: 4.4rem;
+    min-height: 44px;
+    padding: 2px 4px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .tape :global(button.tc) {
+    cursor: pointer;
+  }
+  .tape :global(.tc.two) {
+    width: calc(8.8rem + 3px);
+  }
+  .tape :global(.tc.debug) {
+    width: 3.6rem;
+    background: transparent;
+    border-style: dashed;
+    color: var(--fg-muted);
+  }
+  .tape :global(.tc.pad) {
+    color: var(--fg-muted);
+    border-color: var(--line);
+  }
+  .tape :global(.tc.alloc) {
+    border-color: var(--accent);
+    border-left-width: 4px;
+  }
+  .tape :global(.tc.free) {
+    border-color: var(--ok);
+    border-left-width: 4px;
+  }
+  .tape :global(.tc.alloc .t1) {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .tape :global(.tc.free .t1) {
+    color: var(--ok);
+    font-weight: 600;
+  }
+  .tape :global(.tc.sel) {
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
+  }
+  /* The selected entry keeps a focus ring of its own: the selection outline would hide it. */
+  .tape :global(.tc.sel:focus-visible) {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+  }
+  .tape :global(.tc.cond) {
+    background: var(--ok-soft);
+  }
+  .tape :global(.tc.replayed) {
+    background: var(--accent-soft);
+  }
+  .bits {
+    margin-top: var(--space-4);
+    border-top: 1px solid var(--line);
+    padding-top: var(--space-3);
+  }
+  .bits :global(h4) {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--step--1);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .bits :global(.word) {
+    margin-bottom: var(--space-3);
+  }
+  .bits :global(.whex) {
+    font-size: var(--step--1);
+    margin-bottom: var(--space-1);
+  }
+  .bits :global(.whex code) {
+    font-size: 0.95em;
+    letter-spacing: 0.02em;
+  }
+  .bits :global(.fields) {
+    display: flex;
+    gap: 2px;
+  }
+  .bits :global(.fb) {
+    flex-basis: 0;
+    min-width: 3.4rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 3px 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-size: 0.7rem;
+    overflow: hidden;
+    background: var(--surface-2);
+  }
+  .bits :global(.fb.pre),
+  .bits :global(.fb.pad),
+  .bits :global(.fb.typ),
+  .bits :global(.fb.act) {
+    min-width: 3.2rem;
+  }
+  .bits :global(.fn) {
+    font-weight: 600;
+  }
+  .bits :global(.fbits) {
+    color: var(--fg-muted);
+  }
+  .bits :global(.fv) {
+    font-family: var(--font-mono);
+    word-break: break-all;
+  }
+  .bits :global(.fb.off) {
+    border-color: var(--accent);
+  }
+  .bits :global(.fb.run) {
+    border-color: var(--ok);
+  }
+  .bits :global(.bits-says) {
+    font-size: var(--step--1);
+    max-width: var(--measure);
+  }
+  .check :global(.tests li) {
+    display: block;
+  }
+  .check :global(.yn) {
+    display: inline-block;
+    min-width: 2.6em;
+    font-weight: 600;
+  }
+  .check :global(.yn.yes) {
+    color: var(--ok);
+  }
+  .check :global(.yn.no) {
+    color: var(--bad);
+  }
+  .check :global(.meter) {
+    display: block;
+    height: 6px;
+    margin-top: var(--space-1);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    max-width: 30rem;
+    overflow: hidden;
+  }
+  .check :global(.meter span) {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .check :global(.verdict) {
+    margin-top: var(--space-3);
+    font-size: var(--step--1);
+  }
+  .msl-log {
+    margin-top: var(--space-6);
+    max-width: 48rem;
+  }
+  .msl-log h3 {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+    margin-bottom: var(--space-3);
+  }
+  .msl-log ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .msl-log :global(li) {
+    border-left: 2px solid var(--line-strong);
+    padding-left: var(--space-3);
+  }
+  .msl-log :global(li.muted) {
+    border-left-color: transparent;
+    padding-left: 0;
+  }
+  .msl-log :global(li.append) {
+    border-left-color: var(--accent);
+  }
+  .msl-log :global(li.condense) {
+    border-left-color: var(--ok);
+  }
+  .msl-log :global(li.defer),
+  .msl-log :global(li.synced) {
+    color: var(--fg-muted);
+    margin-left: var(--space-3);
+  }
+  .msl-log :global(li.refused) {
+    border-left-color: var(--bad);
+  }
+  .msl :global(a.see) {
+    font-size: 0.85em;
+    color: var(--fg-muted);
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version :global(ul) {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-1);
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 48rem) {
+    .msl-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .bits :global(.fields) {
+      flex-wrap: wrap;
+    }
+    .bits :global(.fb) {
+      flex-basis: 40%;
+    }
+    .msl-vdev :global(.id) {
+      font-size: 0.55rem;
+    }
+  }
+</style>

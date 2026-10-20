@@ -1,0 +1,392 @@
+---
+import "@fontsource-variable/fraunces/wght.css";
+import "@fontsource-variable/inter/wght.css";
+import "@fontsource/instrument-serif/latin-400-italic.css";
+import "../styles/global.css";
+// Body text font, preloaded so the first paint already has its metrics (CLS, DECISIONS.md D6.6).
+import interLatin from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url";
+import { LANG_NAME, LANGS, ROOMS, roomUrl, type Lang } from "../lib/rooms";
+import { REPO_URL, repoFile } from "../lib/stack";
+import { UI } from "../lib/ui";
+import { OPENZFS_SHA, OPENZFS_TAG } from "../lib/openzfs";
+
+interface Props {
+  lang: Lang;
+  roomId: string;
+  title: string;
+  description: string;
+}
+const { lang, roomId, title, description } = Astro.props;
+const t = UI[lang];
+const hall = roomUrl(lang, "hall");
+// A room page marks "Rooms" as the current section (design review of v1.3, DECISIONS.md D17.1).
+const inRoom = roomId !== "hall" && roomId !== "history" && ROOMS.some((r) => r.id === roomId);
+// The flags of the language switcher, as on the owner's site blok (DECISIONS.md D16.1).
+const FLAGS: Record<Lang, string> = {
+  en: `<svg class="flag" viewBox="0 0 60 30" width="18" height="12" aria-hidden="true"><clipPath id="flag-uk"><path d="M30,15h30v15zv15h-30zh-30v-15zv-15h30z"/></clipPath><path d="M0,0v30h60v-30z" fill="#012169"/><path d="M0,0L60,30M60,0L0,30" stroke="#fff" stroke-width="6"/><path clip-path="url(#flag-uk)" d="M0,0L60,30M60,0L0,30" stroke="#C8102E" stroke-width="4"/><path d="M30,0v30M0,15h60" stroke="#fff" stroke-width="10"/><path d="M30,0v30M0,15h60" stroke="#C8102E" stroke-width="6"/></svg>`,
+  fr: `<svg class="flag" viewBox="0 0 3 2" width="18" height="12" aria-hidden="true"><path d="M0 0h1v2H0z" fill="#0055A4"/><path d="M1 0h1v2H1z" fill="#fff"/><path d="M2 0h1v2H2z" fill="#EF4135"/></svg>`,
+  es: `<svg class="flag" viewBox="0 0 3 2" width="18" height="12" aria-hidden="true"><path d="M0 0h3v2H0z" fill="#AA151B"/><path d="M0 .5h3v1H0z" fill="#F1BF00"/></svg>`,
+};
+const OG_LOCALE: Record<Lang, string> = { en: "en_US", fr: "fr_FR", es: "es_ES" };
+const GITHUB_MARK =
+  "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z";
+const canonical = new URL(roomUrl(lang, roomId), Astro.site).href;
+---
+
+<!doctype html>
+<html lang={lang} data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="preload" href={interLatin} as="font" type="font/woff2" crossorigin />
+    {LANGS.map((l) => <link rel="alternate" hreflang={l} href={new URL(roomUrl(l, roomId), Astro.site).href} />)}
+    <link rel="alternate" hreflang="x-default" href={new URL("/", Astro.site).href} />
+    <meta name="theme-color" content="#0e0d0b" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:locale" content={OG_LOCALE[lang]} />
+    <script is:inline>
+      // Theme before first paint: dark unless the visitor chose light.
+      try {
+        if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light";
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">{t.skip}</a>
+    <header class="site-header">
+      <div class="wrap bar">
+        <a class="wordmark" href={hall}>Uberblok</a>
+        <nav class="menu" aria-label={t.navLabel}>
+          <ul>
+            <li><a href={hall} aria-current={roomId === "hall" ? "page" : undefined}>{t.navHall}</a></li>
+            <li><a href={`${hall}#map`} aria-current={inRoom ? "true" : undefined}>{t.navRooms}</a></li>
+            <li><a href={roomUrl(lang, "history")} aria-current={roomId === "history" ? "page" : undefined}>{t.navHistory}</a></li>
+            <li><a href={`${hall}#why`}>{t.navWhy}</a></li>
+          </ul>
+        </nav>
+        <ul class="tools" aria-label={t.toolsLabel}>
+          <li>
+            <a class="icon github" href={REPO_URL} title={t.github}>
+              <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path d={GITHUB_MARK} fill="currentColor"></path></svg>
+              <span class="visually-hidden">{t.github}</span>
+            </a>
+          </li>
+          <li>
+            <div class="langs" role="group" aria-label={t.langLabel}>
+            {
+              LANGS.map((l) =>
+                l === lang ? (
+                  <span class="langue" aria-current="true" lang={l} title={LANG_NAME[l]}>
+                    <Fragment set:html={FLAGS[l]} />
+                    <span aria-hidden="true">{l.toUpperCase()}</span>
+                    <span class="visually-hidden">{LANG_NAME[l]}</span>
+                  </span>
+                ) : (
+                  <a class="langue" href={roomUrl(l, roomId)} hreflang={l} lang={l} title={LANG_NAME[l]} data-lang={l}>
+                    <Fragment set:html={FLAGS[l]} />
+                    <span aria-hidden="true">{l.toUpperCase()}</span>
+                    <span class="visually-hidden">{LANG_NAME[l]}</span>
+                  </a>
+                ),
+              )
+            }
+            </div>
+          </li>
+          <li>
+            <button
+              class="icon theme"
+              type="button"
+              data-to-dark={t.themeToDark}
+              data-to-light={t.themeToLight}
+              aria-label={t.themeToLight}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
+                <path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"></path>
+              </svg>
+            </button>
+          </li>
+        </ul>
+      </div>
+    </header>
+    <main id="content" tabindex="-1">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <div class="wrap">
+        <div class="links">
+          <nav aria-labelledby="footer-visit">
+            <h2 id="footer-visit">{t.footerVisit}</h2>
+            <ul>
+              <li><a href={hall}>{t.navHall}</a></li>
+              <li><a href={`${hall}#map`}>{t.footerMap}</a></li>
+              <li><a href={roomUrl(lang, "history")}>{t.navHistory}</a></li>
+              <li><a href={roomUrl(lang, "engine-room")}>{t.footerEngine}</a></li>
+            </ul>
+          </nav>
+          <nav aria-labelledby="footer-about">
+            <h2 id="footer-about">{t.footerAbout}</h2>
+            <ul>
+              <li><a href={`${hall}#why`}>{t.footerWhy}</a></li>
+              <li><a href={repoFile("SOURCES.md")}>{t.footerSources}</a></li>
+              <li><a href={REPO_URL}>{t.footerRepo}</a></li>
+            </ul>
+          </nav>
+          <nav aria-labelledby="footer-langs">
+            <h2 id="footer-langs">{t.footerLangs}</h2>
+            <ul>
+              {
+                LANGS.map((l) => (
+                  <li>
+                    <a href={roomUrl(l, roomId)} hreflang={l} lang={l} data-lang={l} aria-current={l === lang ? "true" : undefined}>
+                      {LANG_NAME[l]}
+                    </a>
+                  </li>
+                ))
+              }
+            </ul>
+          </nav>
+        </div>
+        <p class="colophon">
+          {t.footerCode}
+          <a href={`https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`}><code>{OPENZFS_TAG}</code></a>
+          ({OPENZFS_SHA.slice(0, 12)}), {t.footerLicence}
+          {t.footerNotAffiliated}
+        </p>
+      </div>
+    </footer>
+    <script is:inline>
+      (() => {
+        const root = document.documentElement;
+        const btn = document.querySelector(".site-header .theme");
+        const meta = document.querySelector('meta[name="theme-color"]');
+        const sync = () => {
+          const light = root.dataset.theme === "light";
+          btn.setAttribute("aria-label", light ? btn.dataset.toDark : btn.dataset.toLight);
+          meta.setAttribute("content", light ? "#efe8da" : "#0e0d0b");
+        };
+        sync();
+        btn.addEventListener("click", () => {
+          root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
+          try { localStorage.setItem("theme", root.dataset.theme); } catch {}
+          sync();
+        });
+        // Remember the language picked with a switch, for the root page.
+        for (const a of document.querySelectorAll("a[data-lang]"))
+          a.addEventListener("click", () => {
+            try { localStorage.setItem("lang", a.dataset.lang); } catch {}
+          });
+      })();
+    </script>
+  </body>
+</html>
+
+<style>
+  /* Header (DECISIONS.md D16.1): the wordmark, the visit's links, then the tools.
+     On a phone the links take a second row, so nothing scrolls sideways. */
+  .bar {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "mark menu tools";
+    align-items: center;
+    column-gap: var(--space-5);
+    padding-block: var(--space-3);
+  }
+  .wordmark {
+    grid-area: mark;
+    font-family: var(--font-display);
+    font-size: var(--step-1);
+    font-weight: 380;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    padding-block: var(--space-2);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .menu {
+    grid-area: menu;
+  }
+  .menu ul {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--space-5);
+  }
+  .menu a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .menu a:hover,
+  .menu a[aria-current] {
+    color: var(--fg);
+  }
+  .menu a[aria-current] {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-underline-offset: 0.35em;
+  }
+  .tools {
+    grid-area: tools;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .langs {
+    display: flex;
+    align-items: center;
+  }
+  .langue,
+  .icon {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    color: var(--fg-muted);
+    background: none;
+    border: 1px solid transparent;
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    transition:
+      color var(--dur-1) var(--ease),
+      border-color var(--dur-1) var(--ease);
+  }
+  .langue {
+    padding-inline: 0.45rem;
+  }
+  .icon {
+    cursor: pointer;
+  }
+  a.langue:hover,
+  .icon:hover {
+    color: var(--fg);
+    border-color: var(--line-strong);
+  }
+  /* The active language: the nav's accent underline, under the code, or under the
+     flag alone when the codes are hidden, so it never rests on colour (D17.1). */
+  .langue[aria-current] {
+    position: relative;
+    color: var(--fg);
+  }
+  .langue[aria-current]::after {
+    content: "";
+    position: absolute;
+    left: 0.45rem;
+    right: 0.45rem;
+    top: calc(50% + 0.6rem);
+    height: 1px;
+    background: var(--accent);
+  }
+  .langue :global(.flag) {
+    width: 18px;
+    height: 12px;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  a.langue :global(.flag) {
+    opacity: 0.8;
+  }
+  a.langue:hover :global(.flag) {
+    opacity: 1;
+  }
+  @media (max-width: 47.99rem) {
+    .bar {
+      grid-template-columns: 1fr auto;
+      grid-template-areas: "mark tools" "menu menu";
+    }
+    .menu {
+      border-top: 1px solid var(--line);
+      margin-top: var(--space-1);
+    }
+    .menu ul {
+      column-gap: var(--space-4);
+    }
+  }
+  /* On the narrowest phones the language codes give way to the flags alone, and
+     the flags take 36 px targets (above WCAG 2.5.8's 24), so 320 px fits. */
+  @media (max-width: 24rem) {
+    .bar {
+      column-gap: var(--space-2);
+    }
+    .tools {
+      gap: 0;
+    }
+    .langue > span[aria-hidden] {
+      display: none;
+    }
+    .langue {
+      min-width: 36px;
+      padding-inline: 0;
+    }
+    .langue[aria-current]::after {
+      left: 9px;
+      right: 9px;
+    }
+  }
+  /* Below 360 px the four links still hold one row in every language (Spanish is
+     the longest, 278 px of text in 288): a smaller gap and text a step down (D17.1). */
+  @media (max-width: 22.49rem) {
+    .menu ul {
+      column-gap: var(--space-2);
+    }
+    .menu a {
+      font-size: 0.78rem;
+    }
+  }
+
+  .site-footer {
+    margin-top: var(--space-9);
+    padding-block: var(--space-6);
+    border-top: 1px solid var(--line);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .links {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: var(--space-5);
+    margin-bottom: var(--space-6);
+  }
+  .links h2 {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--step--1);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+  .links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.25rem;
+    color: var(--fg-muted);
+  }
+  .links a:hover,
+  .links a[aria-current] {
+    color: var(--fg);
+  }
+  .colophon {
+    max-width: var(--measure);
+  }
+  main:focus {
+    outline: none;
+  }
+</style>

@@ -1,0 +1,271 @@
+---
+// The figure of the tree and the uberblock room: a block pointer tree under
+// its uberblock, a data block written (the leaf and every ancestor copied),
+// the four beats of vdev_config_sync on one disk with four labels and their
+// rings, and the plug pulled at any beat, then the import. src/lib/tree.ts
+// decides every outcome, src/lib/tree-view.ts draws it in 2D (SVG) and
+// src/lib/tree-3d.ts in 3D, loaded only on demand (src/lib/lazy3d.ts). Shown
+// without JavaScript: D2 written in txg 4211, nothing synced yet. Refs:
+// ANALYSIS.md, room "The tree and the uberblock"; simplifications:
+// DECISIONS.md D12.2 to D12.4.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { createPool, writeLeaf, NDATA } from "../lib/tree";
+import { treeSvg, diskSvg, diskHtml, beatsHtml, importHtml, describe, type TrStrings } from "../lib/tree-view";
+import { TREE_STRINGS } from "../lib/tree-strings";
+import "../styles/tree.css";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const VL = "module/zfs/vdev_label.c";
+const refs = {
+  offset: gh(VL, 158, 170),
+  dirty: gh("module/zfs/dbuf.c", 2537, 2554),
+  write: gh("module/zfs/zio.c", 2102, 2104),
+  flush: gh(VL, 2085, 2098),
+  even: gh(VL, 2100, 2116),
+  ubsync: gh(VL, 1782, 1796),
+  odd: gh(VL, 2144, 2161),
+  load: gh(VL, 1570, 1588),
+  compare: gh(VL, 1495, 1505),
+  readConfig: gh(VL, 832, 863),
+  cases: gh(VL, 2118, 2131),
+};
+const S = { ...Object.fromEntries(Object.entries(TREE_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const t = UI[lang];
+const p0 = writeLeaf(createPool(), 2).pool;
+const helpId = `tr-help-${lang}`;
+const leaves = Array.from({ length: NDATA }, (_, i) => i);
+---
+
+<figure class="tr" data-tree-lab data-strings={JSON.stringify(S)} data-help={helpId} aria-label={S.figure}>
+  <div class="tr-bar" hidden>
+    <div class="buttons" role="group" aria-label={S.writeLabel}>
+      <span class="glabel">{S.writeLabel}</span>
+      {leaves.map((i) => <button class="btn" type="button" data-leaf={i}>D{i}</button>)}
+    </div>
+    <div class="buttons">
+      <button class="btn btn--primary" type="button" data-act="step">{S.stepBtn}</button>
+      <button class="btn" type="button" data-act="plug">{S.plugBtn}</button>
+      <button class="btn" type="button" data-act="import">{S.importBtn}</button>
+      <button class="btn" type="button" data-act="restart">{S.restart}</button>
+      <button class="btn" type="button" data-view3d aria-pressed="false" hidden>{S.view3d}</button>
+    </div>
+    <div class="buttons">
+      <button class="btn" type="button" data-act="config" aria-pressed="true">{S.configBtn}</button>
+    </div>
+    <div class="buttons" role="group" aria-label={S.landedLabel}>
+      <span class="glabel">{S.landedLabel}</span>
+      {[0, 1, 2, 3].map((n) => <button class="btn" type="button" data-landed={n} aria-pressed={n === 0 ? "true" : "false"}>{n}</button>)}
+    </div>
+    <p class="muted tr-why" data-why></p>
+  </div>
+  <div class="tr-stage">
+    <div data-tree set:html={treeSvg(S, p0)} />
+    <div class="tr-3d" data-3d hidden></div>
+    <p class="tr-help muted off" id={helpId} data-help-text>{S.view3dHelp}</p>
+    <p class="muted" id={`${helpId}-no3d`} data-no3d hidden>{S.no3d}</p>
+    <div data-disk set:html={diskSvg(S, p0)} />
+  </div>
+  <div class="tr-panels">
+    <section class="panel" aria-labelledby={`tr-beats-${lang}`}>
+      <h3 id={`tr-beats-${lang}`}>{S.beatsTitle}</h3>
+      <div data-beats set:html={beatsHtml(S, p0)} />
+    </section>
+    <section class="panel" aria-labelledby={`tr-imp-${lang}`}>
+      <h3 id={`tr-imp-${lang}`}>{S.importTitle}</h3>
+      <div data-import set:html={importHtml(S, null)} />
+    </section>
+    <section class="panel tr-wide" aria-labelledby={`tr-disk-${lang}`}>
+      <h3 id={`tr-disk-${lang}`}>{S.diskTitle}</h3>
+      <div class="tr-scroll" data-disk-table tabindex="0" role="region" aria-label={t.scrollTable} set:html={diskHtml(S, p0)} />
+    </section>
+  </div>
+  <p class="tr-now" data-now aria-hidden="true" hidden></p>
+  <p class="visually-hidden" data-live aria-live="polite"></p>
+  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={describe(S, p0, null)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, reducedMotion } from "../lib/svg";
+  import { createPool, writeLeaf, step, pullPlug, importPool, canWrite, canStep, canImport, canSetConfig, newestOnDisk, type Pool, type ImportResult } from "../lib/tree";
+  import {
+    treeSvg, diskSvg, diskHtml, beatsHtml, importHtml, describe, spoken, writeLine, stepLine, plugLine, importLine, whyLine, plural, fill,
+    type TrStrings,
+  } from "../lib/tree-view";
+  import { no3dReason, once } from "../lib/lazy3d";
+  import type { Scene3d } from "../lib/tree-3d";
+
+  const load3d = once(() => import("../lib/tree-3d"));
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-tree-lab]")) {
+    const S = strings<TrStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    let pool: Pool;
+    let last: ImportResult | null = null;
+    let landed = 0;
+    let scene: Scene3d | null = null;
+    let is3d = false;
+    const no3d = no3dReason();
+
+    function start() {
+      pool = writeLeaf(createPool(), 2).pool;
+      last = null;
+    }
+
+    /**
+     * The visible line, and one announcement per action: the live region is
+     * emptied, then filled on the next frame, so that the same text twice is
+     * announced twice; it reads the line without its code links.
+     */
+    function say(html: string) {
+      const el = q("[data-now]");
+      el.hidden = false;
+      el.innerHTML = html;
+      const live = q("[data-live]");
+      live.textContent = "";
+      requestAnimationFrame(() => (live.textContent = spoken(html)));
+    }
+
+    function render(animate: boolean, swung = false) {
+      q("[data-tree]").innerHTML = treeSvg(S, pool);
+      q("[data-disk]").innerHTML = diskSvg(S, pool);
+      q("[data-beats]").innerHTML = beatsHtml(S, pool);
+      q("[data-disk-table]").innerHTML = diskHtml(S, pool);
+      q("[data-import]").innerHTML = importHtml(S, last);
+      q("[data-describe]").innerHTML = describe(S, pool, last);
+      const w = canWrite(pool);
+      for (const b of root.querySelectorAll<HTMLElement>("[data-leaf]")) b.setAttribute("aria-disabled", String(!!w));
+      q("[data-act='step']").setAttribute("aria-disabled", String(!!canStep(pool)));
+      q("[data-act='plug']").setAttribute("aria-disabled", String(!!pool.cut));
+      q("[data-act='import']").setAttribute("aria-disabled", String(!!canImport(pool)));
+      const cfg = q("[data-act='config']");
+      cfg.setAttribute("aria-pressed", String(pool.configDirty));
+      const c = canSetConfig(pool);
+      cfg.setAttribute("aria-disabled", String(!!c));
+      for (const b of root.querySelectorAll<HTMLElement>("[data-landed]")) b.setAttribute("aria-pressed", String(Number(b.dataset.landed) === landed));
+      // Why the disabled buttons are disabled, each reason once.
+      const whys = new Set<string>();
+      if (w) whys.add(whyLine(S, pool, w));
+      const s = canStep(pool);
+      if (s && s !== w) whys.add(whyLine(S, pool, s));
+      if (canImport(pool)) whys.add(whyLine(S, pool, "notCut"));
+      // "Syncing" already says why the configuration is set, and "cut" why nothing works.
+      if (c && c !== "cut" && !(c === "cfgLocked" && w === "syncing")) whys.add(whyLine(S, pool, c));
+      q("[data-why]").textContent = [...whys].join(" ");
+      const motion = !reducedMotion();
+      if (scene) scene.draw(pool, (animate || swung) && motion);
+      if (motion && !is3d) {
+        if (animate) {
+          const fresh = root.querySelectorAll<SVGGraphicsElement>("[data-tree] .b.s-mem, [data-tree] .b.s-unflushed, [data-tree] .e-mem");
+          for (const el of fresh) el.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+        }
+        if (swung) q("[data-tree] .root")?.animate([{ opacity: 0.1 }, { opacity: 1 }], { duration: 480, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+      }
+    }
+
+    async function set3d(on: boolean, announce: boolean) {
+      const btn = q("[data-view3d]");
+      // One load at a time: a second click while Three.js loads does nothing.
+      if (btn.getAttribute("aria-busy") === "true") return say(S.view3dLoading);
+      if (on && !scene) {
+        btn.setAttribute("aria-busy", "true");
+        btn.textContent = S.view3dLoading;
+        try {
+          const mod = await load3d();
+          const tree = q("[data-tree]");
+          const height = tree.offsetHeight + q("[data-disk]").offsetHeight + parseFloat(getComputedStyle(q("[data-disk]")).marginTop);
+          scene = mod.mount(q("[data-3d]"), { label: S.canvasLabel, describedBy: root.dataset.help, S, height: Math.max(320, Math.round(height)) });
+        } catch {
+          q("[data-no3d]").hidden = false;
+          on = false;
+        }
+        btn.removeAttribute("aria-busy");
+        btn.textContent = S.view3d;
+      }
+      is3d = on;
+      q("[data-3d]").hidden = !on;
+      // The help's room is kept in 2D (hidden, not removed): showing it does not move the page.
+      q("[data-help-text]").classList.toggle("off", !on);
+      q("[data-tree]").hidden = on;
+      q("[data-disk]").hidden = on;
+      btn.setAttribute("aria-pressed", String(on));
+      if (on && scene) scene.draw(pool, false);
+      if (announce) say(on ? S.say3d : S.say2d);
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el)) return;
+      if (el.dataset.leaf !== undefined) {
+        const w = canWrite(pool);
+        if (w) return say(whyLine(S, pool, w));
+        const k = Number(el.dataset.leaf);
+        const r = writeLeaf(pool, k);
+        pool = r.pool;
+        render(true);
+        say(writeLine(S, pool, k, r.rewritten));
+      } else if (el.dataset.act === "step") {
+        const s = canStep(pool);
+        if (s) return say(whyLine(S, pool, s));
+        const before = newestOnDisk(pool).root;
+        pool = step(pool);
+        render(true, newestOnDisk(pool).root !== before);
+        say(stepLine(S, pool));
+      } else if (el.dataset.act === "plug") {
+        if (pool.cut) return say(whyLine(S, pool, "cut"));
+        const before = newestOnDisk(pool).root;
+        pool = pullPlug(pool, landed);
+        // A cut in beat 3 after a write landed: the newest uberblock on the disk is the new one.
+        render(false, newestOnDisk(pool).root !== before);
+        say(plugLine(S, pool));
+      } else if (el.dataset.act === "import") {
+        if (canImport(pool)) return say(whyLine(S, pool, "notCut"));
+        const before = newestOnDisk(pool).root;
+        const r = importPool(pool);
+        pool = r.pool;
+        last = r.result;
+        render(true, newestOnDisk(pool).root !== before);
+        say(importLine(S, last));
+      } else if (el.dataset.act === "config") {
+        const c = canSetConfig(pool);
+        if (c) return say(whyLine(S, pool, c));
+        pool = { ...pool, configDirty: !pool.configDirty };
+        render(false);
+        say(pool.configDirty ? S.cfgOn : S.cfgOff);
+      } else if (el.dataset.landed !== undefined) {
+        landed = Number(el.dataset.landed);
+        render(false);
+        say(fill(S.sayLanded, { n: plural(S, landed, "write1", "writeN") }));
+      } else if (el.dataset.act === "restart") {
+        start();
+        render(false);
+        say(S.sayRestart);
+      } else if (el.hasAttribute("data-view3d")) {
+        if (no3d) return say(S[no3d]);
+        void set3d(!is3d, true);
+      }
+    });
+
+    start();
+    render(false);
+    for (const b of root.querySelectorAll<HTMLElement>(".tr-bar")) b.hidden = false;
+    // 2D first, always: 3D only on a press of the button (DECISIONS.md D14.1).
+    // Without WebGL or under reduced motion, the button stays, disabled, with its reason.
+    q("[data-view3d]").hidden = false;
+    if (no3d) {
+      q("[data-view3d]").setAttribute("aria-disabled", "true");
+      q("[data-view3d]").setAttribute("aria-describedby", q("[data-no3d]").id);
+      q("[data-no3d]").textContent = S[no3d];
+      q("[data-no3d]").hidden = false;
+    }
+  }
+</script>

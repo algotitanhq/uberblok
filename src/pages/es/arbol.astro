@@ -1,0 +1,401 @@
+---
+import Base from "../../layouts/Base.astro";
+import TreeLab from "../../components/TreeLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "es";
+const r = room("tree");
+const VL = "module/zfs/vdev_label.c";
+const L = {
+  rootbp: gh("include/sys/uberblock_impl.h", 128),
+  metaDnode: gh("include/sys/dmu_objset.h", 81),
+  blkptr: gh("include/sys/dnode.h", 257),
+  nlevels: gh("include/sys/dnode.h", 216),
+  indMax: gh("include/sys/dnode.h", 71),
+  bpSize: gh("include/sys/spa.h", 361, 362),
+  dsBp: gh("include/sys/dsl_dataset.h", 167),
+  dirty: gh("module/zfs/dbuf.c", 2552),
+  setdirty: gh("module/zfs/dbuf.c", 2583),
+  newAddr: gh("module/zfs/zio.c", 2102, 2104),
+  rootSet: gh("module/zfs/dsl_pool.c", 593),
+  flush: gh(VL, 2085, 2098),
+  even: gh(VL, 2109),
+  pair: gh(VL, 1946, 1952),
+  slot: gh(VL, 1782, 1784),
+  ubWrite: gh(VL, 1792, 1796),
+  odd: gh(VL, 2154),
+  ubFlush: gh(VL, 1826, 1854),
+  good: gh(VL, 1854),
+  labels: gh("include/sys/vdev_impl.h", 562),
+  boot: gh("include/sys/vdev_impl.h", 555, 560),
+  ring: gh("include/sys/vdev_impl.h", 482),
+  slotSize: gh("include/sys/vdev_impl.h", 491, 496),
+  load: gh(VL, 1570, 1588),
+  loadDone: gh(VL, 1547, 1553),
+  labelCksum: gh(VL, 197, 200),
+  readConfigCall: gh(VL, 1647),
+  dirtyList: gh(VL, 1962, 1984),
+  minVdevs: gh("include/sys/spa.h", 363),
+  firstTxg: gh("module/zfs/spa.c", 4750, 4751),
+  importUpdate: gh("module/zfs/spa.c", 5721, 5736),
+  configUpdate: gh("module/zfs/spa_config.c", 489, 491),
+  mmpTie: gh(VL, 1507, 1527),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="tree"
+  title="El árbol y el uberblock · Uberblok"
+  description="Cómo cambia de estado un pool ZFS sin fsck, leído en el código de OpenZFS: un árbol de punteros de bloque bajo un único uberblock, una escritura que copia su camino y una confirmación en cuatro fases que un corte de corriente no puede romper: interactivo, en 2D y en 3D."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Sala {roomNumber(r.id)}</p>
+      <h1>{r.title.es}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          ZFS no tiene fsck. Tras un fallo, el pool debe abrirse o bien en el estado anterior al último grupo de
+          transacciones, o bien en el estado posterior, nunca en una mezcla de ambos, aunque un solo txg escriba miles de
+          bloques en varios discos.
+        </p>
+        <p>
+          Así que todo el cambio de estado tiene que reducirse a una sola escritura pequeña que ha ocurrido o no. Y esa
+          escritura no debe poder destruir el estado anterior si se va la corriente a mitad de ella. El código lo consigue
+          con un árbol que cuelga de un único puntero, una regla según la cual un bloque vivo nunca se sobrescribe, y un
+          orden de escrituras al final de cada txg.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="tree">
+      <h2 id="tree"><span class="n">1</span> Todo cuelga de un puntero</h2>
+      <div class="prose">
+        <p>
+          El uberblock contiene un solo puntero de bloque, <a href={L.rootbp}><code>ub_rootbp</code></a>. Apunta al meta
+          objset del pool, el MOS, que empieza por un dnode, <a href={L.metaDnode}>el meta-dnode</a>, cuyos bloques son
+          bloques de dnodes. Un dnode es la raíz de un objeto: sus <a href={L.blkptr}><code>dn_blkptr[]</code></a> apuntan a
+          <a href={L.nlevels}><code>dn_nlevels</code></a> − 1 niveles de bloques indirectos, y el último nivel apunta a los
+          datos. Cada puntero es un <code>blkptr_t</code> de 128 bytes que contiene <a href={L.bpSize}>hasta tres
+          direcciones</a> y la suma de comprobación del bloque de debajo. Desde el uberblock hacia abajo, no hace falta nada
+          más para encontrar cada bloque del pool. La figura dibuja un archivo con tres niveles y cuatro bloques de datos bajo
+          el objset.
+        </p>
+      </div>
+      <TreeLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="write">
+      <h2 id="write"><span class="n">2</span> Una escritura copia todo su camino</h2>
+      <div class="prose">
+        <p>
+          Un bloque modificado nunca se escribe en su sitio: recibe <a href={L.newAddr}>una dirección nueva</a>. Su padre
+          contiene su puntero, dirección y suma de comprobación, así que el padre también cambia: <code>dbuf_dirty</code>
+          <a href={L.dirty}>marca al padre como modificado</a>, y así sucesivamente hasta el dnode, <a href={L.setdirty}>marcado
+          como modificado</a> en su bloque de dnodes, hasta el objset. Un bloque de datos modificado da una copia nueva de sí
+          mismo y de cada bloque de su camino hasta la raíz; todos los demás bloques los comparten el árbol antiguo y el
+          nuevo. El árbol antiguo queda intacto: el último uberblock sincronizado lo sigue alcanzando entero. En la figura,
+          escribe D2 y después D3 en el mismo txg: sus ancestros comunes se copian una sola vez. La
+          <a href={roomUrl(lang, "copy-on-write")}>sala siguiente</a> sigue las sumas de comprobación a lo largo de ese camino.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="beats">
+      <h2 id="beats"><span class="n">3</span> La confirmación, en cuatro fases</h2>
+      <div class="prose">
+        <p>
+          Al final de un txg, una vez que <code>spa_sync</code> ha escrito los bloques nuevos, <code>vdev_config_sync</code>
+          ejecuta cuatro pasos en un orden fijo. Primero <a href={L.flush}>vuelca la caché de escritura</a> de cada disco
+          escrito en el txg, para que el árbol nuevo esté en almacenamiento estable antes de que nada apunte a él. Después
+          escribe las <a href={L.even}>etiquetas pares</a>, L0 y L2, con la configuración nueva. Después el uberblock, en la
+          <a href={L.slot}>ranura <code>ub_txg</code> módulo el número de ranuras</a> de <a href={L.ubWrite}>las cuatro
+          etiquetas</a>, que el uberblock del txg anterior no ocupa: esa escritura es la confirmación, el momento en que el
+          puntero raíz pasa al árbol nuevo. Por último, las <a href={L.odd}>etiquetas impares</a>, L1 y L3. Cada disco lleva
+          <a href={L.labels}>cuatro etiquetas</a> de 256 KiB, dos al principio y dos al final, y cada etiqueta termina con un
+          <a href={L.ring}>anillo de 128 KiB</a> de ranuras de uberblock: 128 ranuras con los sectores de 512 bytes de la
+          figura, <a href={L.slotSize}>32 en discos con sectores de 4K</a>.
+        </p>
+        <p>
+          Las etiquetas solo se escriben para los <a href={L.dirtyList}>vdevs cuya configuración ha cambiado</a> en este
+          txg. En la mayoría de los txg no ha cambiado ninguna: las fases 2 y 4 no escriben nada, y solo el uberblock es
+          nuevo. Desactiva «La configuración de los vdevs cambia en este txg» y recorre de nuevo los pasos.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="plug">
+      <h2 id="plug"><span class="n">4</span> Desenchufar y después importar</h2>
+      <div class="prose">
+        <p>
+          Al importar, ZFS <a href={L.load}>lee cada ranura de cada etiqueta</a>. Una ranura solo cuenta si <a href={L.labelCksum}>su
+          suma de comprobación</a> y su número mágico son correctos, así que una escritura rota se ignora; entre las demás,
+          <a href={L.loadDone}>gana el <code>ub_txg</code> más alto</a>. Después se lee la configuración de <a href={L.readConfigCall}>la
+          etiqueta con la configuración más reciente que no sea más reciente que ese uberblock</a>. Desenchufa en cada paso
+          e importa. Antes de la fase 3 no existe ningún uberblock del txg nuevo: gana el antiguo, las etiquetas pares ya
+          escritas son más recientes que él y se descartan, las impares aún le corresponden. En cuanto ha llegado una copia
+          del uberblock nuevo, esta gana, y las etiquetas pares le corresponden. El árbol es el antiguo o el nuevo, nunca una
+          mezcla. Elige cuántas escrituras de uberblock llegan antes de un corte en la fase 3: cero da el caso (1) del
+          comentario del código, una o más el caso (2).
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">La idea, a tres profundidades</h2>
+
+      <div class="depth">
+        <h3>En una frase</h3>
+        <p class="lead prose">
+          Cada bloque del pool cuelga del único puntero del uberblock, una escritura copia su camino en lugar de
+          sobrescribirlo, y el uberblock nuevo va a una ranura que el antiguo no ocupa, una vez que el árbol nuevo está en el
+          disco: así, el pool es el árbol antiguo o el nuevo, sea cual sea el momento en que se va la corriente.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En un párrafo</h3>
+        <p class="prose">
+          <code>ub_rootbp</code> apunta al <code>objset_phys_t</code> del MOS; los bloques de su meta-dnode contienen
+          dnodes; los <code>dn_blkptr[]</code> de un dnode llevan, a través de <code>dn_nlevels</code> − 1 niveles de bloques
+          indirectos, hasta los datos. <code>dbuf_dirty</code> marca como modificado al padre de un bloque, recursivamente,
+          de modo que una hoja modificada da, en la sincronización, copias nuevas de la hoja y de todos sus ancestros, cada
+          una en una dirección nueva. <code>vdev_config_sync</code> vuelca entonces los discos escritos en el txg, escribe la
+          configuración de las etiquetas pares, escribe el uberblock en la ranura <code>ub_txg %
+          VDEV_UBERBLOCK_COUNT</code> de las cuatro etiquetas y lo vuelca, y escribe las etiquetas impares. Al importar,
+          <code>vdev_uberblock_load</code> se queda con el uberblock válido de txg más alto, y
+          <code>vdev_label_read_config</code> toma la etiqueta cuyo txg de configuración es el más alto que no lo supera. Un
+          corte antes de que llegue ningún uberblock nuevo deja el uberblock antiguo y las etiquetas impares; un corte después
+          de que llegue uno deja el uberblock nuevo y las etiquetas pares. Cualquiera de los dos pares es coherente.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En detalle</h3>
+        <div class="prose">
+          <p><strong>La cima del árbol.</strong> El uberblock nombra un txg y un puntero de bloque.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="include/sys/uberblock_impl.h"
+          from={122}
+          to={139}
+          symbol="struct uberblock"
+          notes={[
+            { from: 125, text: "<code>ub_txg</code>: el txg que este uberblock confirma. Al importar, gana el más alto de los válidos." },
+            { from: 127, text: "<code>ub_timestamp</code>: el criterio de desempate entre dos uberblocks del mismo txg." },
+            { from: 128, text: `<code>ub_rootbp</code>: el único puntero. <code>dsl_pool_sync_mos</code> <a href="${L.rootSet}">lo fija</a> una vez escrito el MOS.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="include/sys/dmu_objset.h"
+          from={80}
+          to={95}
+          symbol="objset_phys_t"
+          notes={[
+            { from: 81, text: `Un objset empieza por un dnode entero, el meta-dnode. Sus bloques son los bloques de dnodes del objset: el objeto <var>n</var> es el dnode <var>n</var>. El objset propio de un sistema de archivos cuelga del MOS de la misma manera, por el <a href="${L.dsBp}"><code>ds_bp</code></a> de su dataset.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="include/sys/dnode.h"
+          from={213}
+          to={229}
+          symbol="dnode_phys_t"
+          notes={[
+            { from: 215, text: `El tamaño de los bloques indirectos del objeto, <a href="${L.indMax}">128 KiB como máximo</a>: 1024 punteros de bloque de 128 bytes.` },
+            { from: 216, text: "La altura del árbol del objeto; 1 cuando el dnode apunta directamente a los datos." },
+            { from: 217, text: `Cuántos de los punteros raíz, <a href="${L.blkptr}"><code>dn_blkptr[]</code></a>, se usan.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Una escritura sube hasta la raíz.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/dbuf.c"
+          from={2537}
+          to={2554}
+          symbol="dbuf_dirty"
+          notes={[
+            { from: 2537, text: "Un bloque por debajo del nivel superior de su objeto tiene un bloque indirecto padre." },
+            { from: 2542, to: 2545, text: "El padre está en el nivel + 1, bloque número <code>blkid >> epbs</code>, con 2<sup>epbs</sup> punteros por bloque indirecto (1024 para 128 KiB). La figura usa 2 para no crecer demasiado." },
+            { from: 2552, text: `Marcar un bloque como modificado marca a su padre, y así hacia arriba; el nivel superior lo contiene el dnode, <a href="${L.setdirty}">marcado a su vez</a>. Cada bloque modificado se escribe en <a href="${L.newAddr}">un lugar nuevo</a> en la sincronización.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Las cuatro fases.</strong> Primero el volcado.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2085}
+          to={2098}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2085, to: 2090, text: "La razón del volcado, en palabras del código: los bloques de este txg llegan a almacenamiento estable «before any uberblock that references them», antes de cualquier uberblock que los referencie." },
+            { from: 2093, to: 2098, text: "Cada vdev escrito en este txg se vuelca; la espera los cubre a todos." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2100}
+          to={2139}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2100, to: 2108, text: "La fase 2, y lo que significa un corte durante ella: las etiquetas pares más recientes que cualquier uberblock no son válidas, las impares siguen siéndolo." },
+            { from: 2109, text: `Las etiquetas pares: <code>vdev_label_sync</code> escribe las etiquetas <code>l</code> y <code>l + 2</code>, <a href="${L.pair}">L0 y L2</a>.` },
+            { from: 2118, to: 2131, text: "La fase 3, y los dos casos de un corte durante ella: no llegó ningún uberblock nuevo, o llegó al menos uno. La figura reproduce los dos." },
+            { from: 2133, text: `Los uberblocks; <code>vdev_uberblock_sync_list</code> <a href="${L.ubFlush}">los vuelca</a> después, y tiene éxito si <a href="${L.good}">al menos una escritura</a> lo tuvo.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={1768}
+          to={1797}
+          symbol="vdev_uberblock_sync"
+          notes={[
+            { from: 1768, to: 1781, text: "Por qué la ranura debe ser distinta de la actual: una sobrescritura rota del uberblock confirmado podría perderlo. El comentario trata de la expansión de RAID-Z, que reutiliza un txg; la regla de la ranura, más abajo, sirve para todos los txg." },
+            { from: 1782, to: 1784, text: "La ranura: <code>ub_txg</code> módulo el número de ranuras (una menos con multihost). Los txg consecutivos ocupan ranuras consecutivas; el txg siguiente nunca cae en la ranura del anterior." },
+            { from: 1792, to: 1796, text: "La misma ranura en las cuatro etiquetas del disco." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2144}
+          to={2161}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2145, to: 2152, text: "La fase 4: las etiquetas impares, al final. Un corte aquí deja las etiquetas pares y los uberblocks nuevos, que bastan." },
+            { from: 2154, text: "La misma función que en la fase 2, con <code>l = 1</code>: L1 y L3." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Qué discos reciben etiquetas y uberblocks: <a href={L.dirtyList}>solo los vdevs de la lista de modificados</a>
+            reciben etiquetas; con esa lista vacía, el uberblock va a <a href={L.minVdevs}>tres</a> vdevs de primer nivel como
+            máximo.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/spa.c"
+          from={10792}
+          to={10819}
+          symbol="spa_sync_rewrite_vdev_config"
+          notes={[
+            { from: 10792, to: 10815, text: "Sin cambio de configuración: tres vdevs de primer nivel como máximo, a partir de uno elegido al azar, saltando los vdevs log y los vdevs sin metaslabs. Un pool de un solo disco recibe cada uberblock en ese disco." },
+            { from: 10816, to: 10818, text: "Un cambio de configuración: cada vdev de primer nivel." },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Dónde están las etiquetas.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={158}
+          to={170}
+          symbol="vdev_label_offset"
+          notes={[
+            { from: 165, to: 166, text: "El desplazamiento cae dentro de una etiqueta, y el tamaño del dispositivo es múltiplo de una etiqueta." },
+            { from: 168, to: 169, text: `Las etiquetas 0 y 1 al principio, 2 y 3 en los últimos 512 KiB. En el disco de 1 GiB de la figura: 0, 256 KiB, 1023,5 MiB y 1023,75 MiB. Tras las dos etiquetas del principio viene <a href="${L.boot}">una zona de arranque de 3,5 MiB</a>.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>La importación.</strong> Se lee cada ranura de cada etiqueta, y <a href={L.loadDone}>una válida se conserva
+            si supera a la mejor hasta el momento</a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={1495}
+          to={1505}
+          symbol="vdev_uberblock_compare"
+          notes={[
+            { from: 1498, text: "Gana el txg más alto." },
+            { from: 1503, text: `Con el mismo txg, la marca de tiempo más reciente; después la <a href="${L.mmpTie}">secuencia multihost</a>, que la figura deja fuera.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={832}
+          to={863}
+          symbol="vdev_label_read_config"
+          notes={[
+            { from: 835, to: 837, text: `Una etiqueta solo cuenta si su lectura tiene éxito, y la lectura comprueba <a href="${L.labelCksum}">la suma de comprobación propia de la etiqueta</a>: una etiqueta rota se ignora.` },
+            { from: 852, to: 856, text: `La etiqueta con el txg de configuración más alto que no supere <code>txg</code>, el del uberblock ganador (<a href="${L.readConfigCall}">la llamada</a>). Así se descartan las etiquetas pares de un txg que no llegó a confirmarse.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Tras la importación, el txg siguiente es <a href={L.firstTxg}>el del ganador + 1</a>: cuando ganó el árbol antiguo,
+            el txg perdido se vuelve a escribir, y su uberblock va a la misma ranura, encima de la rota. La importación también
+            <a href={L.importUpdate}>pide una actualización de la configuración</a>, que <a href={L.configUpdate}>marca cada
+            vdev como modificado</a> para ese txg: este reescribe las cuatro etiquetas, rotas incluidas, cambie lo que cambie
+            además.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">Lo que la figura deja fuera</h2>
+      <p class="prose muted">
+        Un solo dataset y muy pocos bloques: dos punteros por bloque indirecto en lugar de hasta 1024, y los niveles
+        indirectos propios del meta-dnode y el paso del MOS al objset de un sistema de archivos, reducidos a un solo bloque de
+        dnodes. Un solo disco, así que cada uberblock y cada etiqueta llegan a él; sus 128 ranuras son las de sectores de
+        512 bytes. En el código, las escrituras de una misma fase se emiten juntas; la figura las hace llegar en orden (L0 y
+        después L2, L1 y después L3, los uberblocks de L0 a L3) y rompe la que está en curso al desenchufar. El contenido de
+        la configuración, el reintento con <code>ZIO_FLAG_IO_RETRY</code>, multihost, la expansión de RAID-Z, varias pasadas
+        de sincronización en un txg y la liberación de los bloques antiguos (la <a href={roomUrl(lang, "snapshots")}>sala de
+        las instantáneas</a>) no se muestran. La vista 3D dibuja el mismo estado que la 2D.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="tree" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

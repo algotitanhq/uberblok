@@ -1,0 +1,115 @@
+---
+// The dedup figure of the compression, dedup and encryption room: the visitor
+// writes blocks of three contents, one per txg, and can put the dedup table
+// over its quota; each write goes through zio_ddt_write's lookup and takes
+// its miss, hit or over-quota path. src/lib/transforms.ts decides every
+// outcome, src/lib/transforms-view.ts draws it. Shown without JavaScript:
+// A, B, then A again. Refs: ANALYSIS.md, room "Compression, dedup,
+// encryption", excerpts 2, 6 to 10; simplifications: DECISIONS.md D10.2.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { dedupStart, dedupWrite, CONTENTS } from "../lib/transforms";
+import { dedupView, dedupDescribe, type TrStrings } from "../lib/transforms-view";
+import { TRANSFORMS_STRINGS } from "../lib/transforms-strings";
+import "../styles/transforms.css";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const Z = "module/zfs/zio.c";
+const refs = {
+  lookup: gh(Z, 3816, 3823),
+  quota: gh("module/zfs/ddt.c", 1374, 1387),
+  hit: gh(Z, 3958, 3987),
+  miss: gh(Z, 4156, 4167),
+  overquota: gh(Z, 3824, 3832),
+};
+const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const t = UI[lang];
+const s0 = ["A", "B", "A"].reduce((s, c) => dedupWrite(s, c, false), dedupStart());
+const label: Record<string, string> = { A: S.writeA, B: S.writeB, C: S.writeC };
+---
+
+<figure class="dd" data-dedup data-strings={JSON.stringify(S)} aria-label={S.dFigure}>
+  <div class="tr-bar" hidden>
+    <div class="buttons" role="group" aria-label={S.writeLabel}>
+      <span class="glabel">{S.writeLabel}</span>
+      {CONTENTS.map((c) => <button class="btn" type="button" data-write={c}><span class={`ct ct-${c}`} aria-hidden="true">{c}</span> {label[c]}</button>)}
+    </div>
+    <div class="buttons">
+      <button class="btn btn--danger" type="button" data-quota aria-pressed="false">{S.quota}</button>
+      <button class="btn" type="button" data-act="restart">{S.restart}</button>
+    </div>
+  </div>
+  <div data-view set:html={dedupView(S, s0)} />
+  <p class="tr-now" data-now aria-hidden="true" hidden></p>
+  <p class="visually-hidden" data-live aria-live="polite"></p>
+  <noscript><p class="muted">{S.dNoScript}</p></noscript>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={dedupDescribe(S, s0)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, reducedMotion } from "../lib/svg";
+  import { dedupStart, dedupWrite } from "../lib/transforms";
+  import { dedupView, dedupDescribe, dedupLine, spoken, type TrStrings } from "../lib/transforms-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-dedup]")) {
+    const S = strings<TrStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const start = () => ["A", "B", "A"].reduce((s, c) => dedupWrite(s, c, false), dedupStart());
+    let s = start();
+    let quota = false;
+
+    /**
+     * The visible line, and one announcement per action: the live region is
+     * emptied, then filled on the next frame, so that the same text twice is
+     * announced twice; it reads the line without its code links.
+     */
+    function say(html: string) {
+      const el = q("[data-now]");
+      el.hidden = false;
+      el.innerHTML = html;
+      const live = q("[data-live]");
+      live.textContent = "";
+      requestAnimationFrame(() => (live.textContent = spoken(html)));
+    }
+
+    function render() {
+      q("[data-view]").innerHTML = dedupView(S, s);
+      q("[data-describe]").innerHTML = dedupDescribe(S, s);
+      q("[data-quota]").setAttribute("aria-pressed", String(quota));
+      if (!reducedMotion()) {
+        for (const el of root.querySelectorAll<HTMLElement>("[data-view] .cur, [data-view] .path li"))
+          el.animate([{ opacity: 0.2, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: 300, delay: el.matches(".path li") ? Number([...el.parentElement!.children].indexOf(el)) * 180 : 360, fill: "backwards", easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+      }
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el)) return;
+      if (el.dataset.write) {
+        s = dedupWrite(s, el.dataset.write, quota);
+        render();
+        say(dedupLine(S, s.steps[s.steps.length - 1]));
+      } else if (el.hasAttribute("data-quota")) {
+        quota = !quota;
+        render();
+        say(quota ? S.quotaOnLine : S.quotaOffLine);
+      } else if (el.dataset.act === "restart") {
+        s = dedupStart();
+        quota = false;
+        render();
+        say(S.restartLine);
+      }
+    });
+
+    render();
+    q(".tr-bar").hidden = false;
+  }
+</script>

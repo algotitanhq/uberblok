@@ -1,0 +1,432 @@
+---
+import Base from "../../layouts/Base.astro";
+import SendLab from "../../components/SendLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "es";
+const r = room("send-receive");
+const TR = "module/zfs/dmu_traverse.c";
+const SEND = "module/zfs/dmu_send.c";
+const RECV = "module/zfs/dmu_recv.c";
+const IOC = "include/sys/zfs_ioctl.h";
+const L = {
+  record: gh(IOC, 246, 259),
+  types: gh(IOC, 247, 252),
+  begin: gh(IOC, 235, 244),
+  magic: gh(IOC, 171),
+  overlay: gh(IOC, 374, 387),
+  size: gh(SEND, 266, 267),
+  logical: gh(TR, 80, 81),
+  getBirth: gh(TR, 78, 84),
+  birthComment: gh("include/sys/spa.h", 483, 488),
+  minTxg: gh(TR, 653),
+  holesDefault: gh(TR, 44),
+  fromtxg: gh(SEND, 2370),
+  flags: gh(SEND, 2088),
+  doDump: gh(SEND, 2568, 2574),
+  dnodeLoop: gh(TR, 402, 404),
+  objectRange: gh(SEND, 894, 898),
+  dumpDnode: gh(SEND, 732, 742),
+  bonus: gh(SEND, 793),
+  freeEnd: gh(SEND, 796, 799),
+  dumpFree: gh(SEND, 367, 403),
+  freeAtOnce: gh(SEND, 396, 398),
+  writeFlush: gh(SEND, 482, 486),
+  freeobjMerge: gh(SEND, 683, 698),
+  maxobj: gh(SEND, 653, 666),
+  holeMeta: gh(SEND, 1012, 1017),
+  holeFile: gh(SEND, 1018, 1034),
+  fullFrees: gh(SEND, 326, 328),
+  payloadSum: gh(SEND, 295, 298),
+  end: gh(SEND, 2619, 2626),
+  guids: gh(SEND, 2049, 2050),
+  enodev: gh(RECV, 463, 479),
+  recvBegin: gh(RECV, 1304, 1306),
+  recvPayload: gh(RECV, 2813),
+  queue: gh(RECV, 3500, 3513),
+  endCheck: gh(RECV, 3000, 3007),
+  cleanup: gh(RECV, 3582, 3588),
+  writer: gh(RECV, 3285, 3294),
+  recvObject: gh(RECV, 1968, 1989),
+  recvFreeobjects: gh(RECV, 2208, 2215),
+  recvFree: gh(RECV, 2666, 2684),
+  recvFreeCase: gh(RECV, 3235, 3240),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="send-receive"
+  title="send / receive · Uberblok"
+  description="Cómo zfs send encuentra la diferencia entre dos instantáneas solo a partir de los txg de nacimiento, saltándose enteros los subárboles sin cambios, y la escribe como un flujo que se comprueba a sí mismo: interactivo, con el código de OpenZFS."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Sala {roomNumber(r.id)}</p>
+      <h1>{r.title.es}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          Mantener una copia de un sistema de archivos en otra máquina parece sencillo: comparar los dos lados y copiar lo
+          que difiere. Pero comparar significa leer. Para encontrar los pocos bloques que cambiaron desde ayer, una
+          herramienta que trabaja archivo por archivo lee, o como mínimo enumera, todos los archivos de ambos lados, cada
+          vez, y solo puede ver un cambio a través del contenido que compara o de las fechas y tamaños en los que confía.
+        </p>
+        <p>
+          ZFS no compara. Cada puntero de bloque guarda el txg en el que nació su bloque, y una instantánea tomada en el
+          txg F no contiene ningún bloque nacido después de F. Así que la diferencia entre dos instantáneas son los bloques
+          de la más reciente nacidos después del txg de la más antigua. La copia en escritura reescribe todos los bloques
+          por encima de uno modificado, así que un subárbol con una raíz antigua no ha cambiado por debajo: una sola
+          comparación en su cima lo salta entero, sin leerlo. Lo que encuentra el recorrido se convierte en un
+          <em>flujo</em> de registros, cada uno salvo el primero con una suma de comprobación de todo lo anterior, que el
+          lado receptor comprueba registro a registro, antes de aplicar cada uno.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="lab">
+      <h2 id="lab"><span class="n">1</span> Enviar @s4, desde la instantánea que elijas</h2>
+      <div class="prose">
+        <p>
+          <code>tank/fs</code> tiene cuatro instantáneas, una por cada txg de su historia. La figura envía la última,
+          <code>@s4</code>: su árbol, cada puntero de bloque con su txg de nacimiento lógico. Elige la instantánea de
+          origen que el receptor ya tiene, o ninguna para un flujo completo, y sigue el envío paso a paso: en cada
+          puntero de bloque se compara el nacimiento con F, el txg de la instantánea de origen, los registros caen en el
+          flujo con sus sumas de comprobación, y el receptor los comprueba y los aplica hasta que sus archivos son los de
+          <code>@s4</code>. «Invertir un bit» daña el flujo por el camino.
+        </p>
+      </div>
+      <SendLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">La idea, a tres profundidades</h2>
+
+      <div class="depth">
+        <h3>En una frase</h3>
+        <p class="lead prose">
+          Un envío incremental recorre el árbol de la instantánea más reciente y se salta cada puntero de bloque nacido en
+          el txg de la instantánea más antigua o antes, con todo lo que tiene por debajo, y escribe lo que queda como un
+          flujo de registros cuya suma de comprobación acumulada verifica el receptor antes de reproducirlos.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En un párrafo</h3>
+        <p class="prose">
+          <code>zfs send -i @from @to</code> recorre el árbol de <code>@to</code> con una cota inferior, F, el txg en el que
+          se creó <code>@from</code>. Un puntero de bloque nacido en F o antes ya estaba en <code>@from</code>, y también
+          todo el subárbol que tiene debajo, ya que la <a href={roomUrl(lang, "copy-on-write")}>copia en escritura</a> da un
+          nacimiento nuevo a todos los bloques por encima de un cambio: el recorrido vuelve sin leerlo. Todo lo que sí
+          visita se convierte en registros: un OBJECT por cada dnode que encuentra, un WRITE por cada bloque de datos, un
+          FREE por cada hueco, FREEOBJECTS por cada ranura de dnode vacía. El flujo empieza con BEGIN, que nombra las dos
+          instantáneas por su GUID, y termina con END. Cada registro salvo BEGIN lleva la suma fletcher-4 de todos los
+          bytes del flujo hasta esa suma; el receptor lleva la misma suma y rechaza el flujo en la primera cabecera que no
+          coincide, antes de aplicar el registro al que sigue. Sin instantánea de origen, F vale 0, se visitan todos los
+          bloques, y el flujo reconstruye el sistema de archivos entero.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En detalle</h3>
+        <div class="prose">
+          <p>
+            <strong>Un flujo de registros.</strong> Un flujo de send es una secuencia de <a href={L.record}><code>dmu_replay_record_t</code></a>,
+            cada uno una cabecera de 312 bytes con <a href={L.types}>uno de once tipos</a>, a veces seguida de una carga
+            útil: los datos de un WRITE siguen a su cabecera. BEGIN lleva el número mágico <a href={L.magic}><code>0x2F5bacbacULL</code></a>,
+            y <a href={L.begin}>el GUID de la instantánea enviada y el de aquella desde la que parte</a>.
+          </p>
+          <p><strong>La cota.</strong> El recorrido que alimenta un envío empieza aquí.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={1203}
+          to={1221}
+          symbol="send_traverse_thread"
+          notes={[
+            {
+              from: 1211,
+              to: 1213,
+              text: `El dataset se recorre desde <code>fromtxg</code>, el <a href="${L.fromtxg}">txg de creación</a> de la instantánea de origen, 0 para un flujo completo. <code>TRAVERSE_LOGICAL</code> se suma a los <a href="${L.flags}">indicadores del envío</a>, entre ellos <code>TRAVERSE_PRE</code>: la función de retorno de un bloque se ejecuta antes que sus hijos.`,
+            },
+            {
+              from: 1217,
+              to: 1218,
+              text: `Tras el último intervalo va una marca de fin de flujo. Los intervalos que <code>send_cb</code> pone en cola llegan al hilo principal a través de más colas, en orden, y <a href="${L.doDump}">allí se convierten en registros</a>.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>La prueba que salta un subárbol.</strong> Todos los punteros de bloque de la instantánea pasan por aquí.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={TR}
+          from={249}
+          to={279}
+          symbol="traverse_visitbp"
+          notes={[
+            {
+              from: 249,
+              to: 276,
+              text: `Un hueco con fecha de nacimiento 0 nunca se escribió, o se creó antes de la funcionalidad <code>hole_birth</code>. Estas líneas lo saltarían en algunos casos, pero solo cuando <code>send_holes_without_birth_time</code> vale 0, y <a href="${L.holesDefault}">vale 1 por defecto</a>: esos huecos se visitan. La figura no tiene ninguno; un hueco abierto en b lleva el txg de la liberación, y pasa por la prueba de abajo.`,
+            },
+            {
+              from: 277,
+              to: 278,
+              text: `La regla. <code>td_min_txg</code> es <a href="${L.minTxg}">la cota</a>, F. Si nació en F o antes, el bloque está en la instantánea de origen: la función vuelve antes de leerlo o de llamar a la función de retorno, así que no se alcanza nada de lo que tiene debajo. En la figura la ficha pasa a borde discontinuo y su subárbol se atenúa.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>El nacimiento lógico.</strong> <code>get_birth_time</code> <a href={L.getBirth}>devuelve el nacimiento lógico</a>
+            cuando <code>TRAVERSE_LOGICAL</code> está activado, como en un envío. Un puntero de bloque tiene dos
+            nacimientos, y <a href={L.birthComment}>el comentario que los define</a> dice que el físico puede ser menor que
+            el lógico con la deduplicación y la clonación de bloques, y mayor con los bloques reasignados y reescritos, y que
+            el lógico es el que sirve para la replicación incremental. Send <a href={L.logical}>compara el lógico</a>, el txg
+            en el que el usuario cambió los datos: un bloque deduplicado o clonado sobre una copia más antigua se envía igual,
+            ya que el usuario lo escribió después de F, y un bloque que solo se reescribió o se reasignó en disco no se
+            vuelve a enviar.
+          </p>
+          <p><strong>Cada dnode de un bloque de dnodes.</strong> Cuando se visita un bloque de dnodes, cada uno de sus dnodes <a href={L.dnodeLoop}>se entrega a esta función</a>.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={TR}
+          from={534}
+          to={550}
+          symbol="traverse_dnode"
+          notes={[
+            {
+              from: 534,
+              to: 543,
+              text: "La función de retorno se ejecuta para el propio dnode. Aquí no se prueba ningún nacimiento: todos los dnodes de un bloque de dnodes visitado llegan a <code>send_cb</code>, hayan cambiado o no.",
+            },
+            {
+              from: 545,
+              to: 550,
+              text: "Después cada uno de los punteros de bloque del dnode pasa por <code>traverse_visitbp</code>, y por su prueba.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Por eso, al enviar <code>@s4</code> desde <code>@s3</code>, el flujo contiene registros OBJECT para a y b, cuyos
+            datos no cambiaron: borrar c reescribió el bloque de dnodes que comparten con él. Sus bloques de datos se
+            siguen saltando, un nivel más abajo.
+          </p>
+          <p><strong>De los bloques visitados a los registros.</strong> La función de retorno decide lo que produce cada visita.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={1098}
+          to={1120}
+          symbol="send_cb"
+          notes={[
+            {
+              from: 1098,
+              to: 1108,
+              text: "Un dnode se convierte en un intervalo OBJECT, salvo el meta-dnode, el objeto 0.",
+            },
+            {
+              from: 1109,
+              to: 1116,
+              text: `Un bloque de dnodes se convierte en un OBJECT_RANGE, que <a href="${L.objectRange}">solo escribe un flujo raw</a>.`,
+            },
+            {
+              from: 1117,
+              to: 1120,
+              text: "El bloque del objset y cada bloque indirecto que no es un hueco no producen ningún registro: solo se leen para llegar a lo que tienen debajo.",
+            },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={1130}
+          to={1146}
+          symbol="send_cb"
+          notes={[
+            {
+              from: 1130,
+              to: 1135,
+              text: "Nada más allá del final del objeto.",
+            },
+            {
+              from: 1140,
+              to: 1146,
+              text: `Lo que queda es un bloque de datos (un WRITE) o un hueco (un FREE de <a href="${L.holeFile}">su intervalo</a>; un hueco entre los bloques de dnodes <a href="${L.holeMeta}">libera objetos</a>). REDACT pertenece a los envíos redactados.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Un intervalo OBJECT va a <a href={L.dumpDnode}><code>dump_dnode</code></a>. Una ranura de dnode sin ningún objeto
+            se convierte en FREEOBJECTS; un archivo se convierte en OBJECT, con su búfer bonus como
+            <a href={L.bonus}>carga útil</a>, seguido de inmediato por <a href={L.freeEnd}>un FREE desde el final del
+            archivo hasta <code>DMU_OBJECT_END</code></a>, para que un receptor cuya copia era más larga la recorte.
+            <a href={L.dumpFree}><code>dump_free</code></a> mantiene un FREE pendiente y fusiona en él el siguiente cuando lo
+            continúa, y por eso los dos huecos de b viajan como un solo FREE; un FREE hasta el final
+            <a href={L.freeAtOnce}>se escribe de inmediato</a>, y cualquier otro registro <a href={L.writeFlush}>escribe
+            primero el pendiente</a>. Los FREEOBJECTS <a href={L.freeobjMerge}>se fusionan del mismo modo</a>, y los objetos
+            más allá del último bloque de dnodes <a href={L.maxobj}>se descartan</a>. Un flujo completo también lleva
+            liberaciones, <a href={L.fullFrees}>para poder recibirse como un clon</a>.
+          </p>
+          <p><strong>La suma de comprobación que recorre el flujo.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={257}
+          to={283}
+          symbol="dump_record"
+          notes={[
+            {
+              from: 268,
+              to: 270,
+              text: "La suma fletcher-4 acumulada continúa sobre el registro, hasta sus últimos 32 bytes.",
+            },
+            {
+              from: 271,
+              to: 277,
+              text: `Salvo para BEGIN, ese valor va en esos 32 bytes, <code>drr_checksum</code>, <a href="${L.overlay}">superpuestos a todos los tipos de registro</a>.`,
+            },
+            {
+              from: 281,
+              to: 283,
+              text: `Después se suman los 32 bytes, y <a href="${L.payloadSum}">la carga útil</a> que los sigue. Así, el <code>drr_checksum</code> de cada registro es la fletcher-4 de todos los bytes del flujo anteriores a él, incluida su propia cabecera hasta la suma. La figura muestra los 32 bits bajos de su última palabra.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            END lleva una más: <a href={L.end}><code>drr_end.drr_checksum</code></a>, la suma de comprobación de todo lo
+            anterior.
+          </p>
+          <p><strong>El lado receptor comprueba antes de aplicar.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={RECV}
+          from={2843}
+          to={2868}
+          symbol="receive_read_payload_and_next_header"
+          notes={[
+            {
+              from: 2843,
+              to: 2851,
+              text: `El receptor lleva su propia suma: <a href="${L.recvBegin}">empieza sobre todo el registro BEGIN</a>, continúa <a href="${L.recvPayload}">sobre cada carga útil</a>, y aquí sobre la cabecera siguiente, hasta su suma.`,
+            },
+            {
+              from: 2861,
+              to: 2866,
+              text: "Una cabecera cuyo <code>drr_checksum</code> no coincide detiene la recepción: <code>ECKSUM</code>. Una suma de comprobación formada solo por ceros no se comprueba.",
+            },
+            {
+              from: 2868,
+              text: "Después se suma el valor almacenado, como hizo el emisor.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Esto se ejecuta cuando se han leído la carga útil de un registro y la cabecera que lo sigue, y solo entonces el
+            registro <a href={L.queue}>se pone en la cola del escritor</a>: un registro cuyos bytes se dañaron nunca se
+            aplica. END se comprueba una vez más, <a href={L.endCheck}>su <code>drr_end.drr_checksum</code> contra la suma
+            anterior a él</a>. Ante un error, <a href={L.cleanup}>lo que la recepción creó se destruye</a>: el receptor
+            sigue teniendo la instantánea de origen. Antes de todo esto, el BEGIN de un flujo incremental
+            <a href={L.guids}>nombra la instantánea de origen por su GUID</a>, y el receptor <a href={L.enodev}>lo rechaza
+            (<code>ENODEV</code>) a menos que tenga una instantánea con ese GUID</a>.
+          </p>
+          <p><strong>Registros despachados por tipo.</strong> El hilo escritor <a href={L.writer}>saca cada registro de la cola</a> y lo entrega aquí.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={RECV}
+          from={3188}
+          to={3213}
+          symbol="receive_process_record"
+          notes={[
+            {
+              from: 3189,
+              to: 3196,
+              text: `OBJECT va a <code>receive_object</code>, que <a href="${L.recvObject}">crea el objeto, o conserva uno que ya existe</a>.`,
+            },
+            {
+              from: 3197,
+              to: 3203,
+              text: `FREEOBJECTS va a <code>receive_freeobjects</code>, que <a href="${L.recvFreeobjects}">libera cada objeto del intervalo que existe</a>: c desaparece.`,
+            },
+            {
+              from: 3204,
+              to: 3206,
+              text: `WRITE va a <code>receive_process_write_record</code>. FREE, <a href="${L.recvFreeCase}">más abajo</a>, va a <code>receive_free</code>, que <a href="${L.recvFree}">libera el intervalo en el objeto</a>.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>Con qué termina el receptor.</strong> Partiendo de los archivos de la instantánea de origen, los
+            registros del flujo devuelven exactamente <code>@s4</code>: la figura compara los dos al final, para cada
+            instantánea de origen, y sus pruebas lo contrastan con los registros calculados a mano de cada flujo.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">Lo que la figura deja fuera</h2>
+      <p class="prose muted">
+        La figura es pequeña: archivos de cuatro bloques de 512 bytes bajo un solo bloque indirecto, bloques de dnodes de
+        cuatro dnodes (un bloque de dnodes real de 16 KiB contiene 32), un meta-dnode dibujado con sus dos bloques de
+        dnodes, sin búfer bonus. El envío se ejecuta como una sola secuencia, mientras que el código une varios hilos
+        (recorrido, fusión, lector, el hilo principal) mediante colas que conservan el orden, y el receptor empieza una vez
+        completo el flujo, mientras que el código recibe a través de una tubería a medida que se escribe el flujo. Las
+        cabeceras de los registros siguen la estructura de <code>dmu_replay_record_t</code>, con solo los campos que usa la
+        figura rellenados. No se muestran los flujos redactados, raw (cifrados), comprimidos y reanudables, los datos
+        integrados, WRITE_BYREF ni los bloques spill; tampoco cifras de rendimiento, que dependen de los discos y de la red,
+        no de este código.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="send-receive" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

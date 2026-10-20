@@ -1,0 +1,280 @@
+---
+// The History wing's timeline (DECISIONS.md D2.1): eras, then dated milestones,
+// each sentence carrying footnotes to SOURCES.md. Plain HTML and CSS, no JS.
+import { ERAS, dateLabel } from "../lib/history";
+import { CITE, source } from "../lib/sources";
+import type { Lang } from "../lib/rooms";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const t = {
+  en: { eras: "Eras", source: "Source", sources: "Sources", backTo: "Back to" },
+  fr: { eras: "Époques", source: "Source", sources: "Sources", backTo: "Retour à" },
+  es: { eras: "Épocas", source: "Fuente", sources: "Fuentes", backTo: "Volver a" },
+}[lang];
+
+// Footnote numbers follow the first citation in reading order.
+const number = new Map<string, number>();
+const citedBy = new Map<string, { id: string; label: string }[]>();
+for (const era of ERAS)
+  for (const m of era.milestones)
+    for (const [, id] of m.text[lang].matchAll(CITE)) {
+      source(id);
+      if (!number.has(id)) number.set(id, number.size + 1);
+      const list = citedBy.get(id) ?? [];
+      if (!list.some((x) => x.id === m.id)) list.push({ id: m.id, label: m.title[lang] });
+      citedBy.set(id, list);
+    }
+
+const cite = (html: string) =>
+  html.replace(CITE, (_, id: string) => {
+    const n = number.get(id)!;
+    return `<a class="fn" href="#src-${id}" data-source="${id}" aria-label="${t.source} ${n}">${n}</a>`;
+  });
+---
+
+<nav class="eras" aria-labelledby="eras-title">
+  <h2 id="eras-title" class="visually-hidden">{t.eras}</h2>
+  <ol>
+    {
+      ERAS.map((era) => (
+        <li>
+          <a href={`#${era.id}`}>
+            <span class="span">{era.span}</span> {era.title[lang]}
+          </a>
+        </li>
+      ))
+    }
+  </ol>
+</nav>
+
+{
+  ERAS.map((era) => (
+    <section class="era" aria-labelledby={era.id}>
+      <h2 id={era.id}>
+        <span class="span">{era.span}</span> {era.title[lang]}
+      </h2>
+      <ol class="milestones">
+        {era.milestones.map((m) => (
+          <li class="milestone" id={m.id} data-milestone={m.id}>
+            <time datetime={m.date}>{dateLabel(m.date, lang)}</time>
+            <div class="body">
+              <h3>{m.title[lang]}</h3>
+              <div class="text" set:html={cite(m.text[lang])} />
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  ))
+}
+
+<section class="section sources" aria-labelledby="sources">
+  <h2 id="sources">{t.sources}</h2>
+  <slot />
+  <ol class="biblio">
+    {
+      [...number].map(([id, n]) => (
+        <li id={`src-${id}`} data-entry={id}>
+          <span class="n">{n}</span>
+          <span class="ref">
+            <span set:html={source(id).html} />
+            <span class="back">
+              {citedBy.get(id)!.map((c) => (
+                <a href={`#${c.id}`} aria-label={`${t.backTo} ${c.label}`}>
+                  ↑
+                </a>
+              ))}
+            </span>
+          </span>
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<style>
+  .eras ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .eras a {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-height: 44px;
+    padding: 0.55em 1em;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    text-decoration: none;
+    font-size: var(--step--1);
+  }
+  .eras a:hover {
+    border-color: var(--accent);
+  }
+  .span {
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+  .era {
+    margin-top: var(--space-8);
+  }
+  .era h2 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 var(--space-4);
+  }
+  .era h2 .span {
+    font-size: var(--step-1);
+    font-family: var(--font-caption);
+    font-style: italic;
+    letter-spacing: 0;
+  }
+  .milestones {
+    list-style: none;
+    margin: var(--space-6) 0 0;
+    padding: 0;
+  }
+  /* The rail: one line down the date column, a dot per milestone. */
+  .milestone {
+    --rail: 0.4rem;
+    position: relative;
+    display: grid;
+    grid-template-columns: 11rem minmax(0, var(--measure));
+    gap: var(--space-2) var(--space-6);
+    padding: var(--space-5) 0 var(--space-5) var(--space-6);
+    border-left: 1px solid var(--line-strong);
+  }
+  .milestone::before {
+    content: "";
+    position: absolute;
+    left: calc(-1 * var(--rail) - 0.5px);
+    top: calc(var(--space-5) + 0.55em);
+    width: calc(2 * var(--rail));
+    height: calc(2 * var(--rail));
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1.5px solid var(--accent);
+  }
+  .milestone:target::before {
+    background: var(--accent);
+  }
+  time {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+    line-height: 1.3;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .body h3 {
+    font-size: var(--step-2);
+    font-weight: 340;
+    line-height: 1.2;
+  }
+  .text {
+    margin-top: var(--space-3);
+  }
+  .text :global(p + p) {
+    margin-top: var(--space-3);
+  }
+  .text :global(blockquote) {
+    margin: var(--space-4) 0;
+    padding-left: var(--space-4);
+    border-left: 2px solid var(--accent);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+    line-height: 1.4;
+  }
+  .text :global(blockquote footer) {
+    font-family: var(--font-body);
+    font-style: normal;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    margin-top: var(--space-2);
+  }
+  .text :global(.translation) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .text :global(.fn),
+  .back a {
+    font-size: 0.72em;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    text-decoration: none;
+    vertical-align: 0.45em;
+    line-height: 1;
+    padding: 0.3em 0.2em;
+    margin-left: 0.05em;
+  }
+  .text :global(.fn:hover),
+  .back a:hover {
+    text-decoration: underline;
+  }
+  .sources > :global(p) {
+    max-width: var(--measure);
+    color: var(--fg-muted);
+  }
+  .biblio {
+    list-style: none;
+    margin: var(--space-5) 0 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+    font-size: var(--step--1);
+    max-width: 52rem;
+  }
+  .biblio li {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: var(--space-2);
+    scroll-margin-top: var(--space-6);
+  }
+  .biblio li:target {
+    background: var(--accent-soft);
+    border-radius: var(--radius);
+  }
+  .biblio .n {
+    text-align: right;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .ref {
+    overflow-wrap: anywhere;
+  }
+  /* Back links stand alone on the line: give them a full 32 px target. */
+  .back a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2rem;
+    min-height: 2rem;
+    vertical-align: middle;
+    font-size: 1em;
+    padding: 0;
+    margin-left: 0.25em;
+  }
+  .milestone {
+    scroll-margin-top: var(--space-6);
+  }
+  @media (max-width: 48rem) {
+    .milestone {
+      grid-template-columns: minmax(0, 1fr);
+      padding-left: var(--space-5);
+    }
+    .milestone::before {
+      top: calc(var(--space-5) + 0.45em);
+    }
+  }
+</style>

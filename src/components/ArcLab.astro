@@ -1,0 +1,712 @@
+---
+// The figure of the ARC room: the data lists of MRU, MFU and their ghosts, the
+// blocks forgotten, and a gauge of arc_c with the MRU target. The visitor
+// reads blocks; src/lib/arc.ts (a transcription of arc_access, arc_evict,
+// arc_evict_adj and arc_evict_hdr) decides every outcome, and
+// src/lib/arc-view.ts draws it, at build time for the opening state (readable
+// without JavaScript) and in the browser after. Refs: ANALYSIS.md, room
+// "The ARC"; simplifications: DECISIONS.md D6.2.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { opening } from "../lib/arc";
+import { board, gauge, balance, clock, describe, summary, type ArcStrings } from "../lib/arc-view";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const A = "module/zfs/arc.c";
+const refs = {
+  anon: gh(A, 5381, 5397),
+  mintime: gh(A, 5423, 5428),
+  ghostMru: gh(A, 5437, 5449),
+  mfu: gh(A, 5450, 5459),
+  ghostMfu: gh(A, 5466, 5472),
+  hits: gh(A, 4479, 4497),
+  adj: gh(A, 4405, 4442),
+  order: gh(A, 4543, 4556),
+  hdr: gh(A, 3876, 3882),
+  ghosts: gh(A, 4569, 4582),
+};
+const S0 = {
+  en: {
+    figure: "The ARC as four lists, MRU, MFU and their ghost lists, with the share of the cache MRU may keep",
+    nMru: "MRU",
+    nMfu: "MFU",
+    nMruGhost: "MRU ghost",
+    nMfuGhost: "MFU ghost",
+    nGone: "Forgotten",
+    liveMeta: "{n}, data in memory",
+    blk1: "{n} block",
+    blkN: "{n} blocks",
+    hdr1: "{n} header",
+    hdrN: "{n} headers",
+    ghostMeta: "{n}, no data · at most {cap} · ghost hits {hits}",
+    goneMeta: "headers destroyed: the ARC no longer knows these blocks",
+    head: "head, most recent",
+    tail: "tail, evicted first",
+    none: "empty",
+    aRead: "Read {id} ({where})",
+    aGone: "forgotten",
+    free: "free {n}",
+    balance: "arc_pd {pd}: the MRU target is {target} of {c}.",
+    percent: "{n}%",
+    kib: "{n} KiB",
+    clock: "t = {t} s",
+    summary: "MRU {mru} and MFU {mfu}, of {c}; MRU ghost {mrug} and MFU ghost {mfug}. {balance}",
+    tIntro: "arc_c is {c} blocks of {size}. Clock: {t} s. Each list from head (most recent) to tail (evicted first):",
+    tList: "{name}, {n}: {list}.",
+    tGone: "Forgotten (headers destroyed), most recent first: {list}.",
+    tHits: "Ghost hits so far: MRU ghost {mru}, MFU ghost {mfu}.",
+    eNew: "{id}: not in the ARC. Read from disk; a new header at the head of MRU.",
+    eNewForgotten: "{id}: its header was destroyed, so the ARC does not know this block: read from disk, a new header at the head of MRU, and no ghost hit.",
+    eGhostMru: "{id}: MRU ghost hit. Only its header was left: the data is read from disk again, the header goes to the head of MFU, and {kib} go to the MRU ghost list’s hit counter.",
+    eGhostMfu: "{id}: MFU ghost hit. Only its header was left: the data is read from disk again, the header goes back to the head of MFU, and {kib} go to the MFU ghost list’s hit counter.",
+    eHitMfu: "{id}: MFU hit, served from memory. To the head of MFU.",
+    eHitPromote: "{id}: MRU hit, served from memory, {dt} ms after its b_arc_access: more than ARC_MINTIME ({min} ms), promoted to the head of MFU.",
+    eHitStay: "{id}: MRU hit, served from memory, {dt} ms after its b_arc_access: not more than ARC_MINTIME ({min} ms), so it stays in MRU, at its head, and b_arc_access is not refreshed.",
+    ePass: "The cache is one block over arc_c: eviction pass.",
+    eAdjSmall: "No ghost target yet (total < 32 bytes): arc_pd stays at {pd}.",
+    eAdjNone: "No ghost hit since the last pass: arc_pd stays at {pd}.",
+    eAdjMoved: "Ghost hits since the last pass: MRU ghost {grd}, MFU ghost {gfd}, against ghost targets of {total}. arc_pd {before} → {after}, the MRU target {tb} → {ta}.",
+    eShareOver: "MRU holds {mru}, above its target of {target}: MRU gives up its tail.",
+    eShareUnder: "MRU holds {mru}, not above its target of {target}: MFU gives up its tail.",
+    eEvictMru: "{id}: evicted from the tail of MRU. Its data is freed; its header goes to the head of the MRU ghost list.",
+    eEvictMfu: "{id}: evicted from the tail of MFU. Its data is freed; its header goes to the head of the MFU ghost list.",
+    eForgetMru: "{id}: trimmed from the tail of the MRU ghost list, which may hold {cap}, half of MFU. Header destroyed.",
+    eForgetMfu: "{id}: trimmed from the tail of the MFU ghost list, which may hold {cap}, half of MRU. Header destroyed.",
+    see: "code",
+    logLabel: "What the last action did",
+    newBtn: "Read a new block",
+    scanBtn: "Scan 12 new blocks",
+    hotBtn: "Read the hot set again",
+    reset: "Start again",
+    gapLabel: "Before the next read",
+    gap1: "1 s",
+    gap10: "10 ms",
+    hint: "Select any block to read it.",
+    logEmpty: "Nothing yet. The opening state: the hot set H1 to H6 was read twice, a second apart.",
+    legendLive: "block in memory",
+    legendGhost: "header only",
+    legendGone: "forgotten",
+    gaugeLabel: "arc_c, 16 blocks: MRU from the left, MFU from the right, the MRU target as a line",
+  },
+  fr: {
+    figure: "L’ARC en quatre listes, MRU, MFU et leurs listes fantômes, avec la part du cache que MRU peut garder",
+    nMru: "MRU",
+    nMfu: "MFU",
+    nMruGhost: "MRU fantôme",
+    nMfuGhost: "MFU fantôme",
+    nGone: "Oubliés",
+    liveMeta: "{n}, données en mémoire",
+    blk1: "{n} bloc",
+    blkN: "{n} blocs",
+    hdr1: "{n} en-tête",
+    hdrN: "{n} en-têtes",
+    ghostMeta: "{n}, sans données · au plus {cap} · succès fantômes {hits}",
+    goneMeta: "en-têtes détruits : l’ARC ne connaît plus ces blocs",
+    head: "tête, le plus récent",
+    tail: "queue, évincé en premier",
+    none: "vide",
+    aRead: "Lire {id} ({where})",
+    aGone: "oublié",
+    free: "libre {n}",
+    balance: "arc_pd {pd} : la cible de MRU est de {target} sur {c}.",
+    percent: "{n} %",
+    kib: "{n} Kio",
+    clock: "t = {t} s",
+    summary: "MRU {mru} et MFU {mfu}, sur {c} ; MRU fantôme {mrug} et MFU fantôme {mfug}. {balance}",
+    tIntro: "arc_c vaut {c} blocs de {size}. Horloge : {t} s. Chaque liste de la tête (le plus récent) à la queue (évincé en premier) :",
+    tList: "{name}, {n} : {list}.",
+    tGone: "Oubliés (en-têtes détruits), du plus récent au plus ancien : {list}.",
+    tHits: "Succès fantômes jusqu’ici : MRU fantôme {mru}, MFU fantôme {mfu}.",
+    eNew: "{id} : absent de l’ARC. Lu sur le disque ; un nouvel en-tête en tête de MRU.",
+    eNewForgotten: "{id} : son en-tête a été détruit, l’ARC ne connaît donc pas ce bloc : lu sur le disque, un nouvel en-tête en tête de MRU, et aucun succès fantôme.",
+    eGhostMru: "{id} : succès fantôme dans MRU. Il ne restait que son en-tête : les données sont relues sur le disque, l’en-tête passe en tête de MFU, et {kib} s’ajoutent au compteur de succès de la liste MRU fantôme.",
+    eGhostMfu: "{id} : succès fantôme dans MFU. Il ne restait que son en-tête : les données sont relues sur le disque, l’en-tête revient en tête de MFU, et {kib} s’ajoutent au compteur de succès de la liste MFU fantôme.",
+    eHitMfu: "{id} : succès dans MFU, servi depuis la mémoire. En tête de MFU.",
+    eHitPromote: "{id} : succès dans MRU, servi depuis la mémoire, {dt} ms après son b_arc_access : plus qu’ARC_MINTIME ({min} ms), promu en tête de MFU.",
+    eHitStay: "{id} : succès dans MRU, servi depuis la mémoire, {dt} ms après son b_arc_access : pas plus qu’ARC_MINTIME ({min} ms), il reste donc dans MRU, en tête, et b_arc_access n’est pas rafraîchi.",
+    ePass: "Le cache dépasse arc_c d’un bloc : passe d’éviction.",
+    eAdjSmall: "Pas encore de cible fantôme (total < 32 octets) : arc_pd reste à {pd}.",
+    eAdjNone: "Aucun succès fantôme depuis la dernière passe : arc_pd reste à {pd}.",
+    eAdjMoved: "Succès fantômes depuis la dernière passe : MRU fantôme {grd}, MFU fantôme {gfd}, rapportés à des cibles fantômes de {total}. arc_pd {before} → {after}, la cible de MRU {tb} → {ta}.",
+    eShareOver: "MRU tient {mru}, au-dessus de sa cible de {target} : MRU cède sa queue.",
+    eShareUnder: "MRU tient {mru}, pas au-dessus de sa cible de {target} : MFU cède sa queue.",
+    eEvictMru: "{id} : évincé de la queue de MRU. Ses données sont libérées ; son en-tête passe en tête de la liste MRU fantôme.",
+    eEvictMfu: "{id} : évincé de la queue de MFU. Ses données sont libérées ; son en-tête passe en tête de la liste MFU fantôme.",
+    eForgetMru: "{id} : retiré de la queue de la liste MRU fantôme, qui peut tenir {cap}, la moitié de MFU. En-tête détruit.",
+    eForgetMfu: "{id} : retiré de la queue de la liste MFU fantôme, qui peut tenir {cap}, la moitié de MRU. En-tête détruit.",
+    see: "code",
+    logLabel: "Ce que la dernière action a fait",
+    newBtn: "Lire un nouveau bloc",
+    scanBtn: "Parcourir 12 nouveaux blocs",
+    hotBtn: "Relire l’ensemble chaud",
+    reset: "Recommencer",
+    gapLabel: "Avant la lecture suivante",
+    gap1: "1 s",
+    gap10: "10 ms",
+    hint: "Sélectionnez n’importe quel bloc pour le lire.",
+    logEmpty: "Rien encore. L’état de départ : l’ensemble chaud H1 à H6 a été lu deux fois, à une seconde d’intervalle.",
+    legendLive: "bloc en mémoire",
+    legendGhost: "en-tête seul",
+    legendGone: "oublié",
+    gaugeLabel: "arc_c, 16 blocs : MRU depuis la gauche, MFU depuis la droite, la cible de MRU en trait",
+  },
+  es: {
+    figure: "El ARC en cuatro listas, MRU, MFU y sus listas fantasma, con la parte de la caché que MRU puede conservar",
+    nMru: "MRU",
+    nMfu: "MFU",
+    nMruGhost: "MRU fantasma",
+    nMfuGhost: "MFU fantasma",
+    nGone: "Olvidados",
+    liveMeta: "{n}, datos en memoria",
+    blk1: "{n} bloque",
+    blkN: "{n} bloques",
+    hdr1: "{n} cabecera",
+    hdrN: "{n} cabeceras",
+    ghostMeta: "{n}, sin datos · como máximo {cap} · aciertos fantasma {hits}",
+    goneMeta: "cabeceras destruidas: el ARC ya no conoce estos bloques",
+    head: "cabeza, el más reciente",
+    tail: "cola, el primero en ser expulsado",
+    none: "vacía",
+    aRead: "Leer {id} ({where})",
+    aGone: "olvidado",
+    free: "libre {n}",
+    balance: "arc_pd {pd}: el objetivo de MRU es {target} de {c}.",
+    percent: "{n} %",
+    kib: "{n} KiB",
+    clock: "t = {t} s",
+    summary: "MRU {mru} y MFU {mfu}, de {c}; MRU fantasma {mrug} y MFU fantasma {mfug}. {balance}",
+    tIntro: "arc_c son {c} bloques de {size}. Reloj: {t} s. Cada lista de la cabeza (el más reciente) a la cola (el primero en ser expulsado):",
+    tList: "{name}, {n}: {list}.",
+    tGone: "Olvidados (cabeceras destruidas), del más reciente al más antiguo: {list}.",
+    tHits: "Aciertos fantasma hasta ahora: MRU fantasma {mru}, MFU fantasma {mfu}.",
+    eNew: "{id}: no está en el ARC. Se lee del disco; una cabecera nueva en la cabeza de MRU.",
+    eNewForgotten: "{id}: su cabecera se destruyó, así que el ARC no conoce este bloque: se lee del disco, una cabecera nueva en la cabeza de MRU, y ningún acierto fantasma.",
+    eGhostMru: "{id}: acierto fantasma en MRU. Solo quedaba su cabecera: los datos se vuelven a leer del disco, la cabecera pasa a la cabeza de MFU, y {kib} se suman al contador de aciertos de la lista MRU fantasma.",
+    eGhostMfu: "{id}: acierto fantasma en MFU. Solo quedaba su cabecera: los datos se vuelven a leer del disco, la cabecera vuelve a la cabeza de MFU, y {kib} se suman al contador de aciertos de la lista MFU fantasma.",
+    eHitMfu: "{id}: acierto en MFU, servido desde la memoria. A la cabeza de MFU.",
+    eHitPromote: "{id}: acierto en MRU, servido desde la memoria, {dt} ms después de su b_arc_access: más de ARC_MINTIME ({min} ms), promovido a la cabeza de MFU.",
+    eHitStay: "{id}: acierto en MRU, servido desde la memoria, {dt} ms después de su b_arc_access: no más de ARC_MINTIME ({min} ms), así que se queda en MRU, en la cabeza, y b_arc_access no se actualiza.",
+    ePass: "La caché supera arc_c en un bloque: pasada de expulsión.",
+    eAdjSmall: "Aún no hay objetivo fantasma (total < 32 bytes): arc_pd se queda en {pd}.",
+    eAdjNone: "Ningún acierto fantasma desde la última pasada: arc_pd se queda en {pd}.",
+    eAdjMoved: "Aciertos fantasma desde la última pasada: MRU fantasma {grd}, MFU fantasma {gfd}, frente a objetivos fantasma de {total}. arc_pd {before} → {after}, el objetivo de MRU {tb} → {ta}.",
+    eShareOver: "MRU contiene {mru}, por encima de su objetivo de {target}: MRU cede su cola.",
+    eShareUnder: "MRU contiene {mru}, no por encima de su objetivo de {target}: MFU cede su cola.",
+    eEvictMru: "{id}: expulsado de la cola de MRU. Sus datos se liberan; su cabecera pasa a la cabeza de la lista MRU fantasma.",
+    eEvictMfu: "{id}: expulsado de la cola de MFU. Sus datos se liberan; su cabecera pasa a la cabeza de la lista MFU fantasma.",
+    eForgetMru: "{id}: recortado de la cola de la lista MRU fantasma, que puede contener {cap}, la mitad de MFU. Cabecera destruida.",
+    eForgetMfu: "{id}: recortado de la cola de la lista MFU fantasma, que puede contener {cap}, la mitad de MRU. Cabecera destruida.",
+    see: "código",
+    logLabel: "Lo que hizo la última acción",
+    newBtn: "Leer un bloque nuevo",
+    scanBtn: "Recorrer 12 bloques nuevos",
+    hotBtn: "Volver a leer el conjunto caliente",
+    reset: "Reiniciar",
+    gapLabel: "Antes de la lectura siguiente",
+    gap1: "1 s",
+    gap10: "10 ms",
+    hint: "Selecciona cualquier bloque para leerlo.",
+    logEmpty: "Nada todavía. El estado inicial: el conjunto caliente H1 a H6 se leyó dos veces, con un segundo de intervalo.",
+    legendLive: "bloque en memoria",
+    legendGhost: "solo la cabecera",
+    legendGone: "olvidado",
+    gaugeLabel: "arc_c, 16 bloques: MRU desde la izquierda, MFU desde la derecha, el objetivo de MRU como una línea",
+  },
+}[lang];
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as ArcStrings;
+const t = UI[lang];
+const s0 = opening();
+const gapName = `arc-gap-${lang}`;
+---
+
+<figure class="arc" data-arc data-strings={JSON.stringify(S)} aria-label={S.figure}>
+  <div class="arc-bar" hidden>
+    <div class="buttons">
+      <button class="btn btn--primary" type="button" data-act="new">{S.newBtn}</button>
+      <button class="btn" type="button" data-act="scan">{S.scanBtn}</button>
+      <button class="btn" type="button" data-act="hot">{S.hotBtn}</button>
+      <button class="btn" type="button" data-act="reset">{S.reset}</button>
+    </div>
+    <fieldset class="gap">
+      <legend>{S.gapLabel}</legend>
+      <label><input type="radio" name={gapName} value="1000" checked /> {S.gap1}</label>
+      <label><input type="radio" name={gapName} value="10" /> {S.gap10}</label>
+    </fieldset>
+    <p class="clock" data-clock>{clock(s0, S)}</p>
+    <p class="hint muted">{S.hint}</p>
+  </div>
+  <p class="visually-hidden" data-summary>{summary(s0, S)}</p>
+  <div class="arc-gauge" role="img" aria-label={S.gaugeLabel}>
+    <div data-gauge set:html={gauge(s0, S)} />
+    <p class="balance" data-balance>{balance(s0, S)}</p>
+  </div>
+  <div class="arc-board" data-board set:html={board(s0, S, false)} />
+  <ul class="arc-legend" aria-hidden="true">
+    <li><span class="chip mfu">H1</span>{S.legendLive}</li>
+    <li><span class="chip mru_ghost">S1</span>{S.legendGhost}</li>
+    <li><span class="chip gone">S1</span>{S.legendGone}</li>
+  </ul>
+  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <section class="arc-log" aria-labelledby={`arc-log-${lang}`} hidden>
+    <h3 id={`arc-log-${lang}`}>{S.logLabel}</h3>
+    <p class="visually-hidden" data-status aria-live="polite"></p>
+    <ol data-log><li class="muted">{S.logEmpty}</li></ol>
+  </section>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={describe(s0, S)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, wait, reducedMotion } from "../lib/svg";
+  import { opening, read, readAll, next, HOT, type Arc, type Ev } from "../lib/arc";
+  import { board, gauge, balance, clock, describe, summary, eventLine, eventClass, type ArcStrings } from "../lib/arc-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-arc]")) {
+    const S = strings<ArcStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const boardEl = q("[data-board]");
+    const logEl = q("[data-log]");
+    let s: Arc = opening();
+    let run = 0;
+    const gap = () => Number(root.querySelector<HTMLInputElement>("input[type=radio]:checked")?.value ?? 1000);
+
+    const keyOf = (el: Element | null) => {
+      if (!(el instanceof HTMLElement) || !root.contains(el)) return null;
+      if (el.dataset.act) return `[data-act="${el.dataset.act}"]`;
+      if (el.dataset.id) return `button[data-id="${el.dataset.id}"]`;
+      return null;
+    };
+
+    function render(fresh: string[] = [], focusKey: string | null = keyOf(document.activeElement)) {
+      boardEl.innerHTML = board(s, S, true, fresh);
+      q("[data-gauge]").innerHTML = gauge(s, S);
+      q("[data-balance]").textContent = balance(s, S);
+      q("[data-clock]").textContent = clock(s, S);
+      q("[data-summary]").textContent = summary(s, S);
+      q("[data-describe]").innerHTML = describe(s, S);
+      if (focusKey) root.querySelector<HTMLElement>(focusKey)?.focus({ preventScroll: true });
+    }
+
+    // FLIP: each chip that changed list slides from where it was; a new one fades in.
+    const rects = () => {
+      const m = new Map<string, DOMRect>();
+      for (const c of boardEl.querySelectorAll<HTMLElement>("[data-id]")) m.set(c.dataset.id!, c.getBoundingClientRect());
+      return m;
+    };
+
+    async function act(ids: string[], step = 1) {
+      const me = ++run;
+      const before = rects();
+      s.now += gap();
+      const ev: Ev[] = ids.length === 1 ? read(s, ids[0]) : readAll(s, ids, step);
+      render(ids);
+      if (!reducedMotion()) {
+        for (const c of boardEl.querySelectorAll<HTMLElement>("[data-id]")) {
+          const from = before.get(c.dataset.id!);
+          const to = c.getBoundingClientRect();
+          if (!from) c.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 420, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+          else if (Math.abs(from.left - to.left) > 1 || Math.abs(from.top - to.top) > 1)
+            c.animate([{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }], { duration: 560, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+        }
+      }
+      logEl.replaceChildren();
+      const lines = ev.map((e) => eventLine(S, e));
+      q("[data-status]").textContent = ids.length === 1 ? lines.map((l) => l.replace(/<[^>]+>/g, "")).join(" ").split(` ${S.see}`).join("") : summary(s, S);
+      for (let i = 0; i < ev.length; i++) {
+        const li = document.createElement("li");
+        li.className = eventClass(ev[i]);
+        li.innerHTML = lines[i];
+        logEl.append(li);
+        if (ev.length < 12) {
+          await wait(70);
+          if (me !== run) return;
+        }
+      }
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el)) return;
+      const d = el.dataset;
+      if (d.act === "new") void act(next(s, "N"));
+      else if (d.act === "scan") void act(next(s, "S", 12));
+      else if (d.act === "hot") void act(HOT);
+      else if (d.act === "reset") {
+        run++;
+        s = opening();
+        logEl.innerHTML = `<li class="muted">${S.logEmpty}</li>`;
+        q("[data-status]").textContent = "";
+        render();
+      } else if (d.id) void act([d.id]);
+    });
+
+    render([], null);
+    q(".arc-bar").hidden = false;
+    q(".arc-log").hidden = false;
+  }
+</script>
+
+<style>
+  .arc {
+    margin: var(--space-6) 0 0;
+  }
+  .arc-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-5);
+    align-items: center;
+    margin-bottom: var(--space-4);
+  }
+  .arc-bar[hidden],
+  .arc-log[hidden] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .gap {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+    align-items: center;
+    font-size: var(--step--1);
+  }
+  .gap legend {
+    float: left;
+    color: var(--fg-muted);
+    margin-right: var(--space-2);
+  }
+  .gap label {
+    display: inline-flex;
+    gap: var(--space-1);
+    align-items: center;
+    min-height: 44px;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+  .gap input {
+    accent-color: var(--accent);
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+  .clock {
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .hint {
+    flex-basis: 100%;
+    font-size: var(--step--1);
+  }
+  .arc-gauge {
+    margin-bottom: var(--space-4);
+  }
+  .arc-gauge :global(.cells) {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 3px;
+    max-width: 40rem;
+  }
+  .arc-gauge :global(.cell) {
+    height: 14px;
+    border-radius: 2px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+  }
+  .arc-gauge :global(.cell.mru) {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .arc-gauge :global(.cell.mfu) {
+    background: var(--ok);
+    border-color: var(--ok);
+  }
+  .arc-gauge :global(.mark) {
+    position: absolute;
+    top: -5px;
+    bottom: -5px;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--fg);
+    transition: left 600ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .arc-gauge :global(.gauge-legend) {
+    display: flex;
+    justify-content: space-between;
+    max-width: 40rem;
+    margin-top: var(--space-1);
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .arc-gauge :global(.k.mru) {
+    color: var(--accent);
+  }
+  .arc-gauge :global(.k.mfu) {
+    color: var(--ok);
+  }
+  .balance {
+    margin-top: var(--space-2);
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+  }
+  .arc-board :global(.lists) {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+  .arc-board :global(.list) {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .arc-board :global(.list.mru),
+  .arc-board :global(.list.mfu) {
+    border-color: var(--line-strong);
+  }
+  .arc-board :global(.list.mru_ghost),
+  .arc-board :global(.list.mfu_ghost),
+  .arc-board :global(.list.gone) {
+    border-style: dashed;
+  }
+  .arc-board :global(.list.gone) {
+    margin-top: var(--space-3);
+    background: transparent;
+  }
+  .arc-board :global(header) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .arc-board :global(h3) {
+    margin: 0;
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    font-size: var(--step-0);
+    font-weight: 600;
+  }
+  .arc-board :global(.mru h3) {
+    color: var(--accent);
+  }
+  .arc-board :global(.mfu h3) {
+    color: var(--ok);
+  }
+  .arc-board :global(.meta) {
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .arc-board :global(.chips) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+  .arc-board :global(.none) {
+    font-size: 0.75rem;
+    color: var(--fg-faint);
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .arc-board :global(.ends) {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-size: 0.7rem;
+    color: var(--fg-faint);
+  }
+  .chip,
+  .arc-board :global(.chip) {
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    min-width: 2.75rem;
+    min-height: 44px;
+    padding: 0 0.4em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .arc-board :global(button.chip) {
+    cursor: pointer;
+  }
+  .chip.mfu,
+  .arc-board :global(.chip.mfu) {
+    border-color: var(--ok);
+  }
+  .arc-board :global(.chip.mru) {
+    border-color: var(--accent);
+  }
+  .chip.mru_ghost,
+  .arc-board :global(.chip.mru_ghost),
+  .arc-board :global(.chip.mfu_ghost) {
+    background: transparent;
+    border-style: dashed;
+    color: var(--fg-muted);
+    font-weight: 400;
+  }
+  .chip.gone,
+  .arc-board :global(.chip.gone) {
+    background: transparent;
+    border: 1px dashed var(--line);
+    color: var(--fg-faint);
+    font-weight: 400;
+    text-decoration: line-through;
+  }
+  .arc-board :global(.fresh .chip) {
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
+  }
+  .arc-legend {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-4) 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .arc-legend li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .arc-legend .chip {
+    min-height: 1.8rem;
+    min-width: 2.4rem;
+    font-size: 0.78rem;
+  }
+  .arc-log {
+    margin-top: var(--space-6);
+    max-width: 48rem;
+  }
+  .arc-log h3 {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+    margin-bottom: var(--space-3);
+  }
+  .arc-log ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .arc-log :global(li) {
+    border-left: 2px solid var(--line-strong);
+    padding-left: var(--space-3);
+  }
+  .arc-log :global(li.muted) {
+    border-left-color: transparent;
+    padding-left: 0;
+  }
+  .arc-log :global(li.pass) {
+    color: var(--fg-muted);
+    border-left-color: var(--line);
+    margin-left: var(--space-3);
+  }
+  .arc-log :global(li.evict),
+  .arc-log :global(li.forget) {
+    margin-left: var(--space-3);
+  }
+  .arc-log :global(li.ghost),
+  .arc-log :global(li.promote) {
+    border-left-color: var(--ok);
+  }
+  .arc-log :global(li.evict) {
+    border-left-color: var(--accent);
+  }
+  .arc-log :global(li.ghost code),
+  .arc-log :global(li.promote code) {
+    color: var(--ok);
+  }
+  .arc-log :global(li.evict code) {
+    color: var(--accent);
+  }
+  .arc-log :global(li.forget) {
+    color: var(--fg-muted);
+  }
+  .arc :global(a.see) {
+    font-size: 0.85em;
+    color: var(--fg-muted);
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version :global(ol) {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-1);
+  }
+  @media (max-width: 60rem) {
+    .arc-board :global(.lists) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .arc-board :global(.list.mru) {
+      order: 1;
+    }
+    .arc-board :global(.list.mfu) {
+      order: 2;
+    }
+    .arc-board :global(.list.mru_ghost) {
+      order: 3;
+    }
+    .arc-board :global(.list.mfu_ghost) {
+      order: 4;
+    }
+  }
+  @media (max-width: 30rem) {
+    .arc-board :global(.list) {
+      padding: var(--space-2);
+    }
+    .arc-board :global(.chip) {
+      min-width: 2.6rem;
+      font-size: 0.78rem;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .arc-gauge :global(.mark) {
+      transition: none;
+    }
+  }
+</style>

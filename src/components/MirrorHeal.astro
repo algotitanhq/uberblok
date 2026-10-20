@@ -1,0 +1,484 @@
+---
+// Figure 2 of the copy-on-write room: a two-way mirror. Damage a copy, read the
+// file, watch the checksum held in the parent catch it and the mirror repair it.
+//   expected value from the parent  zio_checksum_error_impl, zio_checksum.c L503
+//   mismatch -> ECKSUM              zio_checksum.c L535-L536
+//   try the other child             vdev_mirror_io_done, vdev_mirror.c L793-L802
+//   rewrite the bad child           vdev_mirror.c L927-L933
+//   no good copy -> error           vdev_mirror.c L878-L881
+//   error counter                   zio.c L5295-L5300
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const refs = {
+  verify: gh("module/zfs/zio_checksum.c", 501, 505),
+  ecksum: gh("module/zfs/zio_checksum.c", 535, 536),
+  retry: gh("module/zfs/vdev_mirror.c", 793, 802),
+  repair: gh("module/zfs/vdev_mirror.c", 927, 933),
+  fail: gh("module/zfs/vdev_mirror.c", 878, 881),
+  count: gh("module/zfs/zio.c", 5295, 5300),
+};
+const S = {
+  en: {
+    parent: "Pointers in the parent block: the expected checksums",
+    disk: "Disk {d}",
+    errors: "checksum errors: {n}",
+    rot: "Flip a bit in D1 on disk A",
+    lost: "Lose a write of D2 on disk A",
+    both: "Damage D3 on both disks",
+    read: "Read the file",
+    reset: "Reset",
+    stored: "computes to",
+    readFrom: "D{i}: read from disk {d}.",
+    ok: "D{i} on disk {d}: fletcher4 matches the pointer.",
+    bad: "D{i} on disk {d}: fletcher4 gives …{got}, the pointer expects …{exp}. ECKSUM, although the disk reported no error.",
+    badLost: "D{i} on disk {d}: the new D{i} was to go to a new address, and the disk dropped that write. The address still holds bytes left by an earlier, freed block. They are consistent with themselves, so a checksum stored next to them would pass. The pointer in the parent expects the new D{i}: ECKSUM.",
+    staleBytes: "freed, old bytes",
+    other: "D{i}: the mirror reads the other side, disk {d}.",
+    repaired: "D{i}: disk {d} gets the good bytes back (a repair write). Healed.",
+    failed: "D{i}: no copy matches. The read fails with an error: the application never receives wrong bytes.",
+    doneOk: "File read: {good} of 4 blocks correct, {healed} repaired on the way.",
+    doneErr: "File read failed on D{i}: both copies are damaged, and ZFS says so instead of returning them.",
+    see: "code",
+    damaged: "damaged",
+    healed: "healed",
+    stale: "stale",
+  },
+  fr: {
+    parent: "Pointeurs dans le bloc parent : les sommes attendues",
+    disk: "Disque {d}",
+    errors: "erreurs de somme : {n}",
+    rot: "Inverser un bit de D1 sur le disque A",
+    lost: "Perdre une écriture de D2 sur le disque A",
+    both: "Abîmer D3 sur les deux disques",
+    read: "Lire le fichier",
+    reset: "Recommencer",
+    stored: "donne",
+    readFrom: "D{i} : lecture sur le disque {d}.",
+    ok: "D{i} sur le disque {d} : la somme fletcher4 correspond au pointeur.",
+    bad: "D{i} sur le disque {d} : fletcher4 donne …{got}, le pointeur attend …{exp}. ECKSUM, alors que le disque n’a signalé aucune erreur.",
+    badLost: "D{i} sur le disque {d} : le nouveau D{i} devait aller à une nouvelle adresse, et le disque a perdu cette écriture. L’adresse garde les octets d’un ancien bloc, libéré depuis. Ils sont cohérents avec eux-mêmes ; une somme rangée à côté d’eux passerait. Le pointeur du parent attend le nouveau D{i} : ECKSUM.",
+    staleBytes: "ancien, libéré",
+    other: "D{i} : le miroir lit l’autre côté, le disque {d}.",
+    repaired: "D{i} : le disque {d} reçoit les bons octets (écriture de réparation). Réparé.",
+    failed: "D{i} : aucune copie ne correspond. La lecture échoue avec une erreur : l’application ne reçoit jamais d’octets faux.",
+    doneOk: "Fichier lu : {good} blocs corrects sur 4 ; blocs réparés au passage : {healed}.",
+    doneErr: "La lecture du fichier échoue sur D{i} : les deux copies sont abîmées, et ZFS le dit au lieu de les rendre.",
+    see: "code",
+    damaged: "abîmé",
+    healed: "réparé",
+    stale: "périmé",
+  },
+  es: {
+    parent: "Punteros en el bloque padre: las sumas de comprobación esperadas",
+    disk: "Disco {d}",
+    errors: "errores de suma de comprobación: {n}",
+    rot: "Invertir un bit de D1 en el disco A",
+    lost: "Perder una escritura de D2 en el disco A",
+    both: "Dañar D3 en los dos discos",
+    read: "Leer el archivo",
+    reset: "Reiniciar",
+    stored: "da",
+    readFrom: "D{i}: se lee del disco {d}.",
+    ok: "D{i} en el disco {d}: fletcher4 coincide con el puntero.",
+    bad: "D{i} en el disco {d}: fletcher4 da …{got}, el puntero espera …{exp}. ECKSUM, aunque el disco no ha señalado ningún error.",
+    badLost: "D{i} en el disco {d}: el nuevo D{i} debía ir a una nueva dirección, y el disco perdió esa escritura. La dirección conserva los bytes de un bloque anterior, ya liberado. Son coherentes consigo mismos, así que una suma guardada junto a ellos pasaría. El puntero del padre espera el nuevo D{i}: ECKSUM.",
+    staleBytes: "bytes antiguos, liberados",
+    other: "D{i}: el espejo lee el otro lado, el disco {d}.",
+    repaired: "D{i}: el disco {d} recibe de nuevo los bytes buenos (una escritura de reparación). Reparado.",
+    failed: "D{i}: ninguna copia coincide. La lectura falla con un error: la aplicación nunca recibe bytes erróneos.",
+    doneOk: "Archivo leído: {good} de 4 bloques correctos; bloques reparados por el camino: {healed}.",
+    doneErr: "La lectura del archivo falla en D{i}: las dos copias están dañadas, y ZFS lo dice en lugar de devolverlas.",
+    see: "código",
+    damaged: "dañado",
+    healed: "reparado",
+    stale: "obsoleto",
+  },
+}[lang];
+const t = UI[lang];
+const textVersion = {
+  en: [
+    "A file of four blocks, D0 to D3, sits on a two-way mirror: disk A and disk B each hold a full copy. The parent block holds, in each block pointer, the fletcher4 checksum of the block it points to.",
+    "Bit rot: one bit of D1 flips on disk A. The disk returns the bytes without error. Recomputing fletcher4 over them gives a different value from the one in the pointer: ECKSUM.",
+    "Lost write: disk A acknowledged the write of the new D2 but never performed it. Under copy-on-write that write went to a new address, not over the old D2, so the address still holds whatever was there before: stale bytes of an earlier block, since freed. Those bytes can be consistent with themselves; only the checksum in the parent, which describes the new D2, reveals them.",
+    "On a mismatch the mirror reads the other disk. If that copy matches, it is returned to the application and written back over the bad copy: the pool heals itself on a normal read.",
+    "If both copies are damaged, the read fails with an error rather than return wrong data. Each mismatch is counted against the disk that returned it.",
+  ],
+  fr: [
+    "Un fichier de quatre blocs, D0 à D3, est sur un miroir à deux voies : le disque A et le disque B en gardent chacun une copie complète. Le bloc parent contient, dans chaque pointeur de bloc, la somme fletcher4 du bloc pointé.",
+    "Dégradation silencieuse : un bit de D1 s’inverse sur le disque A. Le disque rend les octets sans erreur. Recalculer fletcher4 sur ces octets donne une autre valeur que celle du pointeur : ECKSUM.",
+    "Écriture perdue : le disque A a confirmé l’écriture du nouveau D2 sans la faire. Avec la copie sur écriture, cette écriture visait une nouvelle adresse, pas l’ancien D2 ; l’adresse garde donc ce qu’elle contenait avant, les octets périmés d’un ancien bloc, libéré depuis. Ces octets peuvent être cohérents avec eux-mêmes ; seule la somme rangée dans le parent, qui décrit le nouveau D2, les trahit.",
+    "En cas d’écart, le miroir lit l’autre disque. Si cette copie correspond, elle est rendue à l’application et réécrite sur la mauvaise copie : le pool se répare lors d’une simple lecture.",
+    "Si les deux copies sont abîmées, la lecture échoue avec une erreur plutôt que de rendre des données fausses. Chaque écart est compté contre le disque qui l’a rendu.",
+  ],
+  es: [
+    "Un archivo de cuatro bloques, D0 a D3, está en un espejo de dos vías: el disco A y el disco B guardan cada uno una copia completa. El bloque padre contiene, en cada puntero de bloque, la suma fletcher4 del bloque al que apunta.",
+    "Degradación silenciosa (bit rot): un bit de D1 se invierte en el disco A. El disco devuelve los bytes sin error. Recalcular fletcher4 sobre ellos da un valor distinto del que hay en el puntero: ECKSUM.",
+    "Escritura perdida: el disco A acusó recibo de la escritura del nuevo D2 pero nunca la realizó. Con la copia en escritura, esa escritura iba a una nueva dirección, no sobre el antiguo D2, así que la dirección conserva lo que hubiera antes: bytes obsoletos de un bloque anterior, ya liberado. Esos bytes pueden ser coherentes consigo mismos; solo la suma guardada en el padre, que describe el nuevo D2, los delata.",
+    "Ante una discrepancia, el espejo lee el otro disco. Si esa copia coincide, se devuelve a la aplicación y se escribe sobre la copia mala: el pool se repara a sí mismo en una lectura normal.",
+    "Si las dos copias están dañadas, la lectura falla con un error en lugar de devolver datos erróneos. Cada discrepancia se cuenta en el disco que la devolvió.",
+  ],
+}[lang];
+---
+
+<figure class="mirror" data-mirror data-strings={JSON.stringify({ ...S, refs })}>
+  <div class="board">
+    <p class="parent-title">{S.parent}</p>
+    <ol class="expected"></ol>
+    <div class="disks"></div>
+    <noscript><p class="muted">{t.noScript}</p></noscript>
+  </div>
+  <div class="controls" hidden>
+    <div class="buttons">
+      <button class="btn" type="button" data-act="rot">{S.rot}</button>
+      <button class="btn" type="button" data-act="lost">{S.lost}</button>
+      <button class="btn" type="button" data-act="both">{S.both}</button>
+      <button class="btn btn--primary" type="button" data-act="read">{S.read}</button>
+      <button class="btn" type="button" data-act="reset">{S.reset}</button>
+    </div>
+  </div>
+  <ol class="log" aria-live="polite"></ol>
+  <p class="result" aria-live="polite"></p>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <ol>{textVersion.map((x) => <li>{x}</li>)}</ol>
+  </details>
+</figure>
+
+<script>
+  import { h, strings, fill, wait } from "../lib/svg";
+  import { fletcher4, block, sameCksum, shortCksum, type Cksum } from "../lib/fletcher4";
+
+  type S = Record<string, string> & { refs: Record<string, string> };
+  type Mark = "" | "reading" | "ok" | "bad" | "healed";
+  const VERSIONS = [3, 1, 2, 1];
+  const content = (i: number, v: number) => `D${i} version ${v}`;
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-mirror]")) {
+    const t = strings<S>(root);
+    const expectedList = root.querySelector<HTMLOListElement>(".expected")!;
+    const disksEl = root.querySelector<HTMLElement>(".disks")!;
+    const log = root.querySelector<HTMLOListElement>(".log")!;
+    const result = root.querySelector<HTMLElement>(".result")!;
+    const btn = (a: string) => root.querySelector<HTMLButtonElement>(`[data-act="${a}"]`)!;
+
+    const good = VERSIONS.map((v, i) => block(content(i, v)));
+    const expected: Cksum[] = good.map(fletcher4);
+    let disks: Uint8Array[][] = [];
+    let marks: Mark[][] = [];
+    let tags: string[][] = [];
+    let errors = [0, 0];
+    let busy = false;
+
+    function init() {
+      disks = [good.map((b) => b.slice()), good.map((b) => b.slice())];
+      marks = [Array(4).fill(""), Array(4).fill("")];
+      tags = [Array(4).fill(""), Array(4).fill("")];
+      errors = [0, 0];
+      log.replaceChildren();
+      result.textContent = "";
+    }
+
+    const text = (b: Uint8Array) => new TextDecoder().decode(b).replace(/\0+$/, "");
+
+    function draw() {
+      expectedList.replaceChildren(
+        ...expected.map((c, i) => h("li", {}, h("span", { class: "who" }, `→ D${i}`), h("code", {}, `…${shortCksum(c)}`))),
+      );
+      disksEl.replaceChildren(
+        ...[0, 1].map((d) =>
+          h("section", { class: "disk", "aria-label": fill(t.disk, { d: "AB"[d] }) },
+            h("h3", {}, fill(t.disk, { d: "AB"[d] }), h("span", { class: errors[d] ? "errs errs--on" : "errs" }, fill(t.errors, { n: errors[d] }))),
+            h("ol", {}, ...disks[d].map((b, i) => {
+              const c = fletcher4(b);
+              const match = sameCksum(c, expected[i]);
+              return h("li", { class: `blk ${marks[d][i] ? `blk--${marks[d][i]}` : ""}` },
+                h("span", { class: "bytes" }, text(b)),
+                h("span", { class: "sum" }, `${t.stored} `, h("code", { class: match ? "" : "off" }, `…${shortCksum(c)}`)),
+                tags[d][i] ? h("span", { class: "tag" }, tags[d][i]) : "",
+              );
+            })),
+          ),
+        ),
+      );
+      for (const a of ["rot", "lost", "both", "read", "reset"]) btn(a).disabled = busy;
+    }
+
+    function note(msg: string, ref?: string, cls = "") {
+      const li = h("li", { class: cls }, msg);
+      if (ref) li.append(" ", h("a", { href: ref }, `(${t.see})`));
+      log.append(li);
+    }
+
+    function flipBit(d: number, i: number) {
+      const b = disks[d][i];
+      b[4] ^= 0x20; // one bit: turns a letter of "version" to upper case
+      marks[d][i] = "";
+      tags[d][i] = t.damaged;
+    }
+
+    btn("rot").addEventListener("click", () => {
+      flipBit(0, 1);
+      draw();
+    });
+    btn("lost").addEventListener("click", () => {
+      disks[0][2] = block(t.staleBytes); // copy-on-write: the dropped write was to a new address
+      marks[0][2] = "";
+      tags[0][2] = t.stale;
+      draw();
+    });
+    btn("both").addEventListener("click", () => {
+      flipBit(0, 3);
+      disks[1][3][9] ^= 0x01;
+      tags[1][3] = t.damaged;
+      draw();
+    });
+    btn("reset").addEventListener("click", () => {
+      init();
+      draw();
+    });
+
+    btn("read").addEventListener("click", async () => {
+      busy = true;
+      log.replaceChildren();
+      result.textContent = "";
+      marks = [Array(4).fill(""), Array(4).fill("")];
+      draw();
+      let healed = 0;
+      let failedAt = -1;
+      for (let i = 0; i < 4 && failedAt < 0; i++) {
+        let ok = false;
+        for (const d of [0, 1]) {
+          const D = "AB"[d];
+          if (d === 1) note(fill(t.other, { i, d: D }), t.refs.retry);
+          else note(fill(t.readFrom, { i, d: D }));
+          marks[d][i] = "reading";
+          draw();
+          await wait(650);
+          const got = fletcher4(disks[d][i]);
+          if (sameCksum(got, expected[i])) {
+            marks[d][i] = "ok";
+            note(fill(t.ok, { i, d: D }), d === 0 ? t.refs.verify : undefined, "ok");
+            ok = true;
+            draw();
+            await wait(350);
+            break;
+          }
+          marks[d][i] = "bad";
+          errors[d] += 1;
+          const stale = tags[d][i] === t.stale;
+          note(fill(stale ? t.badLost : t.bad, { i, d: D, got: shortCksum(got), exp: shortCksum(expected[i]) }), t.refs.ecksum, "bad");
+          draw();
+          await wait(900);
+        }
+        if (ok && marks[0][i] === "bad") {
+          disks[0][i] = disks[1][i].slice();
+          marks[0][i] = "healed";
+          tags[0][i] = t.healed;
+          healed += 1;
+          note(fill(t.repaired, { i, d: "A" }), t.refs.repair, "ok");
+          draw();
+          await wait(650);
+        }
+        if (!ok) {
+          failedAt = i;
+          note(fill(t.failed, { i }), t.refs.fail, "bad");
+        }
+      }
+      result.textContent = failedAt >= 0 ? fill(t.doneErr, { i: failedAt }) : fill(t.doneOk, { good: 4, healed });
+      result.className = failedAt >= 0 ? "result result--bad" : "result result--ok";
+      busy = false;
+      draw();
+      btn("read").focus();
+    });
+
+    init();
+    root.querySelector<HTMLElement>(".controls")!.hidden = false;
+    draw();
+  }
+</script>
+
+<style>
+  .mirror {
+    margin: var(--space-6) 0 0;
+  }
+  .board {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--space-4);
+    max-width: 52rem;
+  }
+  .parent-title {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+    color: var(--fg-muted);
+  }
+  .expected {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-3) 0 var(--space-5);
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .expected :global(li) {
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: var(--space-2);
+    display: grid;
+    gap: 2px;
+  }
+  .expected :global(.who) {
+    font-weight: 600;
+  }
+  .expected :global(code),
+  .disks :global(code) {
+    font-size: 0.85em;
+  }
+  .disks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+  }
+  .disks :global(h3) {
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    margin: 0 0 var(--space-2);
+    font-size: var(--step-0);
+    font-weight: 600;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--space-1) var(--space-3);
+  }
+  .disks :global(.errs) {
+    font-weight: 400;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .disks :global(.errs--on) {
+    color: var(--bad);
+  }
+  .disks :global(ol) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .disks :global(.blk) {
+    position: relative;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: var(--space-2) var(--space-3);
+    display: grid;
+    gap: 2px;
+    font-size: var(--step--1);
+    background: var(--surface-2);
+    transition:
+      border-color var(--dur-2) var(--ease),
+      background var(--dur-2) var(--ease);
+  }
+  .disks :global(.bytes) {
+    font-family: var(--font-mono);
+  }
+  .disks :global(.sum) {
+    color: var(--fg-muted);
+  }
+  .disks :global(.sum code.off) {
+    color: var(--bad);
+  }
+  .disks :global(.tag) {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--fg-muted);
+  }
+  .disks :global(.blk--reading) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .disks :global(.blk--ok) {
+    border-color: var(--ok);
+  }
+  .disks :global(.blk--bad) {
+    border-color: var(--bad);
+    background: var(--bad-soft);
+  }
+  .disks :global(.blk--healed) {
+    border-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .controls {
+    margin-top: var(--space-4);
+  }
+  .controls[hidden] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .log {
+    margin: var(--space-4) 0 0;
+    padding-left: 2.2em;
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--step--1);
+    max-width: var(--measure);
+  }
+  .log :global(li.bad) {
+    color: var(--bad);
+  }
+  .log :global(li.ok) {
+    color: var(--ok);
+  }
+  .result {
+    margin-top: var(--space-3);
+    max-width: var(--measure);
+    font-weight: 500;
+  }
+  .result:global(.result--bad) {
+    color: var(--bad);
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version ol {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-2);
+  }
+  @media (max-width: 30rem) {
+    .expected {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .disks {
+      gap: var(--space-2);
+    }
+    .disks :global(.blk) {
+      padding: var(--space-2);
+    }
+    .disks :global(.tag) {
+      position: static;
+    }
+  }
+</style>

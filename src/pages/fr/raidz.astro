@@ -1,0 +1,351 @@
+---
+import Base from "../../layouts/Base.astro";
+import RaidzMap from "../../components/RaidzMap.astro";
+import WriteHole from "../../components/WriteHole.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "fr";
+const r = room("raidz");
+const V = "module/zfs/vdev_raidz.c";
+const L = {
+  maxParity: gh("include/sys/fs/zfs.h", 929),
+  pqr: gh(V, 121, 123),
+  pad: gh("module/zfs/zio.c", 4718, 4729),
+  nskip: gh(V, 699, 700),
+  skipPlace: gh(V, 509, 580),
+  skipIo: gh(V, 553, 572),
+  skipOpt: gh(V, 2481, 2506),
+  dataLoop: gh(V, 548, 576),
+  oneSector: gh(V, 2300, 2303),
+  genP: gh(V, 1141, 1156),
+  startWrite: gh(V, 2443, 2462),
+  readRow: gh(V, 2573, 2588),
+  cksum: gh(V, 2767, 2772),
+  readAll: gh(V, 3886, 3910),
+  combrecCall: gh(V, 3959),
+  order: gh(V, 3467, 3490),
+  simulate: gh(V, 3283, 3299),
+  einval: gh(V, 3385, 3392),
+  parityChoice: gh(V, 2125, 2155),
+  ecksum: gh(V, 3403, 3428),
+  verify: gh(V, 3132, 3163),
+  repair: gh(V, 3166, 3210),
+  scrubRead: gh(V, 2580, 2582),
+  state: gh(V, 3977, 3983),
+  swap: gh(V, 725, 734),
+  recurse: gh("module/zfs/dsl_scan.c", 2248, 2255),
+  visit: gh("module/zfs/dsl_scan.c", 2440),
+  window: gh("module/zfs/dsl_scan.c", 4844, 4848),
+  needIo: gh("module/zfs/dsl_scan.c", 4878, 4880),
+  dtlWindow: gh("module/zfs/dsl_scan.c", 914, 915),
+  expansion: gh(V, 152, 162),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="raidz"
+  title="RAID-Z · Uberblok"
+  description="Comment RAID-Z donne à chaque bloc sa propre bande, de largeur variable, si bien qu’il n’y a pas de trou d’écriture, et comment il démasque un disque qui ment : en interactif, avec le code d’OpenZFS."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Salle {roomNumber(r.id)}</p>
+      <h1>{r.title.fr}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          Le RAID-5 classique garde une bande fixe sur ses disques : des données et la parité de ces données. Pour en
+          changer un morceau, il doit écrire les nouvelles données et la nouvelle parité, sur place, en deux écritures
+          distinctes. Une coupure de courant entre les deux laisse une bande dont la parité ne correspond plus aux données,
+          et rien sur le disque ne le signale. Quand un disque meurt plus tard, son contenu est reconstruit à partir de
+          cette parité : faux, sans un mot. C’est le <em>trou d’écriture</em> (write hole).
+        </p>
+        <p>
+          Une petite écriture coûte cher aussi : pour calculer la nouvelle parité, le RAID-5 doit d’abord lire le reste de
+          la bande, ou les anciennes données et l’ancienne parité. RAID-Z ne fait ni l’un ni l’autre, parce qu’il ne met
+          jamais une bande à jour : chaque bloc a sa propre bande, aussi large que le bloc l’exige.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="map">
+      <h2 id="map"><span class="n">1</span> Un bloc, une bande</h2>
+      <div class="prose">
+        <p>
+          Quand ZFS écrit un bloc sur un vdev raidz, <code>vdev_raidz_map_alloc</code> découpe ce bloc, et ce bloc seul,
+          en colonnes, une par disque enfant. Les <a href={L.pqr}>colonnes de parité viennent d’abord</a>, P, puis Q et R
+          pour raidz2 et raidz3 (<a href={L.maxParity}>3 au plus</a>). Les colonnes de données suivent, chacune
+          <a href={L.dataLoop}>une suite contiguë du bloc</a> : pas un secteur par disque à tour de rôle, comme on dessine
+          souvent le RAID. Viennent enfin les secteurs de saut qui arrondissent l’allocation. Choisissez une taille, une
+          parité, un nombre de disques et une taille de secteur : la carte et chaque nombre sont ceux que calcule le code.
+        </p>
+      </div>
+      <RaidzMap lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="hole">
+      <h2 id="hole"><span class="n">2</span> Pas de trou d’écriture</h2>
+      <div class="prose">
+        <p>
+          La parité d’un bloc RAID-Z est <a href={L.genP}>calculée à partir de ses propres colonnes de données</a>, et
+          <a href={L.startWrite}>toutes les colonnes partent ensemble vers leurs disques</a> : rien d’ancien n’est lu,
+          rien d’ancien n’est réécrit. Le bloc va dans de l’espace libre, comme tout bloc dans ZFS
+          (<a href={roomUrl(lang, "copy-on-write")}>copie sur écriture</a>), et l’ancienne version reste où elle était
+          jusqu’à ce qu’un groupe de transactions qui n’en a plus besoin soit validé par une seule écriture d’uberblock
+          (<a href={roomUrl(lang, "txg")}>groupes de transactions</a>). Une coupure de courant au milieu laisse une bande à
+          moitié écrite que rien ne désigne.
+        </p>
+        <p class="muted">
+          Cette moitié de l’argument n’est pas dans <code>vdev_raidz.c</code> : RAID-Z écrit une bande entière, et la
+          copie sur écriture et la validation du txg garantissent que personne ne la lit avant qu’elle soit entière.
+        </p>
+      </div>
+      <WriteHole lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">L’idée, à trois profondeurs</h2>
+
+      <div class="depth">
+        <h3>En une phrase</h3>
+        <p class="lead prose">
+          RAID-Z ne met jamais une bande à jour : chaque bloc est écrit dans de l’espace libre comme une bande à lui seul,
+          données et parité ensemble, et la somme de contrôle de son parent dit quel disque ment quand on relit le bloc.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En un paragraphe</h3>
+        <p class="prose">
+          Un vdev raidz de <em>n</em> enfants avec <em>p</em> parités est un seul espace d’adresses, entrelacé secteur par
+          secteur sur les enfants. Un bloc de <em>s</em> secteurs y commence quelque part et occupe
+          ⌈<em>s</em> / (<em>n</em> − <em>p</em>)⌉ rangées : ses données dans des colonnes qui contiennent chacune une
+          suite contiguë du bloc, et <em>p</em> colonnes de parité aussi longues que la plus longue colonne de données. Un
+          petit bloc n’utilise que les colonnes dont il a besoin : <a href={L.oneSector}>un secteur de données coûte
+          toujours <em>p</em> + 1 secteurs</a>, quelle que soit la largeur. Chaque allocation est
+          <a href={L.nskip}>arrondie à un multiple de <em>p</em> + 1</a> secteurs, la taille du plus petit bloc. À la
+          lecture, ZFS ne lit que les colonnes de données et les vérifie contre la somme de contrôle du pointeur de bloc
+          parent. Si elle échoue et qu’aucun disque n’a signalé d’erreur, ZFS lit tout et essaie, une combinaison après
+          l’autre, quels disques ne pas croire, jusqu’à ce que la somme de contrôle soit vérifiée ; puis il réécrit la
+          colonne fausse.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En détail</h3>
+        <div class="prose">
+          <p>
+            <strong>Découper le bloc.</strong> Quand l’entrée-sortie atteint le vdev raidz, sa taille a été
+            <a href={L.pad}>complétée jusqu’à un secteur entier</a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={615}
+          to={649}
+          symbol="vdev_raidz_map_alloc"
+          notes={[
+            {
+              from: 617,
+              to: 623,
+              text: "Tout est en secteurs de <code>1 &lt;&lt; ashift</code>. <code>b</code> est l’endroit où le bloc commence sur le vdev, <code>s</code> sa taille. Le secteur <code>b</code> du vdev est sur l’enfant <code>b % dcols</code>, au secteur <code>b / dcols</code> de cet enfant.",
+            },
+            {
+              from: 628,
+              text: "Une rangée : sur un raidz qui n’est pas en cours d’extension, le bloc entier forme une seule bande.",
+            },
+            {
+              from: 634,
+              to: 643,
+              text: "<code>q</code> rangées pleines de données, <code>r</code> secteurs restants. Les <code>bc</code> « grandes colonnes » ont un secteur de plus : les <code>r</code> colonnes de données qui portent le reste, et les colonnes de parité, qui doivent être aussi longues que la plus longue colonne de données.",
+            },
+            {
+              from: 649,
+              text: "<code>tot</code> : données plus parité, les secteurs réellement écrits.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Placer les colonnes.</strong> La même fonction donne ensuite à chaque colonne son enfant, son décalage et sa taille.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={677}
+          to={700}
+          symbol="vdev_raidz_map_alloc"
+          notes={[
+            {
+              from: 679,
+              to: 686,
+              text: "La colonne <code>c</code> est sur l’enfant <code>f + c</code>. Après le dernier enfant, elle repart de l’enfant 0, un secteur plus bas : le bloc est une suite de secteurs consécutifs de l’espace d’adresses du vdev.",
+            },
+            {
+              from: 688,
+              to: 693,
+              text: "Une colonne au-delà d’<code>acols</code> ne porte pas de données (un bloc plus étroit que le vdev) ; les <code>bc</code> premières colonnes ont <code>q + 1</code> secteurs, les autres <code>q</code>.",
+            },
+            {
+              from: 699,
+              to: 700,
+              text: `Le bourrage : <code>roundup(tot, nparity + 1) - tot</code> secteurs de saut, à partir de la colonne <code>bc</code>. <a href="${L.skipPlace}">Où ils tombent</a> : un après chaque colonne courte, en revenant sur les colonnes de parité si la bande manque de colonnes. Ils sont écrits à zéro, <a href="${L.skipIo}">dans la même entrée-sortie que leur colonne</a>, ou <a href="${L.skipOpt}">dans une entrée-sortie facultative à part</a> pour une colonne sans données, pour que la file du disque puisse fusionner des écritures contiguës.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>Ce que l’allocateur réserve.</strong> La carte écrit <code>tot</code> secteurs ; l’allocateur a déjà
+            réservé la taille arrondie, calculée à partir de la seule taille.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={2305}
+          to={2317}
+          symbol="vdev_raidz_psize_to_asize"
+          notes={[
+            { from: 2315, text: "Secteurs de données : <code>psize</code> arrondi au secteur." },
+            { from: 2316, text: "Plus <code>nparity</code> secteurs de parité pour chaque rangée de <code>cols - nparity</code> secteurs de données entamée." },
+            {
+              from: 2317,
+              text: "Arrondi à un multiple de <code>nparity + 1</code>. Sur un raidz2 de 12 disques à secteurs de 4 Kio, un bloc de 4 Kio prend 12 Kio, un bloc de 8 Kio 24 Kio (deux secteurs de saut), un bloc de 40 Kio 48 Kio : la figure calcule tous les autres.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            En raidz1, la colonne de parité et la première colonne de données <a href={L.swap}>échangent leurs enfants
+            un mégaoctet sur deux</a> du vdev, pour que la parité ne soit pas toujours sur le même disque ; le commentaire
+            juge le gain douteux, mais le format sur disque doit le garder pour toujours. Mettez le premier secteur
+            <code>b</code> à 256 avec des secteurs de 4 Kio pour le voir.
+          </p>
+          <p>
+            <strong>Relire le bloc.</strong> Une lecture ordinaire <a href={L.readRow}>ne demande que les colonnes de
+            données</a> ; la parité est lue quand un disque manque, ou par un scrub ou un resilver. Le bloc est réassemblé
+            et <a href={L.cksum}>vérifié contre la somme de contrôle de son pointeur de bloc parent</a>. Un disque absent
+            est une erreur que ZFS connaît : sa colonne de données est reconstruite à partir de la première colonne de
+            parité encore valide, P avant Q avant R (<a href={L.parityChoice}>le choix</a>). Mais un disque peut aussi
+            renvoyer de faux octets en annonçant un succès. La somme de contrôle échoue alors, et aucun disque n’est en
+            cause. ZFS <a href={L.readAll}>lit toutes les colonnes</a> et
+            <a href={L.combrecCall}>appelle <code>vdev_raidz_combrec</code></a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={3523}
+          to={3558}
+          symbol="vdev_raidz_combrec"
+          notes={[
+            { from: 3523, text: "Supposer qu’un disque ment, puis deux, jusqu’à <code>nparity</code>." },
+            {
+              from: 3532,
+              to: 3536,
+              text: `<code>n</code> enfants logiques. Sans extension, c’est le nombre de disques, et l’enfant logique <em>i</em> est <a href="${L.simulate}">le disque <em>i</em></a>.`,
+            },
+            {
+              from: 3542,
+              to: 3546,
+              text: `La première combinaison, les disques 0 à <code>num_failures - 1</code> ; la boucle qui suit cet extrait parcourt les autres dans <a href="${L.order}">l’ordre que donne le commentaire au-dessus de la fonction</a>.`,
+            },
+            {
+              from: 3549,
+              to: 3558,
+              text: `<code>raidz_reconstruct</code> tient ces disques pour morts, reconstruit leurs colonnes de données à partir de la parité et redemande la somme de contrôle. <code>EINVAL</code> : avec les erreurs déjà connues, <a href="${L.einval}">plus de colonnes mortes que de parités</a> ; essayer davantage de pannes. 0 : la somme de contrôle est vérifiée.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            La somme de contrôle est l’oracle. La parité seule peut reconstruire une colonne que ZFS sait absente, mais
+            elle ne peut pas dire laquelle des colonnes qu’elle a sous la main ment ; la somme de contrôle, rangée un niveau
+            plus haut dans l’arbre, le peut. Quand une combinaison est vérifiée, <a href={L.ecksum}>ses colonnes de
+            données sont marquées en erreur de somme de contrôle</a>, la parité lue mais pas utilisée est
+            <a href={L.verify}>régénérée et comparée</a>, et <a href={L.repair}>les bonnes données sont réécrites</a> dans
+            chaque colonne trouvée fausse. Un disque qui renvoie une parité fausse n’est pas pris par une lecture ordinaire,
+            qui ne lit pas la parité ; <a href={L.scrubRead}>un scrub lit toutes les colonnes</a>. Avec plus de disques
+            absents que de parités, le vdev <a href={L.state}>ne peut pas être ouvert</a> ; avec un à <code>nparity</code>, il est dégradé.
+          </p>
+          <p>
+            <strong>Resilver.</strong> Quand un disque revient après avoir manqué des écritures, ZFS ne recopie pas le
+            disque entier. Un resilver parcourt l’arbre des pointeurs de bloc, <a href={L.recurse}>bloc indirect par bloc
+            indirect</a>, et <a href={L.visit}>visite chaque bloc</a>. Il saute les blocs <a href={L.window}>nés hors de
+            l’intervalle de txg</a> qu’<a href={L.dtlWindow}>un disque a manqués</a>, puis <a href={L.needIo}>demande au
+            vdev</a> si ce bloc touche un tel disque.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={4011}
+          to={4037}
+          symbol="vdev_raidz_need_resilver"
+          notes={[
+            { from: 4018, to: 4019, text: "Le bloc n’est pas né pendant qu’un disque manquait des écritures : rien à faire." },
+            { from: 4021, to: 4022, text: "Un bloc qui a au moins autant de colonnes que de disques les touche tous." },
+            {
+              from: 4024,
+              to: 4035,
+              text: "Sinon, seulement si l’un des <code>s + nparity</code> disques à partir de la première colonne a manqué des écritures. Dans la figure, déclarez un disque absent et lisez : le résultat dit si un resilver réécrirait ce bloc.",
+            },
+          ]}
+        />
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">Ce que la figure laisse de côté</h2>
+      <p class="prose muted">
+        La figure fait tourner l’arithmétique de <code>vdev_raidz_map_alloc</code> et de
+        <code>vdev_raidz_psize_to_asize</code> telle que le code l’écrit : chaque carte et chaque nombre sont ceux du code.
+        La lecture suit les décisions du code (quelles colonnes sont lues, quelle parité reconstruit quoi, l’ordre des
+        combinaisons, ce qui est réécrit), mais ne suit que si chaque colonne est juste ou fausse, pas ses octets : une
+        reconstruction est juste exactement quand toutes les colonnes qu’elle lit sont justes. Elle laisse de côté les
+        disques qui ont manqué des écritures (lus comme périmés, pas absents), les disques lents écartés exprès, les
+        blocs gang, le chemin du scrub et dRAID. Les blocs sont limités à 128 Kio et 16 disques pour que la carte reste
+        lisible. L’extension RAIDZ, qui <a href={L.expansion}>ajoute un disque à un raidz existant</a> et donne aux blocs
+        plus anciens des cartes de plusieurs rangées, sera pour une autre fois.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="raidz" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

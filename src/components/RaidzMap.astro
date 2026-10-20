@@ -1,0 +1,845 @@
+---
+// The figure of the RAID-Z room: the map vdev_raidz_map_alloc builds for one
+// block, for the visitor's psize, parity, children, ashift and start sector,
+// then a read of that block with damaged children. It runs src/lib/raidz.ts
+// (the arithmetic and the read path's decisions of vdev_raidz.c) and draws
+// with src/lib/raidz-view.ts, which also renders the default layout at build
+// time: without JavaScript the page shows that layout and its numbers. The refs
+// are listed in ANALYSIS.md, room "RAID-Z"; what is simplified: DECISIONS.md D4.1.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { mapAlloc } from "../lib/raidz";
+import { grid, readout, describe, summary, type RzStrings } from "../lib/raidz-view";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const V = "module/zfs/vdev_raidz.c";
+const refs = {
+  s: gh(V, 617, 619),
+  f: gh(V, 621),
+  o: gh(V, 623),
+  q: gh(V, 634),
+  r: gh(V, 640),
+  bc: gh(V, 643),
+  tot: gh(V, 649),
+  cols: gh(V, 655, 662),
+  nskip: gh(V, 699, 700),
+  asize: gh(V, 2315, 2317),
+  columns: gh(V, 677, 696),
+  skipPlace: gh(V, 509, 580),
+  swap: gh(V, 725, 734),
+  write: gh(V, 2443, 2462),
+  enxio: gh(V, 2522, 2531),
+  readRow: gh(V, 2573, 2588),
+  known: gh(V, 3712, 3739),
+  cksum: gh(V, 3865),
+  readAll: gh(V, 3886, 3910),
+  combrec: gh(V, 3523, 3558),
+  tooMany: gh(V, 3510, 3520),
+  unrecoverable: gh(V, 3959, 3963),
+  repair: gh(V, 3166, 3210),
+  parityVerify: gh(V, 3132, 3163),
+  scrub: gh(V, 2580, 2582),
+  resilver: gh(V, 4011, 4037),
+};
+const S0 = {
+  en: {
+    figure: "The map of one block on a raidz vdev",
+    psize: "Block size (psize, bytes)",
+    psizeHint: "a multiple of 512",
+    parity: "Parity",
+    children: "Children",
+    ashift: "ashift (sector size)",
+    start: "First sector on the vdev (b)",
+    write: "Write the block",
+    child: "child",
+    column: "column",
+    childN: "child {d}",
+    skipShort: "skip",
+    see: "code",
+    legendData: "data, numbered by sector of the block",
+    legendParity: "parity",
+    legendSkip: "skip sector (padding)",
+    legendFree: "another block, or free",
+    summary:
+      "{psize} block: {s}, {p}, {k}, on {used} of {dcols} columns. asize = {asize}, {ratio} times psize.",
+    secData1: "{n} data sector",
+    secDataN: "{n} data sectors",
+    secParity1: "{n} parity sector",
+    secParityN: "{n} parity sectors",
+    secSkip1: "{n} skip sector",
+    secSkipN: "{n} skip sectors",
+    swapped: "Single parity in an odd megabyte: columns 0 and 1 have swapped children (L725-L734).",
+    dParity: "Column {c}, {name}, on child {dev} from sector {off}: {n}.",
+    dData: "Column {c}, {name}, on child {dev} from sector {off}: sectors {from} to {to} of the block.",
+    dData1: "Column {c}, {name}, on child {dev} at sector {off}: sector {from} of the block.",
+    dData2: "Column {c}, {name}, on child {dev} from sector {off}: sectors {from} and {to} of the block.",
+    unitB: "B",
+    dEmpty: "Column {c}, on child {dev}: no data.",
+    dSkip: "Then one skip sector, sector {row} of that child.",
+    writing: "The data columns are filled one after the other, each a contiguous run of the block; then the parity columns, computed from this block alone; then every column is sent to its child at once.",
+    damage: "Damage the children, then read the block back",
+    hOk: "healthy",
+    hMissing: "missing",
+    hCorrupt: "returns bad data",
+    read: "Read the block",
+    reset: "Heal all",
+    rMissing: "{cols}: the child cannot be read (ENXIO).",
+    rFirst: "The read asks for the data columns only: {cols}. Parity is not read.",
+    rFirstParity: "A data column is missing, so the read asks for parity too: {cols}.",
+    rKnownOk: "{cols} rebuilt from {parity}.",
+    rKnownBad: "{cols} rebuilt from {parity}, but one of the columns used is wrong.",
+    rCksumOk: "The checksum in the parent block pointer verifies.",
+    rCksumBad: "The checksum in the parent block pointer fails, and no child reported an error that explains it.",
+    rTooMany: "{n} children are missing; raidz{np} can rebuild at most {np}.",
+    rReadAll: "Every column not read yet is read: {cols}.",
+    rReadAllNone: "Every column has been read already.",
+    rCombrec: "vdev_raidz_combrec: assume that 1 child is wrong, then up to {np}, and try each combination of the {n} children in turn.",
+    aTry: "{tgts}:",
+    aNotInStripe: "no column of this block there, nothing rebuilt,",
+    aParityOnly: "only parity ({cols}), nothing to rebuild,",
+    aRebuilt: "{cols} rebuilt from {parity},",
+    aOk: "the checksum verifies.",
+    aCksum: "the checksum fails.",
+    aEinval: "{tgts}: with the known errors, {dead} columns dead, more than {np}: EINVAL, try one more failure.",
+    rOk: "The block is returned.",
+    rFound: "Found at attempt {k}: {tgts}. The block is returned.",
+    rRepaired: "Written back with the good data: {cols}.",
+    rParityChecked: "The parity read but not used is regenerated and compared: it is right.",
+    rUndetected:
+      "Wrong parity remains in {cols}: this read did not need it and did not check it. A scrub reads every column and would.",
+    rFail: "No combination verifies: the read fails with a checksum error.",
+    rFailTooMany: "The read fails.",
+    resilverYes: "Resilver of {list}: this block is rewritten, it touches a child that missed writes.",
+    resilverAll: "Resilver of {list}: this block is rewritten, it spans every child.",
+    resilverNo: "Resilver of {list}: this block is skipped, none of the s + nparity children from f on missed writes.",
+    attemptsMore: "… {n} more combinations …",
+    attemptsLabel: "Combinations tried",
+  },
+  fr: {
+    figure: "La carte d’un bloc sur un vdev raidz",
+    psize: "Taille du bloc (psize, octets)",
+    psizeHint: "un multiple de 512",
+    parity: "Parité",
+    children: "Enfants",
+    ashift: "ashift (taille de secteur)",
+    start: "Premier secteur sur le vdev (b)",
+    write: "Écrire le bloc",
+    child: "enfant",
+    column: "colonne",
+    childN: "enfant {d}",
+    skipShort: "saut",
+    see: "code",
+    legendData: "données, numérotées par secteur du bloc",
+    legendParity: "parité",
+    legendSkip: "secteur de saut (bourrage)",
+    legendFree: "un autre bloc, ou libre",
+    summary:
+      "Un bloc de {psize} : {s}, {p}, {k}, sur {used} des {dcols} colonnes. asize = {asize}, {ratio} fois psize.",
+    secData1: "{n} secteur de données",
+    secDataN: "{n} secteurs de données",
+    secParity1: "{n} secteur de parité",
+    secParityN: "{n} secteurs de parité",
+    secSkip1: "{n} secteur de saut",
+    secSkipN: "{n} secteurs de saut",
+    swapped: "Parité simple dans un mégaoctet impair : les colonnes 0 et 1 ont échangé leurs enfants (L725-L734).",
+    dParity: "Colonne {c}, {name}, sur l’enfant {dev} à partir du secteur {off} : {n}.",
+    dData: "Colonne {c}, {name}, sur l’enfant {dev} à partir du secteur {off} : secteurs {from} à {to} du bloc.",
+    dData1: "Colonne {c}, {name}, sur l’enfant {dev} au secteur {off} : secteur {from} du bloc.",
+    dData2: "Colonne {c}, {name}, sur l’enfant {dev} à partir du secteur {off} : secteurs {from} et {to} du bloc.",
+    unitB: "o",
+    dEmpty: "Colonne {c}, sur l’enfant {dev} : pas de données.",
+    dSkip: "Puis un secteur de saut, le secteur {row} de cet enfant.",
+    writing: "Les colonnes de données se remplissent l’une après l’autre, chacune une suite contiguë du bloc ; puis les colonnes de parité, calculées à partir de ce seul bloc ; puis toutes les colonnes partent ensemble vers leurs enfants.",
+    damage: "Abîmer des enfants, puis relire le bloc",
+    hOk: "sain",
+    hMissing: "absent",
+    hCorrupt: "données fausses",
+    read: "Lire le bloc",
+    reset: "Tout réparer",
+    rMissing: "{cols} : l’enfant ne peut pas être lu (ENXIO).",
+    rFirst: "La lecture ne demande que les colonnes de données : {cols}. La parité n’est pas lue.",
+    rFirstParity: "Une colonne de données manque, la lecture demande donc aussi la parité : {cols}.",
+    rKnownOk: "{cols} reconstruite à partir de {parity}.",
+    rKnownBad: "{cols} reconstruite à partir de {parity}, mais l’une des colonnes utilisées est fausse.",
+    rCksumOk: "La somme de contrôle du pointeur de bloc parent est vérifiée.",
+    rCksumBad: "La somme de contrôle du pointeur de bloc parent échoue, et aucun enfant n’a signalé d’erreur qui l’explique.",
+    rTooMany: "{n} enfants manquent ; raidz{np} en reconstruit au plus {np}.",
+    rReadAll: "Toutes les colonnes pas encore lues sont lues : {cols}.",
+    rReadAllNone: "Toutes les colonnes ont déjà été lues.",
+    rCombrec: "vdev_raidz_combrec : supposer qu’un enfant est faux, puis jusqu’à {np}, et essayer tour à tour chaque combinaison des {n} enfants.",
+    aTry: "{tgts} :",
+    aNotInStripe: "aucune colonne de ce bloc là, rien à reconstruire,",
+    aParityOnly: "seulement de la parité ({cols}), rien à reconstruire,",
+    aRebuilt: "{cols} reconstruite à partir de {parity},",
+    aOk: "la somme de contrôle est vérifiée.",
+    aCksum: "la somme de contrôle échoue.",
+    aEinval: "{tgts} : avec les erreurs connues, {dead} colonnes mortes, plus que {np} : EINVAL, essayer une panne de plus.",
+    rOk: "Le bloc est rendu.",
+    rFound: "Trouvé à l’essai {k} : {tgts}. Le bloc est rendu.",
+    rRepaired: "Réécrites avec les bonnes données : {cols}.",
+    rParityChecked: "La parité lue mais pas utilisée est régénérée et comparée : elle est juste.",
+    rUndetected:
+      "{cols} contient toujours une parité fausse : cette lecture n’en avait pas besoin et ne l’a pas vérifiée. Un scrub lit toutes les colonnes et la trouverait.",
+    rFail: "Aucune combinaison n’est vérifiée : la lecture échoue sur une erreur de somme de contrôle.",
+    rFailTooMany: "La lecture échoue.",
+    resilverYes: "Resilver ({list}) : ce bloc est réécrit, il touche un enfant qui a manqué des écritures.",
+    resilverAll: "Resilver ({list}) : ce bloc est réécrit, il couvre tous les enfants.",
+    resilverNo: "Resilver ({list}) : ce bloc est sauté, aucun des s + nparity enfants à partir de f n’a manqué d’écriture.",
+    attemptsMore: "… {n} autres combinaisons …",
+    attemptsLabel: "Combinaisons essayées",
+  },
+  es: {
+    figure: "El mapa de un bloque en un vdev raidz",
+    psize: "Tamaño del bloque (psize, bytes)",
+    psizeHint: "un múltiplo de 512",
+    parity: "Paridad",
+    children: "Hijos",
+    ashift: "ashift (tamaño de sector)",
+    start: "Primer sector en el vdev (b)",
+    write: "Escribir el bloque",
+    child: "hijo",
+    column: "columna",
+    childN: "hijo {d}",
+    skipShort: "relleno",
+    see: "código",
+    legendData: "datos, numerados por sector del bloque",
+    legendParity: "paridad",
+    legendSkip: "sector de relleno (redondeo)",
+    legendFree: "otro bloque, o libre",
+    summary:
+      "Bloque de {psize}: {s}, {p}, {k}, en {used} de {dcols} columnas. asize = {asize}, {ratio} veces psize.",
+    secData1: "{n} sector de datos",
+    secDataN: "{n} sectores de datos",
+    secParity1: "{n} sector de paridad",
+    secParityN: "{n} sectores de paridad",
+    secSkip1: "{n} sector de relleno",
+    secSkipN: "{n} sectores de relleno",
+    swapped: "Paridad simple en un megabyte impar: las columnas 0 y 1 han intercambiado sus hijos (L725-L734).",
+    dParity: "Columna {c}, {name}, en el hijo {dev} desde el sector {off}: {n}.",
+    dData: "Columna {c}, {name}, en el hijo {dev} desde el sector {off}: sectores {from} a {to} del bloque.",
+    dData1: "Columna {c}, {name}, en el hijo {dev} en el sector {off}: sector {from} del bloque.",
+    dData2: "Columna {c}, {name}, en el hijo {dev} desde el sector {off}: sectores {from} y {to} del bloque.",
+    unitB: "B",
+    dEmpty: "Columna {c}, en el hijo {dev}: sin datos.",
+    dSkip: "Después, un sector de relleno, el sector {row} de ese hijo.",
+    writing: "Las columnas de datos se llenan una tras otra, cada una con un tramo contiguo del bloque; después las columnas de paridad, calculadas solo a partir de este bloque; después todas las columnas se envían a la vez a sus hijos.",
+    damage: "Dañar los hijos y volver a leer el bloque",
+    hOk: "sano",
+    hMissing: "ausente",
+    hCorrupt: "devuelve datos erróneos",
+    read: "Leer el bloque",
+    reset: "Reparar todo",
+    rMissing: "{cols}: el hijo no se puede leer (ENXIO).",
+    rFirst: "La lectura solo pide las columnas de datos: {cols}. La paridad no se lee.",
+    rFirstParity: "Falta una columna de datos, así que la lectura pide también la paridad: {cols}.",
+    rKnownOk: "{cols}: reconstrucción a partir de {parity}.",
+    rKnownBad: "{cols}: reconstrucción a partir de {parity}, pero una de las columnas usadas es errónea.",
+    rCksumOk: "La suma de comprobación del puntero de bloque padre se verifica.",
+    rCksumBad: "La suma de comprobación del puntero de bloque padre falla, y ningún hijo ha señalado un error que lo explique.",
+    rTooMany: "Faltan {n} hijos; raidz{np} puede reconstruir como máximo {np}.",
+    rReadAll: "Se leen todas las columnas que aún no se habían leído: {cols}.",
+    rReadAllNone: "Todas las columnas se han leído ya.",
+    rCombrec: "vdev_raidz_combrec: suponer que 1 hijo es erróneo, después hasta {np}, y probar por turno cada combinación de los {n} hijos.",
+    aTry: "{tgts}:",
+    aNotInStripe: "ahí no hay ninguna columna de este bloque, nada reconstruido,",
+    aParityOnly: "solo paridad ({cols}), nada que reconstruir,",
+    aRebuilt: "reconstrucción de {cols} a partir de {parity},",
+    aOk: "la suma de comprobación se verifica.",
+    aCksum: "la suma de comprobación falla.",
+    aEinval: "{tgts}: con los errores conocidos, {dead} columnas muertas, más de {np}: EINVAL, probar con un fallo más.",
+    rOk: "Se devuelve el bloque.",
+    rFound: "Combinación encontrada en el intento {k}: {tgts}. Se devuelve el bloque.",
+    rRepaired: "Reescritura con los datos buenos: {cols}.",
+    rParityChecked: "La paridad leída pero no usada se regenera y se compara: es correcta.",
+    rUndetected:
+      "Queda paridad errónea en {cols}: esta lectura no la necesitaba y no la ha comprobado. Un scrub lee todas las columnas y la detectaría.",
+    rFail: "Ninguna combinación se verifica: la lectura falla con un error de suma de comprobación.",
+    rFailTooMany: "La lectura falla.",
+    resilverYes: "Resilver de {list}: este bloque se reescribe, toca un hijo al que le faltan escrituras.",
+    resilverAll: "Resilver de {list}: este bloque se reescribe, abarca todos los hijos.",
+    resilverNo: "Resilver de {list}: este bloque se omite, a ninguno de los s + nparity hijos a partir de f le faltan escrituras.",
+    attemptsMore: "… {n} combinaciones más …",
+    attemptsLabel: "Combinaciones probadas",
+  },
+}[lang];
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs } as unknown as RzStrings;
+const t = UI[lang];
+// The default layout, rendered at build time: raidz2 on 6 children, 4K
+// sectors, a 24 KiB block, which is not a multiple of the data width.
+const D = { psize: 24576, nparity: 2, dcols: 6, ashift: 12, b: 0 };
+const L = mapAlloc(D.psize, D.ashift, D.dcols, D.nparity, D.b * 2 ** D.ashift);
+const id = `rz-${lang}`;
+---
+
+<figure class="rz" data-raidz data-strings={JSON.stringify(S)} data-lang={lang}>
+  <form class="rz-controls" hidden>
+    <label class="num">
+      <span>{S.psize}</span>
+      <input type="number" name="psize" min="512" max="131072" step="512" value={D.psize} inputmode="numeric" aria-describedby={`${id}-hint`} />
+      <small id={`${id}-hint`} class="muted">{S.psizeHint}</small>
+    </label>
+    <fieldset class="segmented">
+      <legend>{S.parity}</legend>
+      {
+        [1, 2, 3].map((p) => (
+          <label>
+            <input type="radio" name="nparity" value={p} checked={p === D.nparity} />
+            raidz{p}
+          </label>
+        ))
+      }
+    </fieldset>
+    <label class="num">
+      <span>{S.children}</span>
+      <input type="number" name="dcols" min="2" max="16" step="1" value={D.dcols} inputmode="numeric" />
+    </label>
+    <label class="num">
+      <span>{S.ashift}</span>
+      <select name="ashift">
+        {[9, 10, 11, 12, 13, 14, 15, 16].map((a) => <option value={a} selected={a === D.ashift}>{`${a} (${2 ** a} ${S.unitB})`}</option>)}
+      </select>
+    </label>
+    <label class="num">
+      <span>{S.start}</span>
+      <input type="number" name="b" min="0" max="100000000" step="1" value={D.b} inputmode="numeric" />
+    </label>
+  </form>
+  <p class="rz-summary" data-summary set:html={summary(L, S, lang)} />
+  <div class="rz-map" role="img" aria-label={`${S.figure}. ${summary(L, S, lang)}`} data-map set:html={grid(L, S)} />
+  <ul class="rz-legend" aria-hidden="true">
+    <li><span class="cell d d0">0</span>{S.legendData}</li>
+    <li><span class="cell p">P</span>{S.legendParity}</li>
+    <li><span class="cell k"></span>{S.legendSkip}</li>
+    <li><span class="cell e"></span>{S.legendFree}</li>
+  </ul>
+  <div class="rz-write" hidden>
+    <button class="btn btn--primary" type="button" data-act="write">{S.write}</button>
+    <p class="muted" data-write-note aria-live="polite"></p>
+  </div>
+  <div data-readout set:html={readout(L, S, lang)} />
+  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <div class="rz-read" hidden>
+    <h3>{S.damage}</h3>
+    <ul class="rz-health" data-health></ul>
+    <div class="buttons">
+      <button class="btn btn--primary" type="button" data-act="read">{S.read}</button>
+      <button class="btn" type="button" data-act="heal">{S.reset}</button>
+    </div>
+    <ol class="rz-steps" data-steps></ol>
+    <div class="rz-attempts" data-attempts hidden>
+      <h4>{S.attemptsLabel}</h4>
+      <ol></ol>
+    </div>
+    <p class="rz-result" data-result aria-live="polite"></p>
+  </div>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={describe(L, S, lang)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, fill, wait, reducedMotion } from "../lib/svg";
+  import { mapAlloc, readBlock, needResilver, type Health, type Layout } from "../lib/raidz";
+  import { grid, readout, describe, summary, readSteps, attemptText, type RzStrings } from "../lib/raidz-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-raidz]")) {
+    const S = strings<RzStrings>(root);
+    const lang = root.dataset.lang ?? "en";
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const form = q<HTMLFormElement>(".rz-controls");
+    const map = q("[data-map]");
+    const healthList = q("[data-health]");
+    const steps = q("[data-steps]");
+    const attemptsBox = q("[data-attempts]");
+    const result = q("[data-result]");
+    let L: Layout;
+    let health: Health[] = [];
+    let run = 0; // bumps on every change, so a running animation stops
+
+    const val = (n: string) => Number((form.elements.namedItem(n) as HTMLInputElement | RadioNodeList).value);
+
+    function inputs() {
+      const nparity = val("nparity");
+      const dc = form.elements.namedItem("dcols") as HTMLInputElement;
+      dc.min = String(nparity + 1);
+      let dcols = Math.round(val("dcols")) || 6;
+      dcols = Math.min(16, Math.max(nparity + 1, dcols));
+      const ashift = val("ashift");
+      let psize = Math.round(val("psize") / 512) * 512 || 512;
+      psize = Math.min(131072, Math.max(512, psize));
+      const b = Math.min(1e8, Math.max(0, Math.round(val("b")) || 0));
+      return { psize, nparity, dcols, ashift, b };
+    }
+
+    function cells(dev?: number) {
+      return [...map.querySelectorAll<HTMLElement>(dev === undefined ? ".cell" : `.cell[data-dev="${dev}"]`)];
+    }
+
+    function draw() {
+      run++;
+      const v = inputs();
+      L = mapAlloc(v.psize, v.ashift, v.dcols, v.nparity, v.b * 2 ** v.ashift);
+      map.innerHTML = grid(L, S);
+      const sum = summary(L, S, lang);
+      q("[data-summary]").innerHTML = sum;
+      map.setAttribute("aria-label", `${S.figure}. ${sum}`);
+      q("[data-readout]").innerHTML = readout(L, S, lang);
+      q("[data-describe]").innerHTML = describe(L, S, lang);
+      q("[data-write-note]").textContent = "";
+      if (health.length !== L.dcols) health = Array(L.dcols).fill("ok");
+      drawHealth();
+      clearRead();
+    }
+
+    function drawHealth() {
+      healthList.replaceChildren(
+        ...health.map((h, d) => {
+          const li = document.createElement("li");
+          const label = document.createElement("label");
+          const sel = document.createElement("select");
+          for (const [k, txt] of [["ok", S.hOk], ["missing", S.hMissing], ["corrupt", S.hCorrupt]]) {
+            const o = document.createElement("option");
+            o.value = k;
+            o.textContent = txt;
+            o.selected = k === h;
+            sel.append(o);
+          }
+          sel.addEventListener("change", () => {
+            health[d] = sel.value as Health;
+            clearRead();
+          });
+          label.append(fill(S.childN, { d }), sel);
+          li.append(label);
+          return li;
+        }),
+      );
+      paintHealth();
+    }
+
+    function paintHealth() {
+      for (const c of cells()) {
+        const d = Number(c.dataset.dev);
+        c.classList.toggle("gone", health[d] === "missing");
+        c.classList.toggle("bad", health[d] === "corrupt");
+        c.classList.remove("sim", "fixed", "pending", "lit");
+      }
+      for (const h of map.querySelectorAll<HTMLElement>(".h")) {
+        const d = Number(h.dataset.dev);
+        h.classList.toggle("gone", health[d] === "missing");
+        h.classList.toggle("bad", health[d] === "corrupt");
+      }
+    }
+
+    function clearRead() {
+      run++;
+      steps.replaceChildren();
+      attemptsBox.hidden = true;
+      attemptsBox.querySelector("ol")!.replaceChildren();
+      result.textContent = "";
+      paintHealth();
+    }
+
+    const li = (html: string) => {
+      const e = document.createElement("li");
+      e.innerHTML = html;
+      return e;
+    };
+
+    async function write() {
+      const me = ++run;
+      paintHealth();
+      const all = cells().filter((c) => c.dataset.n !== undefined);
+      all.sort((a, b) => Number(a.dataset.n) - Number(b.dataset.n));
+      q("[data-write-note]").textContent = S.writing;
+      if (reducedMotion()) return;
+      for (const c of all) c.classList.add("pending");
+      const dt = Math.max(12, Math.min(90, 1400 / all.length));
+      for (const c of all) {
+        await wait(dt);
+        if (me !== run) return;
+        c.classList.remove("pending");
+      }
+      await wait(150);
+      if (me !== run) return;
+      for (const c of all) c.classList.add("lit");
+      await wait(500);
+      for (const c of all) c.classList.remove("lit");
+    }
+
+    async function read() {
+      const me = ++run;
+      steps.replaceChildren();
+      result.textContent = "";
+      const box = attemptsBox.querySelector("ol")!;
+      box.replaceChildren();
+      attemptsBox.hidden = true;
+      paintHealth();
+      const R = readBlock(L, health);
+      const out = readSteps(L, R, S);
+      for (const s of out.steps) {
+        steps.append(li(s));
+        await wait(260);
+        if (me !== run) return;
+      }
+      if (R.attempts.length) {
+        attemptsBox.hidden = false;
+        const N = R.attempts.length;
+        const show = N <= 16 ? [...R.attempts.keys()] : [...Array(12).keys(), ...[N - 3, N - 2, N - 1]];
+        let shown = -1;
+        for (const i of show) {
+          if (i > shown + 1) box.append(li(fill(S.attemptsMore, { n: i - shown - 1 })));
+          shown = i;
+          const a = R.attempts[i];
+          const e = li(attemptText(L, a, S));
+          e.className = a.outcome;
+          box.append(e);
+          for (const c of cells()) c.classList.toggle("sim", a.tgts.includes(Number(c.dataset.dev)) && c.dataset.n !== undefined);
+          await wait(i < 12 ? 320 : 120);
+          if (me !== run) return;
+        }
+        for (const c of cells()) c.classList.remove("sim");
+      }
+      for (const c of cells()) if (R.repaired.includes(Number(c.dataset.c)) && c.dataset.n !== undefined && !c.classList.contains("k")) c.classList.add("fixed");
+      let html = out.result;
+      const missing = health.map((h, d) => (h === "missing" ? d : -1)).filter((d) => d >= 0);
+      if (missing.length) {
+        const list = missing.map((d) => fill(S.childN, { d })).join(", ");
+        const all = L.s + L.nparity >= L.dcols;
+        html += " " + fill(all ? S.resilverAll : needResilver(L, missing) ? S.resilverYes : S.resilverNo, { list }) + ` <a href="${S.refs.resilver}">(${S.see})</a>`;
+      }
+      result.innerHTML = html;
+    }
+
+    form.addEventListener("submit", (e) => e.preventDefault());
+    form.addEventListener("input", draw);
+    form.addEventListener("change", draw);
+    q("[data-act=write]").addEventListener("click", write);
+    q("[data-act=read]").addEventListener("click", read);
+    q("[data-act=heal]").addEventListener("click", () => {
+      health = Array(L.dcols).fill("ok");
+      drawHealth();
+      clearRead();
+    });
+
+    draw();
+    form.hidden = false;
+    q(".rz-write").hidden = false;
+    q(".rz-read").hidden = false;
+  }
+</script>
+
+<style>
+  .rz {
+    margin: var(--space-6) 0 0;
+  }
+  .rz-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4) var(--space-5);
+    align-items: end;
+    margin-bottom: var(--space-5);
+  }
+  .rz-controls[hidden],
+  .rz-write[hidden],
+  .rz-read[hidden],
+  .rz-attempts[hidden] {
+    display: none;
+  }
+  .num {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .num input,
+  .num select,
+  .rz-health :global(select) {
+    font: inherit;
+    font-size: var(--step-0);
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    padding: 0.45em 0.6em;
+    min-height: 44px;
+    width: 10rem;
+  }
+  .num small {
+    font-size: 0.75rem;
+  }
+  .rz-summary {
+    max-width: 44rem;
+    margin-bottom: var(--space-3);
+  }
+  .rz-map {
+    overflow-x: auto;
+  }
+  .rz-map :global(.rz-grid) {
+    display: grid;
+    grid-template-columns: 3.4rem repeat(var(--n), minmax(1.15rem, 3.2rem));
+    gap: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    width: max-content;
+    max-width: 100%;
+  }
+  .rz-map :global(.corner),
+  .rz-map :global(.rn) {
+    color: var(--fg-faint);
+    font-family: var(--font-body);
+    font-size: 0.7rem;
+    text-align: right;
+    padding-right: var(--space-2);
+    align-self: center;
+  }
+  .rz-map :global(.h),
+  .rz-map :global(.role) {
+    text-align: center;
+    color: var(--fg-muted);
+  }
+  .rz-map :global(.role) {
+    color: var(--fg);
+    min-height: 1.2em;
+  }
+  .rz-map :global(.h.gone) {
+    color: var(--fg-faint);
+    text-decoration: line-through;
+  }
+  .rz-map :global(.h.bad) {
+    color: var(--bad);
+  }
+  .cell,
+  .rz-map :global(.cell) {
+    display: grid;
+    place-items: center;
+    height: 1.9rem;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    transition:
+      opacity var(--dur-1) var(--ease),
+      background var(--dur-2) var(--ease);
+  }
+  .rz-map :global(.dense .cell) {
+    height: max(2px, calc(22rem / var(--rows)));
+    border-radius: 1px;
+  }
+  .cell.d,
+  .rz-map :global(.cell.d) {
+    background: var(--surface-2);
+    border-color: var(--line-strong);
+    color: var(--fg);
+  }
+  .cell.d1,
+  .rz-map :global(.cell.d1) {
+    background: var(--line);
+  }
+  .cell.p,
+  .rz-map :global(.cell.p) {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .cell.k,
+  .rz-map :global(.cell.k) {
+    border-color: var(--line-strong);
+    background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line-strong) 4px 5px);
+  }
+  .cell.e,
+  .rz-map :global(.cell.e) {
+    border: 1px dashed var(--line);
+  }
+  .rz-map :global(.cell.pending) {
+    opacity: 0.08;
+  }
+  .rz-map :global(.cell.lit) {
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .rz-map :global(.cell.gone) {
+    opacity: 0.25;
+  }
+  .rz-map :global(.cell.bad:not(.e)) {
+    border-color: var(--bad);
+    background: var(--bad-soft);
+  }
+  .rz-map :global(.cell.sim) {
+    outline: 2px solid var(--fg);
+    outline-offset: -2px;
+  }
+  .rz-map :global(.cell.fixed:not(.e)) {
+    border-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .rz-legend {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-3) 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .rz-legend li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .rz-legend .cell {
+    width: 1.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+  }
+  .rz-write {
+    margin-top: var(--space-4);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+  }
+  .rz-write p {
+    max-width: 40rem;
+    font-size: var(--step--1);
+  }
+  [data-readout] :global(.rz-readout) {
+    margin: var(--space-5) 0 0;
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--step--1);
+    max-width: 52rem;
+  }
+  [data-readout] :global(.rz-readout > div) {
+    display: grid;
+    grid-template-columns: 6rem 1fr;
+    gap: var(--space-3);
+    align-items: baseline;
+  }
+  [data-readout] :global(dd) {
+    margin: 0;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  [data-readout] :global(dd strong) {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  [data-readout] :global(dt code) {
+    color: var(--accent);
+  }
+  .rz-read {
+    margin-top: var(--space-6);
+  }
+  .rz-read h3 {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+    margin-bottom: var(--space-3);
+  }
+  .rz-health {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-4);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+    max-width: 52rem;
+    gap: var(--space-2) var(--space-3);
+  }
+  .rz-health :global(label) {
+    display: grid;
+    gap: 2px;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .rz-health :global(select) {
+    width: 100%;
+    font-size: var(--step--1);
+    min-height: 44px;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .rz-steps,
+  .rz-attempts ol {
+    margin: var(--space-4) 0 0;
+    padding-left: 2.2em;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+    max-width: 48rem;
+  }
+  .rz-attempts h4 {
+    margin: var(--space-4) 0 0;
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--fg-muted);
+  }
+  .rz-attempts :global(li.ok) {
+    color: var(--ok);
+  }
+  .rz-attempts :global(li.cksum),
+  .rz-attempts :global(li.einval) {
+    color: var(--fg-muted);
+  }
+  .rz-result {
+    margin-top: var(--space-4);
+    max-width: 44rem;
+    min-height: 1.5em;
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version :global(ol) {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-1);
+  }
+  @media (max-width: 30rem) {
+    .num input,
+    .num select {
+      width: 8.5rem;
+    }
+    [data-readout] :global(.rz-readout > div) {
+      grid-template-columns: 4.6rem 1fr;
+      gap: var(--space-2);
+    }
+    .rz-map :global(.rz-grid) {
+      grid-template-columns: 2.4rem repeat(var(--n), minmax(1.1rem, 2.6rem));
+      gap: 2px;
+      font-size: 0.7rem;
+    }
+    .rz-map :global(.cell) {
+      height: 1.6rem;
+    }
+    /* More than 12 children: three-character labels (D10, D11...) no longer fit side by side. */
+    .rz-map :global(.rz-grid.wide) {
+      grid-template-columns: 2.4rem repeat(var(--n), minmax(0.9rem, 2.6rem));
+      gap: 1px;
+    }
+    .rz-map :global(.wide .h),
+    .rz-map :global(.wide .role) {
+      font-size: 0.5rem;
+      letter-spacing: -0.03em;
+    }
+  }
+</style>

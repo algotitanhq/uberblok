@@ -1,0 +1,330 @@
+/* The vdevs room's figure (VdevLab): controls, the 2D tree, the 3D canvas,
+   panels. Contents are rendered as HTML and SVG strings, so the rules are
+   global, under the figure's root. Class colours reuse the code tokens:
+   normal muted, log blue, special violet, dedup green, each 4.5:1 on its ground. */
+.vd {
+  margin: var(--space-6) 0 0;
+  --c-normal: var(--fg-muted);
+  --c-log: var(--code-function);
+  --c-special: var(--code-type);
+  --c-dedup: var(--code-string);
+}
+.vd .vd-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.vd .vd-bar[hidden],
+.vd .vd-now[hidden],
+.vd [hidden] {
+  display: none;
+}
+.vd .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.vd .glabel {
+  font-size: var(--step--1);
+  color: var(--fg-muted);
+  margin-right: var(--space-2);
+}
+.vd .btn[aria-pressed="true"]::before {
+  content: "✓ " / "";
+  color: var(--accent);
+}
+.vd .btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+.vd .kd {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 2px;
+  margin-right: 0.45em;
+  background: var(--accent);
+  vertical-align: 0.02em;
+}
+.vd .vd-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 60rem) {
+  .vd .vd-grid {
+    grid-template-columns: minmax(0, 1fr) 16rem;
+    align-items: start;
+  }
+}
+.vd .vd-stage {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--space-3);
+  min-width: 0;
+}
+.vd .vd-help {
+  font-size: var(--step--1);
+  margin: var(--space-2) 0 0;
+}
+.vd-tree {
+  display: block;
+  width: 100%;
+  max-width: 34rem;
+  height: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.vd-tree .edge {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.2;
+}
+.vd-tree .edge.on {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.vd-tree .n {
+  cursor: pointer;
+}
+.vd-tree .n rect {
+  fill: var(--surface-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.vd-tree .n .bias {
+  stroke: none;
+  fill: var(--c-normal);
+}
+.vd-tree .n.c-log .bias { fill: var(--c-log); }
+.vd-tree .n.c-special .bias { fill: var(--c-special); }
+.vd-tree .n.c-dedup .bias { fill: var(--c-dedup); }
+.vd-tree .n.c-log > rect:first-child { stroke: var(--c-log); }
+.vd-tree .n.c-special > rect:first-child { stroke: var(--c-special); }
+.vd-tree .n.c-dedup > rect:first-child { stroke: var(--c-dedup); }
+.vd-tree .n.on > rect:first-child {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: var(--accent-soft);
+}
+.vd-tree .n.sel > rect:first-child {
+  stroke: var(--fg);
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
+}
+.vd-tree .nm {
+  fill: var(--fg);
+}
+.vd-tree .ty,
+.vd-tree .sec {
+  fill: var(--fg-muted);
+  font-family: var(--font-caption);
+  font-style: italic;
+  font-size: 13px;
+}
+.vd-tree .sec {
+  fill: var(--accent);
+}
+.vd-tree .landed rect {
+  fill: var(--accent);
+  stroke: none;
+}
+.vd-tree .landed text {
+  fill: var(--fg);
+  font-size: 11px;
+}
+.vd-tree .t-root rect,
+.vd-tree .t-replacing rect,
+.vd-tree .t-spare rect {
+  stroke-dasharray: none;
+}
+.vd-tree .t-replacing > rect:first-child,
+.vd-tree .t-spare > rect:first-child {
+  stroke: var(--bad);
+}
+.vd .vd-3d {
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.vd .vd-canvas {
+  display: block;
+  width: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.vd .vd-canvas:active {
+  cursor: grabbing;
+}
+.vd .panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+.vd .panel h3 {
+  font-family: var(--font-caption);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--step-1);
+  color: var(--accent);
+  letter-spacing: 0;
+  margin: 0 0 var(--space-2);
+}
+.vd .panel h4 {
+  font-size: var(--step--1);
+  font-weight: 600;
+  margin: var(--space-3) 0 var(--space-1);
+}
+.vd .aux-list {
+  font-size: var(--step--1);
+}
+.vd .aux-list p {
+  margin: 0 0 var(--space-1);
+  color: var(--fg-muted);
+}
+.vd .aux-list ul {
+  margin: 0 0 var(--space-3);
+  padding-left: 1.2em;
+}
+.vd .aux-list li.inuse {
+  color: var(--fg-muted);
+}
+.vd .vd-sel {
+  margin-top: var(--space-4);
+}
+.vd .vd-pick select {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 0.5em 0.6em;
+  min-height: 44px;
+  max-width: 100%;
+}
+.vd .vd-why {
+  font-size: var(--step--1);
+  margin: 0;
+  min-height: 1.4em;
+}
+.vd .vd-panels {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 60rem) {
+  .vd .vd-panels {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+  .vd .vd-panels > :first-child {
+    grid-row: span 2;
+  }
+}
+.vd .path {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+}
+.vd .path li.taken {
+  font-weight: 600;
+}
+.vd .last-head,
+.vd .walk-head,
+.vd .ops-name {
+  font-size: var(--step--1);
+  margin: 0 0 var(--space-2);
+}
+.vd .walk,
+.vd .walk ul {
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: var(--step--1);
+  list-style: none;
+}
+.vd .walk li {
+  margin: var(--space-1) 0;
+  border-left: 1px solid var(--line-strong);
+  padding-left: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.vd .walk .role {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--accent);
+}
+.vd .ty {
+  font-family: var(--font-caption);
+  font-style: italic;
+  color: var(--fg-muted);
+}
+.vd a.see {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+.vd table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+.vd th,
+.vd td {
+  text-align: left;
+  padding: 0.3em 0.4em;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.vd thead th {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+.vd td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.vd .classes tr.empty {
+  color: var(--fg-faint);
+}
+.vd .sw {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 2px;
+  margin-right: 0.45em;
+  background: var(--c-normal);
+}
+.vd .sw-log { background: var(--c-log); }
+.vd .sw-special,
+.vd .sw-special_embedded_log { background: var(--c-special); }
+.vd .sw-dedup { background: var(--c-dedup); }
+.vd .vd-now {
+  margin: var(--space-4) 0 0;
+  font-size: var(--step--1);
+  max-width: 52rem;
+  min-height: 3em;
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-3);
+}
+.vd .text-version {
+  margin-top: var(--space-5);
+  max-width: var(--measure);
+  font-size: var(--step--1);
+}
+.vd .tv-tree {
+  list-style: none;
+  padding-left: 0;
+}
+.vd .classes th:last-child,
+.vd .classes td:last-child {
+  white-space: nowrap;
+}

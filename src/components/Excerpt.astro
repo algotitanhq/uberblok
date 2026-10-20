@@ -1,0 +1,168 @@
+---
+import { codeToHtml, createCssVariablesTheme, type ShikiTransformer } from "shiki";
+import { excerpt } from "../lib/excerpts";
+import { OPENZFS_TAG } from "../lib/openzfs";
+import { UI } from "../lib/ui";
+import type { Lang } from "../lib/rooms";
+
+interface Note {
+  from: number;
+  to?: number;
+  text: string;
+}
+interface Props {
+  lang: Lang;
+  path: string;
+  from: number;
+  to: number;
+  symbol: string;
+  notes: Note[];
+}
+const { lang, path, from, to, symbol, notes } = Astro.props;
+const t = UI[lang];
+const ex = excerpt(path, from, to);
+
+// Token colours are CSS variables, mapped to the theme tokens in the style below.
+const theme = createCssVariablesTheme({ name: "uberblok", variablePrefix: "--shiki-" });
+
+const marked = new Set<number>();
+for (const n of notes) for (let l = n.from; l <= (n.to ?? n.from); l++) marked.add(l);
+
+const lineNumbers: ShikiTransformer = {
+  pre(node) {
+    node.properties.tabindex = "0";
+    delete node.properties.style;
+  },
+  line(node, i) {
+    const n = from + i - 1;
+    node.properties["data-line"] = String(n);
+    if (marked.has(n)) this.addClassToHast(node, "mark");
+  },
+};
+const html = await codeToHtml(ex.code, { lang: "c", theme, transformers: [lineNumbers] });
+const range = (n: Note) => (n.to && n.to !== n.from ? `L${n.from}–L${n.to}` : `L${n.from}`);
+---
+
+<figure class="excerpt">
+  <figcaption>
+    <span class="symbol"><code>{symbol}</code></span>
+    <span class="where">
+      {t.excerptOf} <code>{path}</code>, {t.lines}
+      {from}–{to}, OpenZFS {OPENZFS_TAG}.
+      <a href={ex.url}>{t.viewOnGitHub}</a>
+    </span>
+  </figcaption>
+  <div class="code" set:html={html} />
+  <ol class="notes">
+    {
+      notes.map((n) => (
+        <li>
+          <span class="range">{range(n)}</span>
+          <span set:html={n.text} />
+        </li>
+      ))
+    }
+  </ol>
+</figure>
+
+<style>
+  .excerpt {
+    margin: var(--space-6) 0 0;
+    max-width: 52rem;
+  }
+  figcaption {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-3);
+  }
+  .symbol code {
+    font-size: var(--step-0);
+    color: var(--accent);
+  }
+  .where {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .code {
+    --shiki-foreground: var(--fg);
+    --shiki-background: var(--surface);
+    --shiki-token-comment: var(--code-comment);
+    --shiki-token-keyword: var(--code-keyword);
+    --shiki-token-constant: var(--code-number);
+    --shiki-token-string: var(--code-string);
+    --shiki-token-string-expression: var(--code-string);
+    --shiki-token-function: var(--code-function);
+    --shiki-token-parameter: var(--fg);
+    --shiki-token-punctuation: var(--fg-muted);
+    --shiki-token-link: var(--code-type);
+  }
+  .code :global(pre) {
+    margin: 0;
+    padding: var(--space-4) 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.55;
+    tab-size: 8;
+  }
+  .code :global(code) {
+    display: block;
+    min-width: max-content;
+    font-size: inherit;
+  }
+  .code :global(.line) {
+    display: inline-block;
+    min-width: 100%;
+    padding-right: var(--space-4);
+  }
+  .code :global(.line::before) {
+    content: attr(data-line);
+    display: inline-block;
+    width: 3.2rem;
+    padding-right: var(--space-3);
+    text-align: right;
+    color: var(--fg-faint);
+    user-select: none;
+  }
+  .code :global(.line.mark) {
+    background: var(--code-mark);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .notes {
+    list-style: none;
+    margin: var(--space-4) 0 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+    max-width: var(--measure);
+  }
+  .notes li {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: var(--space-3);
+    font-size: var(--step--1);
+    line-height: 1.55;
+  }
+  .range {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  @media (max-width: 30rem) {
+    .notes li {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+    .code :global(pre) {
+      font-size: 0.74rem;
+      tab-size: 4;
+    }
+    .code :global(.line::before) {
+      width: 2.8rem;
+    }
+  }
+</style>

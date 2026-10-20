@@ -1,0 +1,380 @@
+---
+// The compression figure of the compression, dedup and encryption room: one
+// block in the write pipeline, its size, the pool's ashift, the compression
+// and the data chosen by the visitor; the limit of zio_get_compression_max_size
+// drawn on the block, the compressor's output against it, the branches of
+// zio_write_compress with the one that decides, and what is allocated.
+// src/lib/transforms.ts decides every outcome, src/lib/transforms-view.ts
+// draws it, at build time (readable without JavaScript) and in the browser.
+// Refs: ANALYSIS.md, room "Compression, dedup, encryption", excerpts 1, 4, 5;
+// simplifications: DECISIONS.md D10.2.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { compress } from "../lib/transforms";
+import { compressBars, compressPath, compressResult, compressTable, compressLine, presetOut, size, LSIZES, ASHIFTS, ALGOS, PRESETS, type TrStrings } from "../lib/transforms-view";
+import { TRANSFORMS_STRINGS } from "../lib/transforms-strings";
+import "../styles/transforms.css";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const Z = "module/zfs/zio.c";
+const S_SPA = "include/sys/spa.h";
+const refs = {
+  compressOn: gh(Z, 1982, 1984),
+  zero: gh(Z, 1986, 1987),
+  over: gh(Z, 1991, 2001),
+  embed: gh(Z, 2002, 2017),
+  round: gh(Z, 2018, 2039),
+  k_plain: gh(S_SPA, 123, 186),
+  k_hole: gh(S_SPA, 365, 373),
+  k_embedded: gh(S_SPA, 265, 323),
+};
+const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const t = UI[lang];
+const x0 = { lsize: 131072, ashift: 12, algo: "lz4" as const, zero: false, out: presetOut("text", 131072) };
+const r0 = compress(x0);
+const presetName: Record<string, string> = { text: S.pText, random: S.pRandom, zero: S.pZero, tiny: S.pTiny };
+const id = `cl-out-${lang}`;
+---
+
+<figure class="cl" data-compress data-strings={JSON.stringify(S)} aria-label={S.cFigure}>
+  <div class="cl-bar" hidden>
+    <div class="buttons" role="group" aria-label={S.dataLabel}>
+      <span class="glabel">{S.dataLabel}</span>
+      {PRESETS.map((p) => <button class="btn" type="button" data-preset={p} aria-pressed={p === "text" ? "true" : "false"}>{presetName[p]}</button>)}
+    </div>
+    <div class="buttons out-row">
+      <label class="glabel" for={id}>{S.outInput}</label>
+      <input id={id} class="out-range" type="range" min="1" max={x0.lsize} step="1" value={x0.out} data-out-range aria-describedby={`${id}-n`} />
+      <input id={`${id}-n`} class="out-num" type="number" min="1" max={x0.lsize} step="1" value={x0.out} data-out-num aria-label={S.outInput} />
+    </div>
+    <div class="buttons" role="group" aria-label={S.lsizeLabel}>
+      <span class="glabel">{S.lsizeLabel}</span>
+      {LSIZES.map((l) => <button class="btn" type="button" data-lsize={l} aria-pressed={l === x0.lsize ? "true" : "false"}>{size(S, l)}</button>)}
+    </div>
+    <div class="buttons" role="group" aria-label={S.ashiftLabel}>
+      <span class="glabel">{S.ashiftLabel}</span>
+      {ASHIFTS.map((a) => <button class="btn" type="button" data-ashift={a} aria-pressed={a === x0.ashift ? "true" : "false"}>{`${size(S, 2 ** a)} (${a})`}</button>)}
+    </div>
+    <div class="buttons" role="group" aria-label={S.algoLabel}>
+      <span class="glabel">{S.algoLabel}</span>
+      {ALGOS.map((a) => <button class="btn" type="button" data-algo={a} aria-pressed={a === x0.algo ? "true" : "false"}>{a === "off" ? S.algoOff : a.toUpperCase()}</button>)}
+    </div>
+  </div>
+
+  <div class="cl-grid">
+    <div class="panel" data-bars set:html={compressBars(S, x0, r0)} />
+    <div class="panel" data-path set:html={compressPath(S, x0, r0)} />
+    <div class="panel result" data-result set:html={compressResult(S, x0, r0)} />
+  </div>
+  <p class="cl-now" data-now aria-hidden="true" hidden></p>
+  <p class="visually-hidden" data-live aria-live="polite"></p>
+  <noscript><p class="muted">{S.cNoScript}</p></noscript>
+  <div class="cl-table" data-table tabindex="0" role="region" aria-label={t.scrollTable} set:html={compressTable(S, x0)} />
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <p data-describe set:html={compressLine(S, x0, r0)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, reducedMotion } from "../lib/svg";
+  import { compress, type Algo } from "../lib/transforms";
+  import { compressBars, compressPath, compressResult, compressTable, compressLine, presetOut, spoken, type Preset, type TrStrings } from "../lib/transforms-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-compress]")) {
+    const S = strings<TrStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const range = q<HTMLInputElement>("[data-out-range]");
+    const numIn = q<HTMLInputElement>("[data-out-num]");
+    const x = { lsize: 131072, ashift: 12, algo: "lz4" as Algo, zero: false, out: Number(range.value) };
+    let preset: Preset | null = "text";
+
+    function controls() {
+      const pressed = (sel: string, key: string, v: string) => {
+        for (const b of root.querySelectorAll<HTMLElement>(sel)) b.setAttribute("aria-pressed", String(b.dataset[key] === v));
+      };
+      pressed("[data-preset]", "preset", preset ?? "");
+      pressed("[data-lsize]", "lsize", String(x.lsize));
+      pressed("[data-ashift]", "ashift", String(x.ashift));
+      pressed("[data-algo]", "algo", x.algo);
+      for (const el of [range, numIn]) {
+        el.max = String(x.lsize);
+        el.value = String(Math.min(x.out, x.lsize));
+        // The output does not matter for zeros or with compression off: the control stays, marked as not applying.
+        if (x.zero || x.algo === "off") el.setAttribute("aria-disabled", "true");
+        else el.removeAttribute("aria-disabled");
+      }
+    }
+
+    function render(announce: boolean) {
+      const r = compress(x);
+      q("[data-bars]").innerHTML = compressBars(S, x, r);
+      q("[data-path]").innerHTML = compressPath(S, x, r);
+      q("[data-result]").innerHTML = compressResult(S, x, r);
+      q("[data-table]").innerHTML = compressTable(S, x);
+      q("[data-describe]").innerHTML = compressLine(S, x, r);
+      controls();
+      if (announce && !reducedMotion()) {
+        // The branches light up in order, down to the one that decides; not while the range is dragged.
+        const items = root.querySelectorAll<HTMLElement>("[data-path] li:not(.skip)");
+        items.forEach((li, i) => li.animate([{ opacity: 0.25 }, { opacity: 1 }], { duration: 260, delay: i * 160, fill: "backwards", easing: "ease-out" }));
+      }
+      if (announce) {
+        // One announcement per action (see DedupLab): emptied, then filled on the next frame.
+        const html = `<b>${S[`o_${r.outcome}`]}</b> ${compressLine(S, x, r)}`;
+        const el = q("[data-now]");
+        el.hidden = false;
+        el.innerHTML = html;
+        const live = q("[data-live]");
+        live.textContent = "";
+        requestAnimationFrame(() => (live.textContent = spoken(html)));
+      }
+    }
+
+    function setPreset(p: Preset) {
+      preset = p;
+      x.zero = p === "zero";
+      if (!x.zero) x.out = presetOut(p, x.lsize);
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el)) return;
+      const d = el.dataset;
+      if (d.preset) setPreset(d.preset as Preset);
+      else if (d.lsize) {
+        x.lsize = Number(d.lsize);
+        if (preset && preset !== "zero") x.out = presetOut(preset, x.lsize);
+        else x.out = Math.min(x.out, x.lsize);
+      } else if (d.ashift) x.ashift = Number(d.ashift);
+      else if (d.algo) x.algo = d.algo as Algo;
+      else return;
+      render(true);
+    });
+
+    // The range moves the figure as it is dragged and announces once, when it is released (change).
+    const fromInput = (el: HTMLInputElement, announce: boolean) => {
+      if (el.getAttribute("aria-disabled") === "true") {
+        el.value = String(Math.min(x.out, x.lsize));
+        return;
+      }
+      const v = Math.max(1, Math.min(x.lsize, Math.round(Number(el.value) || 1)));
+      x.out = v;
+      preset = null;
+      x.zero = false;
+      render(announce);
+    };
+    range.addEventListener("input", () => fromInput(range, false));
+    range.addEventListener("change", () => fromInput(range, true));
+    numIn.addEventListener("change", () => fromInput(numIn, true));
+
+    render(false);
+    q(".cl-bar").hidden = false;
+  }
+</script>
+
+<style>
+  .cl {
+    margin: var(--space-6) 0 0;
+  }
+  .cl-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+  }
+  .cl-bar[hidden],
+  .cl-now[hidden] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .glabel {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    margin-right: var(--space-2);
+    min-width: 9em;
+  }
+  .out-range {
+    flex: 1 1 12rem;
+    max-width: 24rem;
+    accent-color: var(--accent);
+  }
+  .out-num {
+    width: 7.5em;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    padding: 0.3em 0.5em;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--fg);
+  }
+  .out-range[aria-disabled="true"],
+  .out-num[aria-disabled="true"] {
+    opacity: 0.45;
+  }
+  .cl-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+  .cl-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--space-3) var(--space-4);
+    min-width: 0;
+  }
+  .panel :global(.bars) {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .panel :global(.rlabel) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    margin-bottom: var(--space-1);
+    font-variant-numeric: tabular-nums;
+  }
+  .panel :global(.rlabel .lim) {
+    display: block;
+    color: var(--accent);
+  }
+  .panel :global(.track) {
+    position: relative;
+    height: 1.6rem;
+    border-radius: 4px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .panel :global(.bar) {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+  }
+  .panel :global(.bar.block) {
+    right: 0;
+    background: var(--code-type);
+    opacity: 0.35;
+  }
+  .panel :global(.bar.block.zero) {
+    background: repeating-linear-gradient(45deg, var(--line-strong) 0 4px, transparent 4px 8px);
+    opacity: 1;
+  }
+  .panel :global(.bar.out.fits) {
+    background: var(--accent);
+  }
+  .panel :global(.bar.out.over) {
+    background: var(--bad);
+  }
+  .panel :global(.tick) {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--bg);
+    opacity: 0.8;
+  }
+  .panel :global(.vline) {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 0;
+    z-index: 1;
+  }
+  .panel :global(.vline.eighth) {
+    border-left: 2px dashed var(--fg-muted);
+  }
+  .panel :global(.vline.limit) {
+    border-left: 3px solid var(--fg);
+  }
+  .panel :global(.sectors .sec) {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    background: var(--ok);
+    border-right: 1px solid var(--surface);
+    box-sizing: border-box;
+  }
+  .panel :global(.bar-note) {
+    font-size: var(--step--1);
+    font-style: italic;
+    color: var(--fg-muted);
+    min-height: 1.6rem;
+    display: flex;
+    align-items: center;
+  }
+  .panel :global(.path) {
+    margin: 0;
+    padding-left: 1.4em;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .panel :global(.path li.skip) {
+    color: var(--fg-faint);
+  }
+  .panel :global(.path li.taken) {
+    font-weight: 600;
+  }
+  .panel :global(.path li.taken::marker) {
+    color: var(--accent);
+  }
+  .result :global(.outcome) {
+    margin: 0 0 var(--space-2);
+    font-size: var(--step--1);
+  }
+  .result :global(.bpfields) {
+    margin: 0 0 var(--space-3);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .cl :global(a.see) {
+    font-size: 0.85em;
+    color: var(--fg-muted);
+    font-weight: 400;
+  }
+  .cl-now {
+    margin: var(--space-4) 0 0;
+    font-size: var(--step--1);
+    max-width: 52rem;
+    min-height: 3em;
+    border-left: 2px solid var(--accent);
+    padding-left: var(--space-3);
+  }
+  .cl-table {
+    margin-top: var(--space-5);
+    overflow-x: auto;
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  @media (max-width: 48rem) {
+    .cl-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .panel {
+      padding: var(--space-2) var(--space-3);
+    }
+  }
+</style>

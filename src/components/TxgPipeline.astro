@@ -1,0 +1,836 @@
+---
+// The figure of the Transaction groups room: the open / quiescing / syncing
+// pipeline, run by the model in src/lib/txg.ts (the two threads of txg.c and
+// their wait conditions). Every event the figure shows names its code; the
+// refs below are the permalinks, all listed in ANALYSIS.md (room "Transaction
+// groups"). What the model simplifies: DECISIONS.md D3.1.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { DIRTY_MAX, DIRTY_SYNC, SYNC_PERCENT, TXG_TIMEOUT } from "../lib/txg";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const refs = {
+  hold: gh("module/zfs/txg.c", 333, 338),
+  kick: gh("module/zfs/dsl_pool.c", 997, 1002),
+  rele: gh("module/zfs/txg.c", 372, 375),
+  drained: gh("module/zfs/txg.c", 422, 428),
+  "wait-synced": gh("module/zfs/txg.c", 714, 717),
+  "wait-open": gh("module/zfs/dmu.c", 1101, 1106),
+  "wake-timeout": gh("module/zfs/txg.c", 542, 553),
+  "wake-waiter": gh("module/zfs/txg.c", 545),
+  "wake-handoff": gh("module/zfs/txg.c", 546),
+  "want-quiesce": gh("module/zfs/txg.c", 568, 577),
+  quiesce: gh("module/zfs/txg.c", 398, 413),
+  handoff: gh("module/zfs/txg.c", 662, 666),
+  sync: gh("module/zfs/txg.c", 589, 593),
+  pass: gh("module/zfs/spa.c", 10675, 10676),
+  noop: gh("module/zfs/spa.c", 10749, 10764),
+  converged: gh("module/zfs/spa.c", 10765),
+  uberblock: gh("module/zfs/vdev_label.c", 2109, 2154),
+  "no-uberblock": gh("module/zfs/vdev_label.c", 2071, 2077),
+  synced: gh("module/zfs/txg.c", 607, 610),
+};
+const S0 = {
+  en: {
+    figure: "The transaction group pipeline",
+    open: "Open",
+    quiescing: "Quiescing",
+    quiesced: "Quiesced, waiting for the sync thread",
+    syncing: "Syncing",
+    empty: "none",
+    cpu: "CPU {c}",
+    holds: "tc_count[cpu][{g}]",
+    dirty: "{n} dirty blocks",
+    dirty1: "{n} dirty block",
+    dirtyNote: "txg_kick past {s} (in this model)",
+    drain: "waiting for {n} holds",
+    drain1: "waiting for {n} hold",
+    passLabel: "pass {n}",
+    passBlocks: "{n} blocks",
+    passBlock: "{n} block",
+    config: "labels and uberblock",
+    noopCfg: "no-op: nothing written",
+    disk: "On disk",
+    ubOnDisk: "uberblock of txg {txg}, slot {slot} of the ring",
+    syncThread: "txg_sync_thread",
+    quiesceThread: "txg_quiesce_thread",
+    sWait: "waits: {left} s left of zfs_txg_timeout ({timeout} s), or a waiter, or a hand-off",
+    sWant: "waits for the quiesce thread to hand off txg {txg}",
+    sTake: "woken: takes txg {txg}",
+    sSync: "in spa_sync for txg {txg}",
+    qWait: "waits for someone to ask for a new txg",
+    qWaitFull: "waits: txg {txg} is quiesced and not taken yet",
+    qDrain: "in txg_quiesce: waits until no CPU holds txg {txg}",
+    write: "Add a write",
+    zsync: "zpool sync",
+    free: "Free a large file",
+    steady: "Background writes",
+    play: "Play",
+    pause: "Pause",
+    step: "Next event",
+    reset: "Reset",
+    clock: "t = {t} s",
+    clockNote: "simulated time; writes and syncs are slowed down",
+    log: "Events",
+    see: "code",
+    idle: "The pool is at txg {open}; the last synced txg is {synced}. Add writes, then play, or go event by event.",
+    hold: "A write on CPU {cpu} joins txg {txg}: txg_hold_open raises tc_count[{cpu}][{g}].",
+    kick: "txg {txg} holds {n} dirty blocks, more than zfs_dirty_data_sync_percent ({pct}%) of zfs_dirty_data_max: txg_kick asks the sync thread not to wait for the timeout.",
+    rele: "The write on CPU {cpu} is done: txg_rele_to_sync lowers tc_count[{cpu}][{g}] of txg {txg}.",
+    drained: "The last hold on txg {txg} is released: every CPU’s count for it is 0.",
+    "wait-synced": "zpool sync calls txg_wait_synced(dp, 0), which waits for txg {txg}: the open txg plus TXG_DEFER_SIZE (2).",
+    "wait-open": "A long free has filled txg {prev} with frees: dmu_free_long_range calls txg_wait_open(dp, 0, B_TRUE), which asks the quiesce thread to close it now.",
+    "wake-timeout": "zfs_txg_timeout ({timeout} s) has passed since the last sync began: the sync thread wakes up.",
+    "wake-waiter": "A sync was asked for (tx_sync_txg_waiting = {n}): the sync thread wakes up before the timeout.",
+    "wake-handoff": "txg {txg} is already quiesced: the sync thread does not wait.",
+    "want-quiesce": "No txg is quiesced yet: the sync thread asks the quiesce thread for the open one, txg {txg} (tx_quiesce_txg_waiting = {next}).",
+    quiesce: "The quiesce thread closes txg {txg}: it takes every CPU’s tc_open_lock, opens txg {next} and lets the new writes into it. Writes that already hold txg {txg} finish there.",
+    handoff: "txg {txg} is quiesced: no write holds it any more. The quiesce thread hands it to the sync thread (tx_quiesced_txg).",
+    sync: "The sync thread takes txg {txg} (tx_syncing_txg) and calls spa_sync, with {n} dirty blocks to write.",
+    sync1: "The sync thread takes txg {txg} (tx_syncing_txg) and calls spa_sync, with {n} dirty block to write.",
+    pass: "Pass {n} of txg {txg} is written. Writing allocates space, which changes space maps in the MOS: if the MOS is dirty again, there is another pass.",
+    noop: "Pass 1 of txg {txg} found nothing to write: the root block pointer was not born in this txg and the MOS is clean. The txg is a no-op.",
+    converged: "Pass {n} left the MOS clean: txg {txg} has converged.",
+    uberblock: "vdev_config_sync flushes the disks, writes the even labels, the uberblock of txg {txg} into slot {slot} of the ring, then the odd labels. The uberblock write is the commit.",
+    "no-uberblock": "Nothing changed in txg {txg}: vdev_config_sync returns without writing. The uberblock on disk is still that of txg {ub}.",
+    synced: "txg {txg} is synced (tx_synced_txg). Its slot in the per-txg arrays, txg & 3 = {g}, will be used again by txg {reuse}.",
+    aria: "Open: txg {open}. Quiescing: {q}. Syncing: {s}. Uberblock on disk: txg {ub}.",
+  },
+  fr: {
+    figure: "Le pipeline des groupes de transactions",
+    open: "Ouvert",
+    quiescing: "En clôture",
+    quiesced: "Clos, attend le thread de synchronisation",
+    syncing: "En synchronisation",
+    empty: "aucun",
+    cpu: "CPU {c}",
+    holds: "tc_count[cpu][{g}]",
+    dirty: "{n} blocs modifiés",
+    dirty1: "{n} bloc modifié",
+    dirtyNote: "txg_kick au-delà de {s} (dans ce modèle)",
+    drain: "attend {n} prises",
+    drain1: "attend {n} prise",
+    passLabel: "passe {n}",
+    passBlocks: "{n} blocs",
+    passBlock: "{n} bloc",
+    config: "labels et uberblock",
+    noopCfg: "sans effet : rien d’écrit",
+    disk: "Sur le disque",
+    ubOnDisk: "uberblock du txg {txg}, case {slot} de l’anneau",
+    syncThread: "txg_sync_thread",
+    quiesceThread: "txg_quiesce_thread",
+    sWait: "attend : encore {left} s sur zfs_txg_timeout ({timeout} s), ou une demande, ou une remise",
+    sWant: "attend que le thread de clôture lui remette le txg {txg}",
+    sTake: "réveillé : prend le txg {txg}",
+    sSync: "dans spa_sync pour le txg {txg}",
+    qWait: "attend qu’on demande un nouveau txg",
+    qWaitFull: "attend : le txg {txg} est clos et pas encore pris",
+    qDrain: "dans txg_quiesce : attend qu’aucun CPU ne tienne plus le txg {txg}",
+    write: "Ajouter une écriture",
+    zsync: "zpool sync",
+    free: "Libérer un gros fichier",
+    steady: "Écritures en continu",
+    play: "Lecture",
+    pause: "Pause",
+    step: "Événement suivant",
+    reset: "Recommencer",
+    clock: "t = {t} s",
+    clockNote: "temps simulé ; écritures et synchronisations ralenties",
+    log: "Événements",
+    see: "code",
+    idle: "Le pool est au txg {open} ; le dernier txg synchronisé est le {synced}. Ajoutez des écritures, puis lancez la lecture, ou avancez événement par événement.",
+    hold: "Une écriture sur le CPU {cpu} entre dans le txg {txg} : txg_hold_open incrémente tc_count[{cpu}][{g}].",
+    kick: "Le txg {txg} contient {n} blocs modifiés, plus que zfs_dirty_data_sync_percent ({pct} %) de zfs_dirty_data_max : txg_kick demande au thread de synchronisation de ne pas attendre la fin du délai.",
+    rele: "L’écriture sur le CPU {cpu} est terminée : txg_rele_to_sync décrémente tc_count[{cpu}][{g}] du txg {txg}.",
+    drained: "La dernière prise sur le txg {txg} est relâchée : le compteur de chaque CPU est à 0.",
+    "wait-synced": "zpool sync appelle txg_wait_synced(dp, 0), qui attend le txg {txg} : le txg ouvert plus TXG_DEFER_SIZE (2).",
+    "wait-open": "Une longue libération a rempli le txg {prev} : dmu_free_long_range appelle txg_wait_open(dp, 0, B_TRUE), qui demande au thread de clôture de le fermer tout de suite.",
+    "wake-timeout": "zfs_txg_timeout ({timeout} s) s’est écoulé depuis le début de la dernière synchronisation : le thread de synchronisation se réveille.",
+    "wake-waiter": "Une synchronisation a été demandée (tx_sync_txg_waiting = {n}) : le thread de synchronisation se réveille avant la fin du délai.",
+    "wake-handoff": "Le txg {txg} est déjà clos : le thread de synchronisation n’attend pas.",
+    "want-quiesce": "Aucun txg n’est encore clos : le thread de synchronisation demande au thread de clôture le txg ouvert, le {txg} (tx_quiesce_txg_waiting = {next}).",
+    quiesce: "Le thread de clôture ferme le txg {txg} : il prend le tc_open_lock de chaque CPU, ouvre le txg {next} et y laisse entrer les nouvelles écritures. Celles qui tiennent déjà le txg {txg} s’y terminent.",
+    handoff: "Le txg {txg} est clos : plus aucune écriture ne le tient. Le thread de clôture le remet au thread de synchronisation (tx_quiesced_txg).",
+    sync: "Le thread de synchronisation prend le txg {txg} (tx_syncing_txg) et appelle spa_sync, avec {n} blocs modifiés à écrire.",
+    sync1: "Le thread de synchronisation prend le txg {txg} (tx_syncing_txg) et appelle spa_sync, avec {n} bloc modifié à écrire.",
+    pass: "La passe {n} du txg {txg} est écrite. Écrire alloue de l’espace, ce qui modifie des space maps dans le MOS : si le MOS est de nouveau modifié, il y a une autre passe.",
+    noop: "La passe 1 du txg {txg} n’a rien trouvé à écrire : le pointeur de bloc racine n’est pas né dans ce txg et le MOS est intact. Le txg est sans effet.",
+    converged: "La passe {n} a laissé le MOS intact : le txg {txg} a convergé.",
+    uberblock: "vdev_config_sync vide les caches des disques, écrit les labels pairs, l’uberblock du txg {txg} dans la case {slot} de l’anneau, puis les labels impairs. L’écriture de l’uberblock est la validation.",
+    "no-uberblock": "Rien n’a changé dans le txg {txg} : vdev_config_sync revient sans rien écrire. L’uberblock sur le disque reste celui du txg {ub}.",
+    synced: "Le txg {txg} est synchronisé (tx_synced_txg). Sa case dans les tableaux par txg, txg & 3 = {g}, servira de nouveau au txg {reuse}.",
+    aria: "Ouvert : txg {open}. En clôture : {q}. En synchronisation : {s}. Uberblock sur le disque : txg {ub}.",
+  },
+  es: {
+    figure: "El pipeline de los grupos de transacciones",
+    open: "Abierto",
+    quiescing: "En cierre",
+    quiesced: "Cerrado, esperando al hilo de sincronización",
+    syncing: "En sincronización",
+    empty: "ninguno",
+    cpu: "CPU {c}",
+    holds: "tc_count[cpu][{g}]",
+    dirty: "{n} bloques modificados",
+    dirty1: "{n} bloque modificado",
+    dirtyNote: "txg_kick a partir de {s} (en este modelo)",
+    drain: "esperando {n} retenciones",
+    drain1: "esperando {n} retención",
+    passLabel: "pasada {n}",
+    passBlocks: "{n} bloques",
+    passBlock: "{n} bloque",
+    config: "etiquetas y uberblock",
+    noopCfg: "sin efecto: nada escrito",
+    disk: "En el disco",
+    ubOnDisk: "uberblock del txg {txg}, ranura {slot} del anillo",
+    syncThread: "txg_sync_thread",
+    quiesceThread: "txg_quiesce_thread",
+    sWait: "espera: quedan {left} s de zfs_txg_timeout ({timeout} s), o alguien que espere, o una entrega",
+    sWant: "espera a que el hilo de cierre le entregue el txg {txg}",
+    sTake: "se despierta: toma el txg {txg}",
+    sSync: "en spa_sync para el txg {txg}",
+    qWait: "espera a que alguien pida un txg nuevo",
+    qWaitFull: "espera: el txg {txg} está cerrado y aún no se ha tomado",
+    qDrain: "en txg_quiesce: espera a que ninguna CPU retenga el txg {txg}",
+    write: "Añadir una escritura",
+    zsync: "zpool sync",
+    free: "Liberar un archivo grande",
+    steady: "Escrituras de fondo",
+    play: "Iniciar",
+    pause: "Pausar",
+    step: "Evento siguiente",
+    reset: "Reiniciar",
+    clock: "t = {t} s",
+    clockNote: "tiempo simulado; escrituras y sincronizaciones ralentizadas",
+    log: "Eventos",
+    see: "código",
+    idle: "El pool está en el txg {open}; el último txg sincronizado es el {synced}. Añade escrituras y después pulsa Iniciar, o avanza evento a evento.",
+    hold: "Una escritura en la CPU {cpu} entra en el txg {txg}: txg_hold_open incrementa tc_count[{cpu}][{g}].",
+    kick: "El txg {txg} contiene {n} bloques modificados, más del zfs_dirty_data_sync_percent ({pct} %) de zfs_dirty_data_max: txg_kick pide al hilo de sincronización que no espere al plazo.",
+    rele: "La escritura en la CPU {cpu} ha terminado: txg_rele_to_sync decrementa tc_count[{cpu}][{g}] del txg {txg}.",
+    drained: "Se libera la última retención del txg {txg}: el contador de cada CPU para él está a 0.",
+    "wait-synced": "zpool sync llama a txg_wait_synced(dp, 0), que espera al txg {txg}: el txg abierto más TXG_DEFER_SIZE (2).",
+    "wait-open": "Una liberación larga ha llenado de liberaciones el txg {prev}: dmu_free_long_range llama a txg_wait_open(dp, 0, B_TRUE), que pide al hilo de cierre que lo cierre ya.",
+    "wake-timeout": "Han pasado zfs_txg_timeout ({timeout} s) desde que empezó la última sincronización: el hilo de sincronización se despierta.",
+    "wake-waiter": "Se ha pedido una sincronización (tx_sync_txg_waiting = {n}): el hilo de sincronización se despierta antes del plazo.",
+    "wake-handoff": "El txg {txg} ya está cerrado: el hilo de sincronización no espera.",
+    "want-quiesce": "Aún no hay ningún txg cerrado: el hilo de sincronización pide al hilo de cierre el abierto, el txg {txg} (tx_quiesce_txg_waiting = {next}).",
+    quiesce: "El hilo de cierre cierra el txg {txg}: toma el tc_open_lock de cada CPU, abre el txg {next} y deja entrar en él las escrituras nuevas. Las escrituras que ya retienen el txg {txg} terminan allí.",
+    handoff: "El txg {txg} está cerrado: ya no lo retiene ninguna escritura. El hilo de cierre lo entrega al hilo de sincronización (tx_quiesced_txg).",
+    sync: "El hilo de sincronización toma el txg {txg} (tx_syncing_txg) y llama a spa_sync, con {n} bloques modificados por escribir.",
+    sync1: "El hilo de sincronización toma el txg {txg} (tx_syncing_txg) y llama a spa_sync, con {n} bloque modificado por escribir.",
+    pass: "La pasada {n} del txg {txg} está escrita. Escribir asigna espacio, lo que modifica space maps en el MOS: si el MOS vuelve a estar modificado, hay otra pasada.",
+    noop: "La pasada 1 del txg {txg} no encontró nada que escribir: el puntero de bloque raíz no nació en este txg y el MOS está limpio. El txg no tiene efecto.",
+    converged: "La pasada {n} dejó el MOS limpio: el txg {txg} ha convergido.",
+    uberblock: "vdev_config_sync vuelca los discos, escribe las etiquetas pares, el uberblock del txg {txg} en la ranura {slot} del anillo, y después las etiquetas impares. La escritura del uberblock es la confirmación.",
+    "no-uberblock": "Nada cambió en el txg {txg}: vdev_config_sync retorna sin escribir nada. El uberblock en el disco sigue siendo el del txg {ub}.",
+    synced: "El txg {txg} está sincronizado (tx_synced_txg). Su posición en los arrays por txg, txg & 3 = {g}, la volverá a usar el txg {reuse}.",
+    aria: "Abierto: txg {open}. En cierre: {q}. En sincronización: {s}. Uberblock en el disco: txg {ub}.",
+  },
+}[lang];
+const S = Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v]));
+const t = UI[lang];
+const consts = { timeout: TXG_TIMEOUT, pct: SYNC_PERCENT, dmax: DIRTY_MAX, dsync: DIRTY_SYNC };
+const textVersion = {
+  en: [
+    "Every change to the pool joins a numbered transaction group (txg). Three txgs can be active at once, one in each state: open, quiescing, syncing.",
+    "A write takes a hold on the open txg: txg_hold_open raises a counter of the CPU it runs on, for that txg. When the write is done, txg_rele_to_sync lowers it.",
+    "The sync thread waits for one of three things: zfs_txg_timeout (5 seconds) since the last sync began, someone waiting for a sync (zpool sync, or txg_kick when the open txg holds more dirty data than zfs_dirty_data_sync_percent of zfs_dirty_data_max), or a txg already quiesced.",
+    "It then asks the quiesce thread for the open txg. The quiesce thread closes it, opens the next txg at once so that writes never wait, and waits until every CPU’s counter of the closed txg is 0. It then hands the txg to the sync thread.",
+    "The sync thread writes the txg in passes: the first writes the user data and the metadata above it; each pass allocates space, which changes space maps in the MOS, so it runs again until a pass leaves the MOS clean. Then vdev_config_sync writes the labels and the new uberblock: that one write commits the txg. A txg in which nothing changed writes nothing at all.",
+    "Normally the next txg stays open while one syncs: the quiesce thread closes a txg only when someone asks. A caller that needs a new txg at once, such as dmu_free_long_range after a txg filled with frees, calls txg_wait_open, and then all three states are busy. There is never more than one txg per state.",
+  ],
+  fr: [
+    "Chaque modification du pool entre dans un groupe de transactions numéroté (txg). Trois txg peuvent être actifs à la fois, un par état : ouvert, en clôture, en synchronisation.",
+    "Une écriture prend une prise sur le txg ouvert : txg_hold_open incrémente un compteur du CPU sur lequel elle tourne, pour ce txg. Quand l’écriture est terminée, txg_rele_to_sync le décrémente.",
+    "Le thread de synchronisation attend l’une de trois choses : zfs_txg_timeout (5 secondes) depuis le début de la dernière synchronisation, quelqu’un qui attend une synchronisation (zpool sync, ou txg_kick quand le txg ouvert contient plus de données modifiées que zfs_dirty_data_sync_percent de zfs_dirty_data_max), ou un txg déjà clos.",
+    "Il demande alors le txg ouvert au thread de clôture. Celui-ci le ferme, ouvre aussitôt le txg suivant pour que les écritures n’attendent jamais, et attend que le compteur de chaque CPU pour le txg fermé soit à 0. Il remet alors le txg au thread de synchronisation.",
+    "Le thread de synchronisation écrit le txg en passes : la première écrit les données et les métadonnées au-dessus d’elles ; chaque passe alloue de l’espace, ce qui modifie des space maps dans le MOS, et une nouvelle passe suit, jusqu’à ce qu’une passe laisse le MOS intact. vdev_config_sync écrit ensuite les labels et le nouvel uberblock : cette seule écriture valide le txg. Un txg où rien n’a changé n’écrit rien du tout.",
+    "D’ordinaire, le txg suivant reste ouvert pendant qu’un autre se synchronise : le thread de clôture ne ferme un txg que si on le lui demande. Un appelant qui a besoin tout de suite d’un nouveau txg, comme dmu_free_long_range après un txg rempli de libérations, appelle txg_wait_open, et les trois états sont alors occupés. Il n’y a jamais plus d’un txg par état.",
+  ].map(fr),
+  es: [
+    "Cada cambio en el pool entra en un grupo de transacciones (txg) numerado. Puede haber tres txg activos a la vez, uno en cada estado: abierto, en cierre, en sincronización.",
+    "Una escritura retiene el txg abierto: txg_hold_open incrementa un contador de la CPU en la que se ejecuta, para ese txg. Cuando la escritura termina, txg_rele_to_sync lo decrementa.",
+    "El hilo de sincronización espera una de tres cosas: que pasen zfs_txg_timeout (5 segundos) desde el comienzo de la última sincronización, que alguien espere una sincronización (zpool sync, o txg_kick cuando el txg abierto contiene más datos modificados que el zfs_dirty_data_sync_percent de zfs_dirty_data_max), o un txg ya cerrado.",
+    "Después pide el txg abierto al hilo de cierre. El hilo de cierre lo cierra, abre de inmediato el txg siguiente para que las escrituras nunca esperen, y espera a que el contador de cada CPU para el txg cerrado sea 0. Entonces entrega el txg al hilo de sincronización.",
+    "El hilo de sincronización escribe el txg en pasadas: la primera escribe los datos de usuario y los metadatos que hay por encima; cada pasada asigna espacio, lo que modifica space maps en el MOS, así que se repite hasta que una pasada deja el MOS limpio. Después vdev_config_sync escribe las etiquetas y el uberblock nuevo: esa única escritura confirma el txg. Un txg en el que nada ha cambiado no escribe nada en absoluto.",
+    "Normalmente el txg siguiente sigue abierto mientras otro se sincroniza: el hilo de cierre solo cierra un txg cuando alguien lo pide. Un llamante que necesita un txg nuevo de inmediato, como dmu_free_long_range tras un txg lleno de liberaciones, llama a txg_wait_open, y entonces los tres estados están ocupados. Nunca hay más de un txg por estado.",
+  ],
+}[lang];
+---
+
+<figure class="txg" data-txg data-strings={JSON.stringify({ ...S, refs, consts })}>
+  <div class="stages" role="img" aria-label={S.figure}>
+    {
+      (["open", "quiescing", "syncing"] as const).map((st) => (
+        <section class={`stage stage--${st}`} data-stage={st}>
+          <h3 class="stage-name">{S[st]}</h3>
+          <p class="var">
+            <code>{st === "open" ? "tx_open_txg" : st === "quiescing" ? "tx_quiescing_txg" : "tx_syncing_txg"}</code>
+          </p>
+          <div class="slot"></div>
+        </section>
+      ))
+    }
+  </div>
+  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <div class="live" hidden>
+    <div class="disk">
+      <span class="disk-label">{S.disk}</span>
+      <span class="ub" data-ub></span>
+    </div>
+    <dl class="threads">
+      <div><dt><code>{S.syncThread}</code></dt><dd data-sync-thread></dd><div class="timer" aria-hidden="true"><span></span></div></div>
+      <div><dt><code>{S.quiesceThread}</code></dt><dd data-quiesce-thread></dd></div>
+    </dl>
+    <div class="controls">
+      <div class="buttons">
+        <button class="btn btn--primary" type="button" data-act="write">{S.write}</button>
+        <button class="btn" type="button" data-act="zsync"><code>{S.zsync}</code></button>
+        <button class="btn" type="button" data-act="free">{S.free}</button>
+        <button class="btn" type="button" data-act="steady" aria-pressed="false">{S.steady}</button>
+      </div>
+      <div class="buttons">
+        <button class="btn" type="button" data-act="play" aria-pressed="false">{S.play}</button>
+        <button class="btn" type="button" data-act="step">{S.step}</button>
+        <button class="btn" type="button" data-act="reset">{S.reset}</button>
+        <p class="clock"><span data-clock></span> <span class="muted">· {S.clockNote}</span></p>
+      </div>
+    </div>
+    <p class="narration" aria-live="polite"></p>
+    <div class="log">
+      <h4>{S.log}</h4>
+      <ol reversed></ol>
+    </div>
+  </div>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <ol>{textVersion.map((x) => <li>{x}</li>)}</ol>
+  </details>
+</figure>
+
+<script>
+  import { h, strings, fill, reducedMotion } from "../lib/svg";
+  import { create, advance, step, write, zpoolSync, longFree, holds, timeLeft, CPUS, TXG_MASK, type Ev, type Model } from "../lib/txg";
+
+  type S = Record<string, string> & { refs: Record<string, string>; consts: Record<string, number> };
+  const RING = 32; // uberblock slots at ashift 12 (Hall room)
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-txg]")) {
+    const t = strings<S>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const slot = (st: string) => q(`[data-stage="${st}"] .slot`);
+    const btn = (a: string) => q<HTMLButtonElement>(`[data-act="${a}"]`);
+    const narration = q(".narration");
+    const log = q("ol[reversed]");
+    const cards = new Map<number, HTMLElement>();
+    let m: Model;
+    let playing = false;
+    let last = 0;
+    let raf = 0;
+
+    // A decimal comma in French and Spanish (D16.3).
+    const fmt = (x: number) => (document.documentElement.lang === "en" ? x.toFixed(1) : x.toFixed(1).replace(".", ","));
+    // Singular for 1, and for 0 in French.
+    const one = (n: number) => n === 1 || (n === 0 && document.documentElement.lang === "fr");
+    const text = (e: Ev) => (e.kind === "sync" && one(Number(e.n)) ? t.sync1 : t[e.kind]);
+    const vars = (e: Ev) => ({
+      ...t.consts,
+      txg: e.txg,
+      cpu: e.cpu ?? "",
+      n: e.n ?? "",
+      g: e.txg & TXG_MASK,
+      next: e.txg + 1,
+      prev: e.txg - 1,
+      reuse: e.txg + 4,
+      slot: e.txg % RING,
+      ub: m.ub,
+    });
+
+    function card(txg: number): HTMLElement {
+      let c = cards.get(txg);
+      if (!c) {
+        c = h("div", { class: "card" });
+        cards.set(txg, c);
+      }
+      return c;
+    }
+
+    function cpuGrid(txg: number) {
+      const g = txg & TXG_MASK;
+      const cells = [];
+      for (let c = 0; c < CPUS; c++) {
+        const ws = m.writers.filter((w) => w.cpu === c && w.txg === txg);
+        cells.push(
+          h("li", { class: ws.length ? "busy" : undefined },
+            h("span", { class: "c" }, fill(t.cpu, { c })),
+            h("span", { class: "dots", "aria-hidden": "true" }, ...ws.map(() => h("i"))),
+            h("span", { class: "n" }, String(m.count[c][g])),
+          ),
+        );
+      }
+      return h("div", { class: "holds" }, h("p", { class: "k" }, h("code", {}, fill(t.holds, { g }))), h("ul", {}, ...cells));
+    }
+
+    function render() {
+      const placed = new Set<number>();
+      const first = new Map<number, DOMRect>();
+      for (const [txg, c] of cards) if (c.isConnected) first.set(txg, c.getBoundingClientRect());
+      const put = (st: string, txg: number, ...kids: (Node | string)[]) => {
+        const c = card(txg);
+        c.className = `card card--${st}`;
+        c.replaceChildren(h("p", { class: "num" }, `txg ${txg}`), ...kids);
+        if (c.parentElement !== slot(st)) slot(st).replaceChildren(c);
+        placed.add(txg);
+      };
+      // Open
+      const d = m.dirty[m.open & TXG_MASK];
+      put("open", m.open, cpuGrid(m.open),
+        h("div", { class: "meter" },
+          h("span", { class: "bar" }, h("span", { style: `width:${Math.min(100, (d / (t.consts.dsync * 2)) * 100)}%` }), h("span", { class: "mark", style: "left:50%" })),
+          h("span", { class: "k" }, fill(one(d) ? t.dirty1 : t.dirty, { n: d }), " · ", fill(t.dirtyNote, { s: t.consts.dsync })),
+        ));
+      // Quiescing, or quiesced and waiting for the sync thread
+      const qt = m.quiescing || m.quiesced;
+      if (qt) {
+        put("quiescing", qt, cpuGrid(qt),
+          h("p", { class: "state" }, m.quiescing ? fill(one(holds(m, qt)) ? t.drain1 : t.drain, { n: holds(m, qt) }) : t.quiesced));
+      } else slot("quiescing").replaceChildren(h("p", { class: "none" }, t.empty));
+      // Once quiesced, the txg sits in tx_quiesced_txg and tx_quiescing_txg is 0 (txg.c L662-L663)
+      q('[data-stage="quiescing"] .var code').textContent = m.quiesced ? "tx_quiesced_txg" : "tx_quiescing_txg";
+      // Syncing
+      const s = m.sync;
+      if (s) {
+        const rows = s.passes.map((b, i) =>
+          h("li", { class: s.pass > i + 1 || s.phase !== "passes" ? "done" : s.pass === i + 1 ? "now" : undefined },
+            h("span", { class: "k" }, fill(t.passLabel, { n: i + 1 })),
+            h("span", { class: "bar" }, h("span", { style: `width:${Math.min(100, b * 8)}%` })),
+            h("span", { class: "k" }, fill(one(b) ? t.passBlock : t.passBlocks, { n: b })),
+          ),
+        );
+        if (s.noop) rows.splice(1);
+        rows.push(h("li", { class: s.phase === "config" ? "now" : s.phase === "done" ? "done" : undefined },
+          h("span", { class: "k cfg" }, s.noop ? t.noopCfg : t.config)));
+        put("syncing", s.txg, h("ol", { class: "passes" }, ...rows));
+      } else slot("syncing").replaceChildren(h("p", { class: "none" }, t.empty));
+      for (const txg of [...cards.keys()]) if (!placed.has(txg)) cards.delete(txg);
+      // FLIP: a txg card glides from one stage to the next.
+      if (!reducedMotion())
+        for (const [txg, c] of cards) {
+          const a = first.get(txg);
+          if (!a) continue;
+          const b = c.getBoundingClientRect();
+          const dx = a.left - b.left, dy = a.top - b.top;
+          if (Math.abs(dx) + Math.abs(dy) > 2)
+            c.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: 450, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+        }
+      status();
+      q(".stages").setAttribute("aria-label", `${t.figure}. ${fill(t.aria, { open: m.open, q: qt ? `txg ${qt}` : t.empty, s: s ? `txg ${s.txg}` : t.empty, ub: m.ub })}`);
+    }
+
+    function status() {
+      q("[data-ub]").textContent = fill(t.ubOnDisk, { txg: m.ub, slot: m.ub % RING });
+      const left = timeLeft(m);
+      q("[data-sync-thread]").textContent =
+        m.syncState === "wait" ? fill(t.sWait, { left: fmt(left), timeout: t.consts.timeout })
+          : m.syncState === "want" ? (m.quiesced ? fill(t.sTake, { txg: m.quiesced }) : fill(t.sWant, { txg: m.quiescing || m.open }))
+            : fill(t.sSync, { txg: m.syncing });
+      q<HTMLElement>(".timer span").style.width = m.syncState === "wait" ? `${(1 - left / t.consts.timeout) * 100}%` : "0";
+      q("[data-quiesce-thread]").textContent =
+        m.quiesceState === "drain" ? fill(t.qDrain, { txg: m.quiescing }) : m.quiesced ? fill(t.qWaitFull, { txg: m.quiesced }) : t.qWait;
+      q("[data-clock]").textContent = fill(t.clock, { t: fmt(m.t) });
+    }
+
+    function tell(evs: Ev[], announce: boolean) {
+      if (!evs.length) return;
+      for (const e of evs) {
+        const li = h("li", {}, h("span", { class: "at" }, `${fmt(e.t)} s`), " ", fill(text(e), vars(e)), " ", h("a", { href: t.refs[e.kind] }, `(${t.see})`));
+        log.prepend(li);
+      }
+      while (log.children.length > 8) log.lastElementChild!.remove();
+      // While playing, only stage changes are announced, so a screen reader is not flooded.
+      const e = announce ? evs[evs.length - 1] : [...evs].reverse().find((x) => x.major);
+      if (e) {
+        narration.replaceChildren(fill(text(e), vars(e)), " ", h("a", { href: t.refs[e.kind] }, `(${t.see})`));
+        if (e.kind === "uberblock") {
+          const ub = q("[data-ub]");
+          ub.classList.remove("flash");
+          void ub.offsetWidth;
+          ub.classList.add("flash");
+        }
+      }
+    }
+
+    function frame(now: number) {
+      const dt = Math.min(0.25, (now - last) / 1000);
+      last = now;
+      const evs = advance(m, dt);
+      if (evs.length) {
+        tell(evs, false);
+        render();
+      } else status();
+      raf = requestAnimationFrame(frame);
+    }
+
+    function setPlaying(on: boolean) {
+      playing = on;
+      btn("play").setAttribute("aria-pressed", String(on));
+      btn("play").textContent = on ? t.pause : t.play;
+      cancelAnimationFrame(raf);
+      if (on) {
+        last = performance.now();
+        raf = requestAnimationFrame(frame);
+      }
+    }
+
+    const act = (f: () => Ev | Ev[]) => () => {
+      const r = f();
+      tell(Array.isArray(r) ? r : [r], true);
+      render();
+    };
+    btn("write").addEventListener("click", act(() => write(m)));
+    btn("zsync").addEventListener("click", act(() => zpoolSync(m)));
+    btn("free").addEventListener("click", act(() => longFree(m)));
+    btn("step").addEventListener("click", act(() => step(m)));
+    btn("steady").addEventListener("click", () => {
+      m.steady = m.steady ? 0 : 1;
+      m.nextSteady = m.t + m.steady;
+      btn("steady").setAttribute("aria-pressed", String(!!m.steady));
+    });
+    btn("play").addEventListener("click", () => setPlaying(!playing));
+    btn("reset").addEventListener("click", init);
+    // Off screen or in a background tab, the figure pauses.
+    document.addEventListener("visibilitychange", () => document.hidden && playing && setPlaying(false));
+
+    function init() {
+      setPlaying(false);
+      m = create(41);
+      btn("steady").setAttribute("aria-pressed", "false");
+      cards.clear();
+      log.replaceChildren();
+      write(m);
+      write(m);
+      m.log = [];
+      narration.textContent = fill(t.idle, { open: m.open, synced: m.synced });
+      render();
+    }
+
+    init();
+    q(".live").hidden = false;
+  }
+</script>
+
+<style>
+  .txg {
+    margin: var(--space-6) 0 0;
+  }
+  .stages {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    min-height: 15.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .stage-name {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .var {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .slot {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .slot :global(.none) {
+    margin: auto;
+    color: var(--fg-faint);
+    font-family: var(--font-caption);
+    font-style: italic;
+  }
+  .slot :global(.card) {
+    flex: 1;
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    display: grid;
+    gap: var(--space-2);
+    align-content: start;
+    font-size: var(--step--1);
+  }
+  .slot :global(.card--open) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .slot :global(.num) {
+    font-family: var(--font-display);
+    font-size: var(--step-1);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  .slot :global(.k) {
+    color: var(--fg-muted);
+  }
+  .slot :global(.holds ul) {
+    list-style: none;
+    margin: var(--space-1) 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-1);
+  }
+  .slot :global(.holds li) {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    padding: var(--space-1) 0;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .slot :global(.holds li.busy) {
+    border-color: var(--accent);
+  }
+  .slot :global(.holds .c) {
+    font-size: 0.72rem;
+    color: var(--fg-muted);
+  }
+  .slot :global(.holds .n) {
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .slot :global(.dots) {
+    display: flex;
+    gap: 3px;
+    min-height: 8px;
+  }
+  .slot :global(.dots i) {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: drop var(--dur-2) var(--ease);
+  }
+  @keyframes drop {
+    from {
+      transform: translateY(-8px);
+      opacity: 0;
+    }
+  }
+  .slot :global(.meter) {
+    display: grid;
+    gap: var(--space-1);
+  }
+  .slot :global(.bar) {
+    position: relative;
+    display: block;
+    height: 6px;
+    background: var(--line);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .slot :global(.bar > span:first-child) {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width var(--dur-2) var(--ease);
+  }
+  .slot :global(.bar .mark) {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--fg);
+  }
+  .slot :global(.state) {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-0);
+  }
+  .slot :global(.passes) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .slot :global(.passes li) {
+    display: grid;
+    grid-template-columns: 4.2rem 1fr 4rem;
+    align-items: center;
+    gap: var(--space-2);
+    opacity: 0.45;
+  }
+  .slot :global(.passes li.now),
+  .slot :global(.passes li.done) {
+    opacity: 1;
+  }
+  .slot :global(.passes li.now .k) {
+    color: var(--accent);
+  }
+  .slot :global(.passes .cfg) {
+    grid-column: 1 / -1;
+  }
+  .live[hidden] {
+    display: none;
+  }
+  .disk {
+    margin-top: var(--space-3);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    align-items: baseline;
+    padding: var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .disk-label {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+    color: var(--fg-muted);
+  }
+  .ub {
+    font-variant-numeric: tabular-nums;
+    padding: 0 var(--space-2);
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .ub:global(.flash) {
+      animation: flash 1.2s var(--ease);
+    }
+  }
+  @keyframes flash {
+    from {
+      background: var(--accent);
+      color: var(--bg);
+    }
+  }
+  .threads {
+    margin: var(--space-4) 0 0;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .threads > div {
+    display: grid;
+    grid-template-columns: 12rem 1fr;
+    gap: var(--space-1) var(--space-3);
+    align-items: baseline;
+  }
+  .threads dd {
+    margin: 0;
+    color: var(--fg-muted);
+  }
+  .timer {
+    grid-column: 2;
+    height: 3px;
+    background: var(--line);
+    border-radius: 2px;
+    max-width: 24rem;
+  }
+  .timer span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .controls {
+    margin-top: var(--space-5);
+    display: grid;
+    gap: var(--space-3);
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .btn code {
+    font-size: 0.95em;
+  }
+  .clock {
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+  }
+  .narration {
+    margin-top: var(--space-4);
+    min-height: 5em;
+    max-width: 44rem;
+  }
+  .log {
+    margin-top: var(--space-4);
+    max-width: 52rem;
+  }
+  .log h4 {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--fg-muted);
+  }
+  .log ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .log :global(li:first-child) {
+    color: var(--fg);
+  }
+  .log :global(.at) {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version ol {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-2);
+  }
+  @media (max-width: 48rem) {
+    .stages {
+      grid-template-columns: 1fr;
+    }
+    .stage {
+      min-height: 0;
+    }
+    .threads > div {
+      grid-template-columns: 1fr;
+    }
+    .timer {
+      grid-column: 1;
+    }
+  }
+</style>

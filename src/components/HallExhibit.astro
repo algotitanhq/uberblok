@@ -1,0 +1,75 @@
+---
+// The Hall's exhibit, "Fig. 1": the uberblock under a reading glass, rendered by
+// scripts/render-glass.mjs from lines 36-150 of include/sys/uberblock_impl.h at
+// the frozen commit (DECISIONS.md D16.4). The caption links the lines it shows;
+// scripts/check-plate.mjs checks the printed text against the clone in CI.
+import Exhibit from "./Exhibit.astro";
+import glass from "../assets/glass.webp";
+import plate from "../assets/glass-plate.json";
+import { gh, OPENZFS_TAG } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import type { Lang } from "../lib/rooms";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const { file, printed, lens } = plate.source;
+const code = (s: string) => `<code>${s}</code>`;
+// The path may break after each slash, on a phone.
+const path = `<code>${file.replaceAll("/", "/<wbr>")}</code>`;
+const lines = gh(file, lens[0], lens[1]);
+const all = gh(file, printed[0], printed[1]);
+const t = {
+  en: {
+    caption: `The Hall’s object under the glass: <a href="${lines}">${code("struct uberblock")}, lines ${lens[0]}–${lens[1]}</a> of ${path} at <code class="tag">${OPENZFS_TAG}</code>, printed with <a href="${all}">lines ${printed[0]}–${printed[1]}</a> of its file.`,
+    alt: "Rendering of a strip of fan-fold listing paper printed with the OpenZFS file include/sys/uberblock_impl.h, its far end fading away. A round reading glass with a black rim and a black handle, held above it, enlarges the highlighted declaration of struct uberblock: uint64_t ub_magic, ub_version, ub_txg, ub_guid_sum, ub_timestamp and blkptr_t ub_rootbp stand out larger than the lines around them. The glass casts a soft shadow, with a bright spot, on the paper below.",
+    parts: [
+      `${code("struct uberblock")}: the record that names the whole pool`,
+      `${code("ub_txg")}: the transaction group of the last sync`,
+      `${code("ub_rootbp")}: the block pointer to the root of the tree, the MOS`,
+      `The listing: lines ${printed[0]} to ${printed[1]} of the file, numbered as in the source`,
+    ],
+  },
+  fr: {
+    caption: fr(`L’objet du hall sous la loupe : <a href="${lines}">${code("struct uberblock")}, lignes ${lens[0]} à ${lens[1]}</a> de ${path} à <code class="tag">${OPENZFS_TAG}</code>, imprimées avec <a href="${all}">les lignes ${printed[0]} à ${printed[1]}</a> du fichier.`),
+    alt: fr("Rendu d’une bande de papier listing à pliage paravent, imprimée avec le fichier d’OpenZFS include/sys/uberblock_impl.h, dont l’extrémité lointaine s’efface. Une loupe ronde à monture et manche noirs, tenue au-dessus, agrandit la déclaration surlignée de struct uberblock : uint64_t ub_magic, ub_version, ub_txg, ub_guid_sum, ub_timestamp et blkptr_t ub_rootbp ressortent, plus grands que les lignes autour. La loupe projette sur le papier une ombre douce, avec une tache de lumière."),
+    parts: [
+      fr(`${code("struct uberblock")} : l’enregistrement qui désigne tout le pool`),
+      fr(`${code("ub_txg")} : le groupe de transactions de la dernière synchronisation`),
+      fr(`${code("ub_rootbp")} : le pointeur de bloc vers la racine de l’arbre, le MOS`),
+      fr(`Le listing : les lignes ${printed[0]} à ${printed[1]} du fichier, numérotées comme dans la source`),
+    ],
+  },
+  es: {
+    caption: `El objeto del Vestíbulo bajo la lupa: <a href="${lines}">${code("struct uberblock")}, líneas ${lens[0]} a ${lens[1]}</a> de ${path} en <code class="tag">${OPENZFS_TAG}</code>, impresas con <a href="${all}">las líneas ${printed[0]} a ${printed[1]}</a> del archivo.`,
+    alt: "Imagen renderizada de una tira de papel continuo plegado en zigzag, impresa con el archivo de OpenZFS include/sys/uberblock_impl.h, cuyo extremo lejano se desvanece. Una lupa redonda de montura y mango negros, sostenida encima, amplía la declaración resaltada de struct uberblock: uint64_t ub_magic, ub_version, ub_txg, ub_guid_sum, ub_timestamp y blkptr_t ub_rootbp destacan, más grandes que las líneas de alrededor. La lupa proyecta sobre el papel una sombra suave, con un punto de luz.",
+    parts: [
+      `${code("struct uberblock")}: el registro que nombra todo el pool`,
+      `${code("ub_txg")}: el grupo de transacciones de la última sincronización`,
+      `${code("ub_rootbp")}: el puntero de bloque a la raíz del árbol, el MOS`,
+      `El listado: las líneas ${printed[0]} a ${printed[1]} del archivo, numeradas como en la fuente`,
+    ],
+  },
+}[lang];
+// Each numbered part: its anchor, and where its numeral sits (fractions of the
+// image), off the paper, on the page's own ground, on a phone too.
+const PARTS: { id: string; at: [number, number] }[] = [
+  { id: "struct", at: [0.08, 0.2] },
+  { id: "txg", at: [0.95, 0.38] },
+  { id: "rootbp", at: [0.95, 0.54] },
+  { id: "listing", at: [0.27, 0.06] },
+];
+---
+
+<Exhibit
+  image={glass}
+  plate={plate}
+  parts={PARTS.map((p, i) => ({ ...p, label: t.parts[i] }))}
+  fig="Fig. 1"
+  caption={t.caption}
+  alt={t.alt}
+  sizes="(min-width: 84rem) 40rem, (min-width: 38rem) 34rem, 100vw"
+  phoneLeaders
+  dimInDark
+/>

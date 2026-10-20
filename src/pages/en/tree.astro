@@ -1,0 +1,393 @@
+---
+import Base from "../../layouts/Base.astro";
+import TreeLab from "../../components/TreeLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "en";
+const r = room("tree");
+const VL = "module/zfs/vdev_label.c";
+const L = {
+  rootbp: gh("include/sys/uberblock_impl.h", 128),
+  metaDnode: gh("include/sys/dmu_objset.h", 81),
+  blkptr: gh("include/sys/dnode.h", 257),
+  nlevels: gh("include/sys/dnode.h", 216),
+  indMax: gh("include/sys/dnode.h", 71),
+  bpSize: gh("include/sys/spa.h", 361, 362),
+  dsBp: gh("include/sys/dsl_dataset.h", 167),
+  dirty: gh("module/zfs/dbuf.c", 2552),
+  setdirty: gh("module/zfs/dbuf.c", 2583),
+  newAddr: gh("module/zfs/zio.c", 2102, 2104),
+  rootSet: gh("module/zfs/dsl_pool.c", 593),
+  flush: gh(VL, 2085, 2098),
+  even: gh(VL, 2109),
+  pair: gh(VL, 1946, 1952),
+  slot: gh(VL, 1782, 1784),
+  ubWrite: gh(VL, 1792, 1796),
+  odd: gh(VL, 2154),
+  ubFlush: gh(VL, 1826, 1854),
+  good: gh(VL, 1854),
+  labels: gh("include/sys/vdev_impl.h", 562),
+  boot: gh("include/sys/vdev_impl.h", 555, 560),
+  ring: gh("include/sys/vdev_impl.h", 482),
+  slotSize: gh("include/sys/vdev_impl.h", 491, 496),
+  load: gh(VL, 1570, 1588),
+  loadDone: gh(VL, 1547, 1553),
+  labelCksum: gh(VL, 197, 200),
+  readConfigCall: gh(VL, 1647),
+  dirtyList: gh(VL, 1962, 1984),
+  minVdevs: gh("include/sys/spa.h", 363),
+  firstTxg: gh("module/zfs/spa.c", 4750, 4751),
+  importUpdate: gh("module/zfs/spa.c", 5721, 5736),
+  configUpdate: gh("module/zfs/spa_config.c", 489, 491),
+  mmpTie: gh(VL, 1507, 1527),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="tree"
+  title="The tree and the uberblock · Uberblok"
+  description="How a ZFS pool changes state without fsck, read in the OpenZFS code: a tree of block pointers under one uberblock, a write that copies its path, and a commit in four beats that a power cut cannot tear: interactive, in 2D and 3D."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Room {roomNumber(r.id)}</p>
+      <h1>{r.title.en}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          ZFS has no fsck. After a crash, the pool must open either in the state before the last transaction group or in
+          the state after it, never in a mixture, even though one txg writes thousands of blocks to several disks.
+        </p>
+        <p>
+          So the whole change of state has to come down to one small write that either happened or did not. And that
+          write must not be able to destroy the previous state if the power goes in the middle of it. The code gets there
+          with a tree that hangs from a single pointer, a rule that a live block is never overwritten, and an order of
+          writes at the end of every txg.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="tree">
+      <h2 id="tree"><span class="n">1</span> Everything hangs from one pointer</h2>
+      <div class="prose">
+        <p>
+          The uberblock holds one block pointer, <a href={L.rootbp}><code>ub_rootbp</code></a>. It points to the pool’s
+          meta objset, the MOS, which begins with a dnode, <a href={L.metaDnode}>the meta-dnode</a>, whose blocks are blocks
+          of dnodes. A dnode is the root of one object: its <a href={L.blkptr}><code>dn_blkptr[]</code></a> point to
+          <a href={L.nlevels}><code>dn_nlevels</code></a> − 1 levels of indirect blocks, and the last level points to the
+          data. Each pointer is a 128-byte <code>blkptr_t</code> that holds <a href={L.bpSize}>up to three addresses</a>
+          and the checksum of the block below. From the uberblock down, nothing else is needed to find every block of the
+          pool. The figure draws a file with three levels and four data blocks under the objset.
+        </p>
+      </div>
+      <TreeLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="write">
+      <h2 id="write"><span class="n">2</span> A write copies its whole path</h2>
+      <div class="prose">
+        <p>
+          A changed block is never written in place: it gets <a href={L.newAddr}>a new address</a>. Its parent holds its
+          pointer, address and checksum, so the parent changes too: <code>dbuf_dirty</code> <a href={L.dirty}>dirties the
+          parent</a>, and so on up to the dnode, <a href={L.setdirty}>marked dirty</a> in its block of dnodes, up to the
+          objset. One changed data block gives a new copy of itself and of every block on its path to the root; every
+          other block is shared by the old tree and the new one. The old tree is untouched: the last synced uberblock still
+          reaches all of it. In the figure, write D2, then D3 in the same txg: their common ancestors are copied once.
+          The <a href={roomUrl(lang, "copy-on-write")}>next room</a> follows the checksums down that path.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="beats">
+      <h2 id="beats"><span class="n">3</span> The commit, in four beats</h2>
+      <div class="prose">
+        <p>
+          At the end of a txg, once <code>spa_sync</code> has written the new blocks, <code>vdev_config_sync</code> runs
+          four steps in a fixed order. First it <a href={L.flush}>flushes the write cache</a> of every disk written in the
+          txg, so the new tree is on stable storage before anything points to it. Then it writes the <a href={L.even}>even
+          labels</a>, L0 and L2, with the new configuration. Then the uberblock, into <a href={L.slot}>slot
+          <code>ub_txg</code> mod the number of slots</a> of <a href={L.ubWrite}>all four labels</a>, which the uberblock of the previous txg
+          does not occupy: that write is the commit, the moment the root pointer swings to the new tree. Last, the
+          <a href={L.odd}>odd labels</a>, L1 and L3. Each disk carries <a href={L.labels}>four labels</a> of 256 KiB, two at
+          its start and two at its end, and each label ends with a <a href={L.ring}>128 KiB ring</a> of uberblock slots: 128
+          slots on the figure’s 512-byte sectors, <a href={L.slotSize}>32 on 4K-sector disks</a>.
+        </p>
+        <p>
+          Labels are written only for <a href={L.dirtyList}>vdevs whose configuration changed</a> in this txg. In most txgs
+          none did: beats 2 and 4 write nothing, and only the uberblock is new. Turn off “The vdev configuration changes in
+          this txg” and step through again.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="plug">
+      <h2 id="plug"><span class="n">4</span> Pull the plug, then import</h2>
+      <div class="prose">
+        <p>
+          On import, ZFS <a href={L.load}>reads every slot of every label</a>. A slot counts only if <a href={L.labelCksum}>its
+          checksum</a> and its magic number are right, so a torn write is skipped; among the others, the
+          <a href={L.loadDone}>highest <code>ub_txg</code> wins</a>. Then the configuration is read from <a href={L.readConfigCall}>the
+          label with the newest config not newer than that uberblock</a>. Pull the plug at each step and import. Before beat
+          3, no uberblock of the new txg exists: the old one wins, the even labels already written are newer than it and
+          are passed over, the odd labels still match it. As soon as one copy of the new uberblock has landed, it wins, and
+          the even labels match it. The tree is old or new, never mixed. Set how many uberblock writes land before a cut in
+          beat 3: zero gives case (1) of the code’s comment, one or more gives case (2).
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">The idea, at three depths</h2>
+
+      <div class="depth">
+        <h3>In one sentence</h3>
+        <p class="lead prose">
+          Every block of the pool hangs from the uberblock’s one pointer, a write copies its path instead of overwriting it,
+          and the new uberblock goes to a slot the old one does not hold, after the new tree is on disk: so the pool is
+          either the old tree or the new one, whatever moment the power goes.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In one paragraph</h3>
+        <p class="prose">
+          <code>ub_rootbp</code> points to the MOS’s <code>objset_phys_t</code>; its meta-dnode’s blocks hold dnodes; a
+          dnode’s <code>dn_blkptr[]</code> lead through <code>dn_nlevels</code> − 1 levels of indirect blocks to the data.
+          <code>dbuf_dirty</code> dirties a block’s parent, recursively, so a changed leaf gives new copies of the leaf and
+          all its ancestors at sync, each at a new address. <code>vdev_config_sync</code> then flushes the disks written in
+          the txg, writes the config of the even labels, writes the uberblock into slot <code>ub_txg %
+          VDEV_UBERBLOCK_COUNT</code> of all four labels and flushes it, and writes the odd labels. On import,
+          <code>vdev_uberblock_load</code> keeps the valid uberblock with the highest txg, and
+          <code>vdev_label_read_config</code> takes the label whose config txg is the highest not above it. A cut before any
+          new uberblock lands leaves the old uberblock and the odd labels; a cut after one lands leaves the new uberblock and
+          the even labels. Either pair is consistent.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In detail</h3>
+        <div class="prose">
+          <p><strong>The top of the tree.</strong> The uberblock names a txg and one block pointer.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="include/sys/uberblock_impl.h"
+          from={122}
+          to={139}
+          symbol="struct uberblock"
+          notes={[
+            { from: 125, text: "<code>ub_txg</code>: the txg this uberblock commits. On import, the highest valid one wins." },
+            { from: 127, text: "<code>ub_timestamp</code>: the tie-breaker between two uberblocks of the same txg." },
+            { from: 128, text: `<code>ub_rootbp</code>: the only pointer. <code>dsl_pool_sync_mos</code> <a href="${L.rootSet}">sets it</a> once the MOS is written.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="include/sys/dmu_objset.h"
+          from={80}
+          to={95}
+          symbol="objset_phys_t"
+          notes={[
+            { from: 81, text: `An objset begins with a whole dnode, the meta-dnode. Its blocks are the objset’s blocks of dnodes: object <var>n</var> is dnode <var>n</var>. A filesystem’s own objset hangs from the MOS the same way, by its dataset’s <a href="${L.dsBp}"><code>ds_bp</code></a>.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="include/sys/dnode.h"
+          from={213}
+          to={229}
+          symbol="dnode_phys_t"
+          notes={[
+            { from: 215, text: `The size of the object’s indirect blocks, <a href="${L.indMax}">at most 128 KiB</a>: 1024 block pointers of 128 bytes.` },
+            { from: 216, text: "The height of the object’s tree; 1 when the dnode points straight at data." },
+            { from: 217, text: `How many of the root pointers, <a href="${L.blkptr}"><code>dn_blkptr[]</code></a>, are used.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>A write climbs to the root.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/dbuf.c"
+          from={2537}
+          to={2554}
+          symbol="dbuf_dirty"
+          notes={[
+            { from: 2537, text: "A block below the top level of its object has a parent indirect block." },
+            { from: 2542, to: 2545, text: "The parent is at level + 1, block number <code>blkid >> epbs</code>, with 2<sup>epbs</sup> pointers per indirect block (1024 for 128 KiB). The figure uses 2, to stay small." },
+            { from: 2552, text: `Dirtying a block dirties its parent, and so on up; the top level is held by the dnode, <a href="${L.setdirty}">marked dirty</a> in turn. Every dirty block is written to <a href="${L.newAddr}">a new place</a> at sync.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>The four beats.</strong> First the flush.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2085}
+          to={2098}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2085, to: 2090, text: "The reason for the flush, in the code’s words: the blocks of this txg reach stable storage “before any uberblock that references them”." },
+            { from: 2093, to: 2098, text: "Every vdev written in this txg, flushed; the wait covers them all." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2100}
+          to={2139}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2100, to: 2108, text: "Beat 2, and what a cut during it means: even labels newer than any uberblock are invalid, the odd ones still valid." },
+            { from: 2109, text: `The even labels: <code>vdev_label_sync</code> writes labels <code>l</code> and <code>l + 2</code>, <a href="${L.pair}">L0 and L2</a>.` },
+            { from: 2118, to: 2131, text: "Beat 3, and the two cases of a cut during it: no new uberblock landed, or at least one did. The figure replays both." },
+            { from: 2133, text: `The uberblocks; <code>vdev_uberblock_sync_list</code> then <a href="${L.ubFlush}">flushes them</a>, and succeeds if <a href="${L.good}">at least one write</a> did.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={1768}
+          to={1797}
+          symbol="vdev_uberblock_sync"
+          notes={[
+            { from: 1768, to: 1781, text: "Why the slot must differ from the current one: a torn overwrite of the committed uberblock could lose it. The comment is about RAID-Z expansion, which reuses a txg; the slot rule below serves every txg." },
+            { from: 1782, to: 1784, text: "The slot: <code>ub_txg</code> modulo the slot count (one fewer with multihost). Consecutive txgs take consecutive slots; the next txg never lands on the slot of the previous one." },
+            { from: 1792, to: 1796, text: "The same slot in all four labels of the disk." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2144}
+          to={2161}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2145, to: 2152, text: "Beat 4: the odd labels last. A cut here leaves the even labels and the new uberblocks, which suffice." },
+            { from: 2154, text: "The same function as beat 2, with <code>l = 1</code>: L1 and L3." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Which disks get labels and uberblocks: <a href={L.dirtyList}>only the vdevs on the dirty list</a> get labels;
+            with that list empty, the uberblock goes to <a href={L.minVdevs}>up to three</a> top-level vdevs.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/spa.c"
+          from={10792}
+          to={10819}
+          symbol="spa_sync_rewrite_vdev_config"
+          notes={[
+            { from: 10792, to: 10815, text: "No configuration change: up to three top-level vdevs, from a random one, skipping logs and vdevs without metaslabs. A pool of one disk gets every uberblock on that disk." },
+            { from: 10816, to: 10818, text: "A configuration change: every top-level vdev." },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Where the labels are.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={158}
+          to={170}
+          symbol="vdev_label_offset"
+          notes={[
+            { from: 165, to: 166, text: "The offset falls inside one label, and the device size is a multiple of a label." },
+            { from: 168, to: 169, text: `Labels 0 and 1 at the start, 2 and 3 in the last 512 KiB. On the figure’s 1 GiB disk: 0, 256 KiB, 1023.5 MiB and 1023.75 MiB. After the two front labels comes <a href="${L.boot}">a 3.5 MiB boot area</a>.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>The import.</strong> Every slot of every label is read, and <a href={L.loadDone}>a valid one is kept if it
+            beats the best so far</a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={1495}
+          to={1505}
+          symbol="vdev_uberblock_compare"
+          notes={[
+            { from: 1498, text: "The higher txg wins." },
+            { from: 1503, text: `On the same txg, the later timestamp; then the <a href="${L.mmpTie}">multihost sequence</a>, which the figure leaves out.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={832}
+          to={863}
+          symbol="vdev_label_read_config"
+          notes={[
+            { from: 835, to: 837, text: `A label counts only if its read succeeds, and the read checks <a href="${L.labelCksum}">the label’s own checksum</a>: a torn label is skipped.` },
+            { from: 852, to: 856, text: `The label with the highest config txg not above <code>txg</code>, the winning uberblock’s (<a href="${L.readConfigCall}">the call</a>). This is how even labels of a txg that did not commit are passed over.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            After the import, the next txg is <a href={L.firstTxg}>the winner’s + 1</a>: when the old tree won, the txg that
+            was lost is written again, and its uberblock goes to the same slot, over the torn one. The import also
+            <a href={L.importUpdate}>asks for a config update</a>, which <a href={L.configUpdate}>marks every vdev dirty</a>
+            for that txg: it rewrites the four labels, torn ones included, whatever else it changes.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">What the figure leaves out</h2>
+      <p class="prose muted">
+        One dataset and very few blocks: two pointers per indirect block instead of up to 1024, the meta-dnode’s own
+        indirect levels and the step from the MOS to a filesystem’s objset folded into one block of dnodes. One disk, so
+        every uberblock and every label lands on it; its 128 slots are those of 512-byte sectors. The writes of one beat are
+        issued together in the code; the figure lands them in order (L0 then L2, L1 then L3, the uberblocks L0 to L3) and
+        tears the one in flight when the plug is pulled. The content of the config, the retry with
+        <code>ZIO_FLAG_IO_RETRY</code>, multihost, RAID-Z expansion, several sync passes in one txg and the freeing of the
+        old blocks (the <a href={roomUrl(lang, "snapshots")}>snapshots room</a>) are not shown. The 3D view draws the same
+        state as the 2D one.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="tree" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

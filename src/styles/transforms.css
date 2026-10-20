@@ -1,0 +1,330 @@
+/* Shared by the three figures of the compression, dedup and encryption room
+   (CompressLab, DedupLab, CryptLab): controls, panels, tables, chips. Their
+   contents are rendered as HTML strings, so the rules are global, under the
+   figures' roots. */
+:is(.cl, .dd, .cr) {
+  margin: var(--space-6) 0 0;
+}
+:is(.dd, .cr) .tr-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+:is(.dd, .cr) .tr-bar[hidden],
+:is(.dd, .cr) .tr-now[hidden] {
+  display: none;
+}
+:is(.dd, .cr) .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+:is(.dd, .cr) .glabel {
+  font-size: var(--step--1);
+  color: var(--fg-muted);
+  margin-right: var(--space-2);
+}
+:is(.cl, .dd, .cr) .btn[aria-pressed="true"]::before {
+  content: "✓ " / "";
+  color: var(--accent);
+}
+:is(.cl, .dd, .cr) .btn--danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+:is(.dd, .cr) .panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+:is(.cl, .dd, .cr) .panel h3 {
+  font-family: var(--font-caption);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--step-1);
+  color: var(--accent);
+  letter-spacing: 0;
+  margin: 0 0 var(--space-2);
+}
+:is(.dd, .cr) .path {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+}
+:is(.dd, .cr) .path li.taken {
+  font-weight: 600;
+}
+:is(.cl, .dd, .cr) a.see {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+:is(.dd, .cr) .tr-now {
+  margin: var(--space-4) 0 0;
+  font-size: var(--step--1);
+  max-width: 52rem;
+  min-height: 3em;
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-3);
+}
+:is(.dd, .cr) .text-version {
+  margin-top: var(--space-5);
+  max-width: var(--measure);
+  font-size: var(--step--1);
+}
+:is(.dd, .cr) .text-version summary {
+  color: var(--fg-muted);
+  padding-block: var(--space-2);
+}
+:is(.cl, .dd, .cr) .muted {
+  color: var(--fg-muted);
+}
+
+/* Tables: the ashift comparison, the words of a block pointer, the DDT. */
+:is(.cl, .dd, .cr) table {
+  border-collapse: collapse;
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+}
+:is(.cl, .dd, .cr) caption {
+  text-align: left;
+  color: var(--fg-muted);
+  padding-bottom: var(--space-2);
+}
+:is(.cl, .dd, .cr) th,
+:is(.cl, .dd, .cr) td {
+  padding: 0.3em 0.6em 0.3em 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+:is(.cl, .dd, .cr) thead th {
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+:is(.cl, .dd, .cr) td.num {
+  text-align: right;
+}
+:is(.cl, .dd, .cr) tr.cur th,
+:is(.cl, .dd, .cr) tr.cur td {
+  color: var(--accent);
+  font-weight: 600;
+}
+/* The DDT scrolls inside its own region on a narrow phone, never the page. */
+.dd .ddt-scroll {
+  overflow-x: auto;
+}
+.cl .cmp-table {
+  max-width: 40rem;
+}
+.cl .cmp-table th,
+.cl .cmp-table td {
+  white-space: nowrap;
+}
+:is(.cl, .cr) .words th[scope="row"] {
+  font-family: var(--font-mono);
+  width: 2.2em;
+  color: var(--fg-muted);
+}
+:is(.cl, .cr) .words td {
+  border-left: 4px solid var(--line);
+  padding-left: 0.6em;
+}
+:is(.cl, .cr) .words.compact td,
+:is(.cl, .cr) .words.compact th {
+  padding-top: 0.1em;
+  padding-bottom: 0.1em;
+}
+:is(.cl, .cr) .words :is(.r-dva-vdev, .r-dva-offset) td {
+  border-left-color: var(--code-type);
+}
+:is(.cl, .cr) .words :is(.r-cksum) td {
+  border-left-color: var(--ok);
+}
+:is(.cl, .cr) .words :is(.r-salt, .r-iv1, .r-iv2-fill, .r-mac, .r-macmac) td {
+  border-left-color: var(--accent);
+}
+:is(.cl, .cr) .words .r-payload td {
+  border-left-color: var(--code-function);
+}
+:is(.cl, .cr) .words .r-zero td {
+  color: var(--fg-faint);
+  border-left-style: dashed;
+}
+:is(.cl, .cr) .words tr.diff td {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* Dedup. */
+.dd .counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--step--1);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 var(--space-3);
+}
+.dd .counters b {
+  color: var(--fg);
+}
+.dd .dd-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.dd .ct {
+  display: inline-block;
+  min-width: 1.6em;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0 0.3em;
+  border: 1px solid var(--line-strong);
+}
+.dd .ct-A {
+  background: var(--accent-soft);
+}
+.dd .ct-B {
+  background: var(--ok-soft);
+}
+.dd .ct-C {
+  background: var(--bad-soft);
+}
+.dd :is(.bps, .disk) {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: var(--step--1);
+}
+.dd :is(.bps, .disk) li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: baseline;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.2em 0.5em;
+}
+.dd :is(.bps, .disk) li.cur {
+  border-color: var(--accent);
+}
+.dd .bpn {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+.dd .dbit {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+.dd .dbit.off {
+  color: var(--bad);
+}
+.dd .births,
+.dd .refs {
+  color: var(--fg-muted);
+  font-size: 0.9em;
+}
+.dd .arrow {
+  color: var(--fg-faint);
+}
+
+/* Encryption. */
+.cr .keystate {
+  font-size: var(--step--1);
+  margin: var(--space-2) 0;
+  padding: var(--space-1) var(--space-2);
+  border-left: 3px solid var(--ok);
+}
+.cr .keystate.off {
+  border-left-color: var(--bad);
+}
+.cr .ctree,
+.cr .ctree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cr .ctree ul {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line);
+  margin-left: var(--space-2);
+}
+.cr .ctree li {
+  margin-top: var(--space-2);
+}
+.cr .ctree li:not(.sub) {
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 0.3em 0.5em;
+  font-size: var(--step--1);
+}
+.cr .bhead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: baseline;
+}
+.cr .bname {
+  font-weight: 600;
+}
+.cr .bkind {
+  color: var(--fg-muted);
+  font-size: 0.9em;
+}
+.cr .bbody {
+  display: grid;
+  gap: 2px;
+  margin-top: 2px;
+}
+.cr .clear {
+  color: var(--fg-muted);
+}
+.cr .plain {
+  font-style: italic;
+}
+.cr .opaque code {
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+}
+.cr .sc.ok {
+  color: var(--ok);
+}
+.cr .sc.bad,
+.cr .flip {
+  color: var(--bad);
+}
+.cr .readout {
+  margin: var(--space-3) 0 0;
+  font-size: var(--step--1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+}
+.cr .readout.ok {
+  background: var(--ok-soft);
+  border-left: 3px solid var(--ok);
+}
+.cr .readout.bad {
+  background: var(--bad-soft);
+  border-left: 3px solid var(--bad);
+}
+@media (max-width: 48rem) {
+  .dd .dd-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :is(.dd, .cr) .panel {
+    padding: var(--space-2) var(--space-3);
+  }
+}

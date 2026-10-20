@@ -1,0 +1,93 @@
+---
+import { neighbours, roomNumber, roomUrl, type Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+
+interface Props {
+  lang: Lang;
+  roomId: string;
+}
+const { lang, roomId } = Astro.props;
+const t = UI[lang];
+const { prev, next } = neighbours(roomId);
+---
+
+<nav class="room-nav wrap" aria-label={t.navRooms}>
+  {
+    prev ? (
+      <a class="prev" href={roomUrl(lang, prev.id)} rel="prev">
+        <span class="dir">← {t.prev}</span>
+        <span class="name">{prev.title[lang]}</span>
+      </a>
+    ) : (
+      <span />
+    )
+  }
+  {
+    next ? (
+      <a class="next" href={roomUrl(lang, next.id)} rel="next">
+        <span class="dir">{t.next} →</span>
+        <span class="name">
+          <span class="num">{roomNumber(next.id)}</span> {next.title[lang]}
+        </span>
+      </a>
+    ) : (
+      <p class="end">
+        {t.endOfVisit} <a href={`${roomUrl(lang, "hall")}#map`}>{t.map}</a>
+      </p>
+    )
+  }
+</nav>
+
+<style>
+  .room-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--line);
+  }
+  a {
+    display: grid;
+    gap: var(--space-1);
+    text-decoration: none;
+    padding: var(--space-3) 0;
+  }
+  .next,
+  .end {
+    text-align: right;
+    justify-self: end;
+  }
+  .dir {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .name {
+    font-family: var(--font-display);
+    font-size: var(--step-1);
+    font-weight: 350;
+    line-height: 1.25;
+  }
+  a:hover .name {
+    color: var(--accent);
+  }
+  .num {
+    color: var(--accent);
+  }
+  .end {
+    margin: 0;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    align-self: center;
+  }
+  @media (max-width: 30rem) {
+    .room-nav {
+      grid-template-columns: 1fr;
+    }
+    .next,
+    .end {
+      text-align: left;
+      justify-self: start;
+    }
+  }
+</style>

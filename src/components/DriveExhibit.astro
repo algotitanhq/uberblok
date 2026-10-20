@@ -1,0 +1,52 @@
+---
+// "Fig. 2", in the dedication: a 3.5-inch hard disk exploded along its spindle,
+// rendered by scripts/render-drive.mjs (DECISIONS.md D15.2). It was the Hall's
+// exhibit in v1.2; since v1.3 it illustrates the dedication's first paragraph,
+// "never, ever trust the underlying hardware" (D16.4).
+import Exhibit from "./Exhibit.astro";
+import drive from "../assets/drive.webp";
+import plate from "../assets/drive-anchors.json";
+import { fr } from "../lib/fr";
+import type { Lang } from "../lib/rooms";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+// Each numbered part: its anchor, and where its numeral sits (fractions of the image).
+const PARTS: { id: string; at: [number, number]; en: string; fr: string; es: string }[] = [
+  { id: "cover", at: [0.05, 0.3], en: "Top cover", fr: "Capot", es: "Tapa superior" },
+  { id: "clamp", at: [0.27, 0.19], en: "Disc clamp", fr: "Bride de serrage", es: "Abrazadera de los platos" },
+  { id: "platters", at: [0.08, 0.47], en: "Platters", fr: "Plateaux", es: "Platos" },
+  { id: "heads", at: [0.95, 0.38], en: "Head stack: arms and heads", fr: fr("Bloc de têtes : bras et têtes"), es: "Conjunto de cabezales: brazos y cabezales" },
+  { id: "coil", at: [0.95, 0.56], en: "Voice coil and its magnet", fr: "Bobine mobile et son aimant", es: "Bobina móvil y su imán" },
+  { id: "motor", at: [0.06, 0.68], en: "Spindle motor", fr: "Moteur de broche", es: "Motor del eje" },
+  { id: "base", at: [0.1, 0.88], en: "Base casting", fr: "Châssis", es: "Chasis" },
+];
+const t = {
+  en: {
+    caption: "The underlying hardware: a 3.5-inch hard disk, exploded along its spindle.",
+    alt: "Rendering of a hard disk taken apart along its spindle: the base, the motor, three glossy brown platters, the clamp and, highest, the cover drawn in outline; the arms of the head stack reach over the platters.",
+  },
+  fr: {
+    caption: fr("Le matériel sous-jacent : un disque dur de 3,5 pouces, éclaté le long de son axe."),
+    alt: fr("Rendu d’un disque dur démonté le long de son axe : le châssis, le moteur, trois plateaux bruns et brillants, la bride et, tout en haut, le capot dessiné au trait ; les bras du bloc de têtes s’avancent au-dessus des plateaux."),
+  },
+  es: {
+    caption: "El hardware subyacente: un disco duro de 3,5 pulgadas, despiezado a lo largo de su eje.",
+    alt: "Imagen renderizada de un disco duro desmontado a lo largo de su eje: la base, el motor, tres platos marrones y brillantes, la abrazadera y, en lo más alto, la tapa dibujada solo con su contorno; los brazos del conjunto de cabezales se extienden sobre los platos.",
+  },
+}[lang];
+---
+
+<Exhibit
+  image={drive}
+  plate={plate}
+  parts={PARTS.map((p) => ({ id: p.id, at: p.at, label: p[lang] }))}
+  fig="Fig. 2"
+  caption={t.caption}
+  alt={t.alt}
+  axis={["axisTop", "axisBottom"]}
+  sizes="(min-width: 60rem) 30rem, 100vw"
+  loading="lazy"
+/>

@@ -1,0 +1,17 @@
+# Captures and media from verification runs never go to git (attach them to the issue).
+shots/
+captures/
+*.png
+# Except the README image(s): synthetic data only, reviewed before commit (D-D1).
+!docs/screens/*.png
+*.jpg
+*.webm
+lighthouse/
+# Local scratch
+.frag/
+node_modules/
+dist/
+.astro/
+.env
+.env.*
+.wrangler/

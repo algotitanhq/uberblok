@@ -1,0 +1,800 @@
+---
+// The figure of the ZIL and SLOG room: an application writing to a file, the
+// decision of zil_write_state for the next write, the itxs and lwbs in
+// memory, and on disk the log header, the chain of log blocks and the devices
+// they live on. The visitor picks the log device, logbias, O_DSYNC, O_DIRECT
+// and a size, writes, fsyncs, syncs the txg, cuts the power, imports and
+// mounts; src/lib/zil.ts (a transcription of zil.c, zfs_log.c and zio.c)
+// decides every outcome, and src/lib/zil-view.ts draws it, at build time for
+// the opening state (readable without JavaScript) and in the browser after,
+// a commit step by step. Refs: ANALYSIS.md, room "ZIL and SLOG";
+// simplifications: DECISIONS.md D8.2.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { empty, SIZES, KIB } from "../lib/zil";
+import { ZIL_STRINGS } from "../lib/zil-strings";
+import { decision, writes, memory, disk, describe, summary, type ZilStrings } from "../lib/zil-view";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const Z = "module/zfs/zil.c";
+const ZL = "module/zfs/zfs_log.c";
+const VN = "module/zfs/zfs_vnops.c";
+const refs = {
+  tput: gh(Z, 2216, 2217),
+  imm: gh(Z, 2227, 2228),
+  slog: gh(Z, 2230, 2232),
+  ret: gh(Z, 2240, 2245),
+  down: gh(ZL, 645, 647),
+  inplace: gh(VN, 1467, 1468),
+  commitFlag: gh(VN, 756, 757),
+  itx: gh(ZL, 627, 649),
+  states: gh("include/sys/zil_impl.h", 83, 92),
+  create: gh(Z, 1022, 1023),
+  createWait: gh(Z, 1034, 1056),
+  dropSynced: gh(Z, 3280, 3283),
+  assign: gh(Z, 2334, 2369),
+  close: gh(Z, 3375, 3379),
+  alloc: gh("module/zfs/zio.c", 4561, 4595),
+  issue: gh(Z, 2073, 2092),
+  flush: gh(Z, 1508, 1524),
+  prune: gh(Z, 3040, 3062),
+  clean: gh(Z, 2862),
+  sync: gh(Z, 4206, 4224),
+  claim: gh(Z, 1232, 1253),
+  replay: gh(Z, 4696, 4712),
+  destroy: gh(Z, 4822, 4823),
+  keepFirst: gh(Z, 4181, 4192),
+  reuse: gh(Z, 1004, 1011),
+  shortDirect: gh(VN, 296, 299),
+  header: gh("include/sys/zil.h", 63, 71),
+};
+const S0 = ZIL_STRINGS[lang];
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as ZilStrings;
+const t = UI[lang];
+const s0 = empty();
+const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u00a0KiB` : `${n} KiB`);
+---
+
+<figure class="zl" data-zl data-strings={JSON.stringify(S)} aria-label={S.figure}>
+  <div class="zl-bar" hidden>
+    <div class="buttons" role="group" aria-label={S.poolLabel}>
+      <span class="glabel">{S.poolLabel}</span>
+      <button class="btn" type="button" data-pool="none" aria-pressed="true">{S.slogNone}</button>
+      <button class="btn" type="button" data-pool="slog" aria-pressed="false">{S.slogSlog}</button>
+      <button class="btn" type="button" data-pool="full" aria-pressed="false">{S.slogFull}</button>
+    </div>
+    <div class="buttons" role="group" aria-label={S.biasLabel}>
+      <span class="glabel"><code>{S.biasLabel}</code></span>
+      <button class="btn" type="button" data-bias="latency" aria-pressed="true">latency</button>
+      <button class="btn" type="button" data-bias="throughput" aria-pressed="false">throughput</button>
+    </div>
+    <div class="buttons" role="group" aria-label={S.flagsLabel}>
+      <span class="glabel">{S.flagsLabel}</span>
+      <button class="btn" type="button" data-flag="dsync" aria-pressed="false"><code>O_DSYNC</code></button>
+      <button class="btn" type="button" data-flag="direct" aria-pressed="false"><code>O_DIRECT</code></button>
+    </div>
+    <div class="buttons" role="group" aria-label={S.sizeLabel}>
+      <span class="glabel">{S.sizeLabel}</span>
+      {SIZES.map((n, i) => <button class="btn" type="button" data-size={n} aria-pressed={i === 0 ? "true" : "false"}>{kib(n / KIB)}</button>)}
+    </div>
+    <div class="buttons actions">
+      <button class="btn btn--primary" type="button" data-act="write"><code>{S.writeBtn}</code></button>
+      <button class="btn btn--primary" type="button" data-act="fsync"><code>{S.fsyncBtn}</code></button>
+      <button class="btn" type="button" data-act="sync" data-sync>{S.syncBtn.replace("{txg}", String(s0.txg))}</button>
+      <button class="btn btn--danger" type="button" data-act="crash">{S.crashBtn}</button>
+      <button class="btn" type="button" data-act="import" disabled><code>{S.importBtn}</code></button>
+      <button class="btn" type="button" data-act="mount" disabled><code>{S.mountBtn}</code></button>
+      <button class="btn" type="button" data-act="reset">{S.reset}</button>
+    </div>
+  </div>
+  <p class="visually-hidden" data-summary>{summary(s0, S)}</p>
+
+  <section class="panel decision" aria-labelledby={`zl-dec-${lang}`}>
+    <h3 id={`zl-dec-${lang}`} set:html={S.decisionLabel} />
+    <div data-decision set:html={decision(s0, S, SIZES[0], { dsync: false, direct: false })} />
+  </section>
+
+  <div class="zl-grid">
+    <section class="panel app" aria-labelledby={`zl-app-${lang}`}>
+      <h3 id={`zl-app-${lang}`}>{S.appLabel}</h3>
+      <div data-writes set:html={writes(s0, S)} />
+    </section>
+    <section class="panel mem" aria-labelledby={`zl-mem-${lang}`}>
+      <h3 id={`zl-mem-${lang}`}>{S.memLabel}</h3>
+      <div data-memory set:html={memory(s0, S)} />
+    </section>
+    <section class="panel disk" aria-labelledby={`zl-disk-${lang}`}>
+      <h3 id={`zl-disk-${lang}`}>{S.diskLabel}</h3>
+      <div data-disk set:html={disk(s0, S)} />
+    </section>
+  </div>
+
+  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <section class="zl-log" aria-labelledby={`zl-log-${lang}`} hidden>
+    <h3 id={`zl-log-${lang}`}>{S.logLabel}</h3>
+    <p class="visually-hidden" data-status aria-live="polite"></p>
+    <ol data-log><li class="muted">{S.logEmpty}</li></ol>
+  </section>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={describe(s0, S)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, wait, reducedMotion, fill } from "../lib/svg";
+  import { empty, write, fsync, sync, crash, importPool, mount, clone, SIZES, type Zil, type Ev, type Flags, type SlogMode, type Logbias } from "../lib/zil";
+  import { decision, writes, memory, disk, describe, summary, eventLine, eventClass, frameAt, type ZilStrings, type Frame } from "../lib/zil-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-zl]")) {
+    const S = strings<ZilStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const logEl = q("[data-log]");
+    let s: Zil = empty();
+    let size = SIZES[0];
+    const flags: Flags = { dsync: false, direct: false };
+    let run = 0;
+    let busy = false;
+
+    const keyOf = (el: Element | null) => {
+      if (!(el instanceof HTMLElement) || !root.contains(el)) return null;
+      for (const k of ["act", "pool", "bias", "flag", "size"]) if (el.dataset[k]) return `[data-${k}="${el.dataset[k]}"]`;
+      return null;
+    };
+
+    function controls() {
+      const ph = s.phase;
+      root.toggleAttribute("data-busy", busy);
+      // Steps that do not apply in this phase are disabled; while a commit is drawn, every control
+      // but Start again is aria-disabled instead, so that the focused button keeps the focus.
+      for (const b of root.querySelectorAll<HTMLButtonElement>("[data-act]")) {
+        const a = b.dataset.act!;
+        b.disabled = a === "import" ? ph !== "crashed" : a === "mount" ? ph !== "imported" : a === "reset" ? false : ph !== "running";
+      }
+      for (const b of root.querySelectorAll<HTMLButtonElement>(".zl-bar button:not([data-act=reset])")) {
+        if (busy) b.setAttribute("aria-disabled", "true");
+        else b.removeAttribute("aria-disabled");
+      }
+      for (const b of root.querySelectorAll<HTMLButtonElement>("[data-pool]")) {
+        b.setAttribute("aria-pressed", String(b.dataset.pool === s.pool.slog));
+        // The devices are the pool's: they do not change between a crash and the mount.
+        b.disabled = ph !== "running";
+      }
+      for (const b of root.querySelectorAll<HTMLElement>("[data-bias]")) b.setAttribute("aria-pressed", String(b.dataset.bias === s.logbias));
+      for (const b of root.querySelectorAll<HTMLElement>("[data-flag]")) b.setAttribute("aria-pressed", String(flags[b.dataset.flag as keyof Flags]));
+      for (const b of root.querySelectorAll<HTMLElement>("[data-size]")) b.setAttribute("aria-pressed", String(Number(b.dataset.size) === size));
+      q("[data-sync]").textContent = fill(S.syncBtn, { txg: s.txg });
+    }
+
+    function draw(f?: Frame) {
+      q("[data-writes]").innerHTML = writes(s, S, f);
+      q("[data-memory]").innerHTML = memory(s, S, f);
+      q("[data-disk]").innerHTML = disk(s, S, f);
+    }
+
+    function render(focusKey: string | null = keyOf(document.activeElement)) {
+      draw();
+      q("[data-decision]").innerHTML = decision(s, S, size, flags);
+      q("[data-summary]").textContent = summary(s, S);
+      q("[data-describe]").innerHTML = describe(s, S);
+      controls();
+      if (focusKey) {
+        const el = root.querySelector<HTMLButtonElement>(focusKey);
+        if (el && !el.disabled) el.focus({ preventScroll: true });
+        else {
+          const next = s.phase === "crashed" ? "import" : s.phase === "imported" ? "mount" : "write";
+          q(`[data-act="${next}"]`).focus({ preventScroll: true });
+        }
+      }
+    }
+
+    const plain = (html: string) => html.replace(/ ?<a class="see"[^>]*>[^<]*<\/a>/g, "").replace(/<[^>]+>/g, "");
+    function say(t: string) {
+      const el = q("[data-status]");
+      el.textContent = "";
+      requestAnimationFrame(() => (el.textContent = t));
+    }
+    /** After a toggle, the new decision is read out. */
+    const sayDecision = () => say(plain(q("[data-decision] .verdict").innerHTML + " " + q("[data-decision] .reasons").innerHTML.replace(/<\/li>/g, " ")));
+
+    async function act(f: () => Ev[]) {
+      const me = ++run;
+      const focusKey = keyOf(document.activeElement);
+      const before = clone(s);
+      const ev = f();
+      const steps = ev.filter((e) => e.k === "lwb").length;
+      logEl.replaceChildren();
+      say(ev.filter((e) => e.k !== "lwb").map((e) => plain(eventLine(S, e))).join(" "));
+      if (reducedMotion() || steps === 0) {
+        for (const e of ev) {
+          const li = document.createElement("li");
+          li.className = eventClass(e);
+          li.innerHTML = eventLine(S, e);
+          logEl.append(li);
+        }
+        render(focusKey);
+        return;
+      }
+      // A commit, drawn step by step: each event shows the model's state up to it.
+      busy = true;
+      controls();
+      for (let k = 0; k < ev.length; k++) {
+        draw(frameAt(before, s, ev, k));
+        const li = document.createElement("li");
+        li.className = eventClass(ev[k]);
+        li.innerHTML = eventLine(S, ev[k]);
+        logEl.append(li);
+        const lw = root.querySelector<HTMLElement>(`[data-lwb="${(ev[k] as { lwb?: number }).lwb}"]`);
+        lw?.animate([{ outline: "2px solid var(--accent)" }, { outline: "2px solid transparent" }], { duration: 420 });
+        await wait(ev[k].k === "lwb" ? 230 : 380);
+        if (me !== run) return;
+      }
+      busy = false;
+      render(focusKey);
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el)) return;
+      const d = el.dataset;
+      if (d.act === "reset") {
+        run++;
+        busy = false;
+        s = empty();
+        size = SIZES[0];
+        flags.dsync = flags.direct = false;
+        logEl.innerHTML = `<li class="muted">${S.logEmpty}</li>`;
+        q("[data-status]").textContent = "";
+        render();
+        return;
+      }
+      if (busy) return;
+      if (d.pool) {
+        s.pool = { slog: d.pool as SlogMode };
+        render();
+        sayDecision();
+      } else if (d.bias) {
+        s.logbias = d.bias as Logbias;
+        render();
+        sayDecision();
+      } else if (d.flag) {
+        const k = d.flag as keyof Flags;
+        flags[k] = !flags[k];
+        render();
+        sayDecision();
+      } else if (d.size) {
+        size = Number(d.size);
+        render();
+        sayDecision();
+      } else if (d.act === "write") void act(() => write(s, size, { ...flags }));
+      else if (d.act === "fsync") void act(() => fsync(s));
+      else if (d.act === "sync") void act(() => sync(s));
+      else if (d.act === "crash") void act(() => crash(s));
+      else if (d.act === "import") void act(() => importPool(s));
+      else if (d.act === "mount") void act(() => mount(s));
+    });
+
+    render(null);
+    q(".zl-bar").hidden = false;
+    q(".zl-log").hidden = false;
+  }
+</script>
+
+<style>
+  .zl {
+    margin: var(--space-6) 0 0;
+  }
+  .zl-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+  }
+  .zl-bar[hidden],
+  .zl-log[hidden] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .buttons.actions {
+    margin-top: var(--space-2);
+  }
+  .glabel {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    margin-right: var(--space-2);
+    min-width: 9.5rem;
+  }
+  .zl-bar .btn[aria-pressed="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--fg);
+  }
+  .zl-bar .btn[aria-pressed="true"]::before {
+    content: "✓ ";
+    color: var(--accent);
+  }
+  .zl-bar .btn[disabled],
+  .zl-bar .btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .zl-bar .btn--danger {
+    border-color: var(--bad);
+    color: var(--bad);
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--space-3) var(--space-4);
+    min-width: 0;
+  }
+  .panel h3 {
+    margin: 0 0 var(--space-2);
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    font-size: var(--step-0);
+    font-weight: 600;
+  }
+  .panel :global(h4) {
+    margin: var(--space-3) 0 var(--space-2);
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    font-size: var(--step--1);
+    font-weight: 600;
+    color: var(--fg-muted);
+  }
+  .panel :global(h4:first-child) {
+    margin-top: 0;
+  }
+  .panel :global(.none) {
+    font-size: var(--step--1);
+    color: var(--fg-faint);
+    list-style: none;
+  }
+  .decision :global(.verdict) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+    margin-bottom: var(--space-2);
+  }
+  .decision :global(.verdict .wr) {
+    font-size: var(--step-0);
+    padding: 2px 8px;
+  }
+  .decision :global(.for) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .decision :global(.reasons) {
+    margin: 0;
+    padding-left: 1.3em;
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--step--1);
+    max-width: 60rem;
+  }
+  .decision :global(.commit) {
+    margin-top: var(--space-2);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .zl :global(.wr) {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 0 5px;
+    white-space: nowrap;
+  }
+  .zl :global(.wr.wr-copied) {
+    color: var(--ok);
+  }
+  .zl :global(.wr.wr-need-copy) {
+    color: var(--accent);
+  }
+  .zl :global(.wr.wr-indirect) {
+    color: var(--code-function);
+  }
+  .zl-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+  }
+  .zl-grid .disk {
+    grid-column: 1 / -1;
+  }
+  .app :global(.writes) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+  }
+  .app :global(.w) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    align-items: center;
+    border-left: 3px solid var(--line-strong);
+    padding-left: var(--space-2);
+  }
+  .app :global(.wid) {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+  }
+  .app :global(.wst) {
+    color: var(--fg-muted);
+  }
+  .app :global(.w.logged) {
+    border-left-color: var(--accent);
+  }
+  .app :global(.w.synced) {
+    border-left-color: var(--ok);
+  }
+  .app :global(.w.replayed) {
+    border-left-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .app :global(.w.lost) {
+    border-left-color: var(--bad);
+  }
+  .app :global(.w.lost .wid) {
+    text-decoration: line-through;
+    color: var(--bad);
+  }
+  .app :global(.more) {
+    color: var(--fg-muted);
+  }
+  .zl :global(.tag) {
+    font-size: 0.72rem;
+    color: var(--fg-muted);
+    border: 1px dashed var(--line-strong);
+    border-radius: 3px;
+    padding: 0 5px;
+  }
+  .zl :global(.tag.wait) {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .mem :global(.itxs),
+  .mem :global(.lwbs),
+  .mem :global(.recs) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .mem :global(.itxs) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .mem :global(.itx) {
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 2px 6px;
+    background: var(--surface-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .mem :global(.lwbs) {
+    display: grid;
+    gap: var(--space-2);
+  }
+  .mem :global(.lwb) {
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-2);
+  }
+  .mem :global(.lwb.done) {
+    border-color: var(--ok);
+  }
+  .mem :global(.lh) {
+    font-size: var(--step--1);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    align-items: center;
+    margin-bottom: var(--space-1);
+  }
+  .mem :global(.lb) {
+    color: var(--fg-muted);
+  }
+  .mem :global(.steps) {
+    list-style: none;
+    margin: 0 0 var(--space-1);
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+  .mem :global(.steps li) {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    padding: 1px 4px;
+    border-radius: 2px;
+    color: var(--fg-muted);
+    border: 1px solid var(--line);
+  }
+  .mem :global(.steps li.past) {
+    color: var(--fg-muted);
+    border-color: var(--line-strong);
+  }
+  .mem :global(.steps li.now) {
+    color: var(--bg);
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .mem :global(.lwb.done .steps li.now) {
+    background: var(--ok);
+    border-color: var(--ok);
+  }
+  .mem :global(.used) {
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .mem :global(.meter) {
+    display: inline-block;
+    width: 8rem;
+    height: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .mem :global(.meter span) {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .mem :global(.recs) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: var(--space-1);
+  }
+  .zl :global(.rec) {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    border: 1px solid var(--line-strong);
+    border-left-width: 3px;
+    border-radius: 2px;
+    padding: 1px 4px;
+    background: var(--surface);
+  }
+  .zl :global(.rec.wr-copied) {
+    border-left-color: var(--ok);
+  }
+  .zl :global(.rec.wr-need-copy) {
+    border-left-color: var(--accent);
+  }
+  .zl :global(.rec.wr-indirect) {
+    border-left-color: var(--code-function);
+  }
+  .zl :global(.part) {
+    color: var(--fg-muted);
+    font-family: var(--font-body);
+  }
+  .disk :global(.hdr) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    margin: 0;
+    font-size: var(--step--1);
+  }
+  .disk :global(.hdr div) {
+    display: flex;
+    gap: var(--space-2);
+  }
+  .disk :global(.hdr dt) {
+    font-family: var(--font-mono);
+    color: var(--fg-muted);
+  }
+  .disk :global(.hdr dd) {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .disk :global(.chain) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) 0;
+    align-items: flex-start;
+  }
+  .disk :global(.chain .arrow) {
+    color: var(--fg-muted);
+    padding: 0 var(--space-2);
+    margin-top: 2px;
+  }
+  .disk :global(.chain .zh) {
+    font-family: var(--font-mono);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    padding-top: 2px;
+  }
+  .disk :global(.blk) {
+    display: flex;
+    align-items: flex-start;
+    font-size: 0.75rem;
+  }
+  .disk :global(.bcol) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .disk :global(.bcol > span:not(:first-child)) {
+    font-size: 0.7rem;
+    color: var(--fg-muted);
+  }
+  .disk :global(.bid) {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 2px 6px;
+    background: var(--surface-2);
+    width: fit-content;
+  }
+  .disk :global(.blk.written .bid) {
+    border-color: var(--ok);
+  }
+  .disk :global(.blk.writing .bid) {
+    border-color: var(--accent);
+  }
+  .disk :global(.blk.end .bid) {
+    border-style: dashed;
+  }
+  .disk :global(.bnote) {
+    max-width: 12rem;
+  }
+  .disk :global(.devs) {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+  }
+  .disk :global(.dev) {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: var(--space-2) var(--space-3);
+  }
+  .disk :global(.dev.slog) {
+    border-color: var(--accent);
+  }
+  .disk :global(.dev.slog.full) {
+    background: repeating-linear-gradient(45deg, transparent 0 6px, var(--bad-soft) 6px 9px);
+  }
+  .disk :global(.dl) {
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    margin-bottom: var(--space-1);
+  }
+  .disk :global(.cells) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .disk :global(.cell) {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 2px;
+    padding: 2px 5px;
+    background: var(--surface-2);
+  }
+  .disk :global(.cell.written) {
+    border-color: var(--ok);
+  }
+  .disk :global(.cell.end) {
+    border-style: dashed;
+  }
+  .disk :global(.cell.freed) {
+    color: var(--fg-faint);
+    background: transparent;
+    border-color: var(--line);
+    text-decoration: line-through;
+  }
+  .disk :global(.cell.data) {
+    border-color: var(--code-function);
+    font-family: var(--font-body);
+  }
+  .zl-log {
+    margin-top: var(--space-6);
+    max-width: 48rem;
+  }
+  .zl-log h3 {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+    margin-bottom: var(--space-3);
+  }
+  .zl-log ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .zl-log :global(li) {
+    border-left: 2px solid var(--line-strong);
+    padding-left: var(--space-3);
+  }
+  .zl-log :global(li.muted) {
+    border-left-color: transparent;
+    padding-left: 0;
+  }
+  .zl-log :global(li.step) {
+    color: var(--fg-muted);
+    margin-left: var(--space-3);
+  }
+  .zl-log :global(li.alloc),
+  .zl-log :global(li.assign) {
+    border-left-color: var(--accent);
+  }
+  .zl-log :global(li.returns),
+  .zl-log :global(li.replay) {
+    border-left-color: var(--ok);
+  }
+  .zl-log :global(li.crash),
+  .zl-log :global(li.refused) {
+    border-left-color: var(--bad);
+  }
+  .zl :global(a.see) {
+    font-size: 0.85em;
+    color: var(--fg-muted);
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version :global(ul) {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-1);
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 48rem) {
+    .zl-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .glabel {
+      min-width: 100%;
+    }
+  }
+</style>

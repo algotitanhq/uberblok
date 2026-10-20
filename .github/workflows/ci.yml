@@ -1,0 +1,63 @@
+name: ci
+
+# Every push: unit tests, the code in the Hall's figure, excerpt check on ANALYSIS.md, site build, permalink
+# check and source check (against SOURCES.md) on the built HTML. Branches build
+# and test only: previews are private, on the build machine (`preview`, see docs/dev.md).
+# Deploy: `wrangler deploy` on a push to main (or a manual run on main, for the
+# first deploy, RELEASE.md step 4), and only once the repository
+# variable PUBLIC_RELEASE is "true" (set after the owner's Go on the first public
+# release, with the Cloudflare keys). Until then it is skipped, even if
+# CLOUDFLARE_ACCOUNT_ID is set. No workflow uploads preview versions.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OPENZFS_SHA: 71a9f9578616a90c3c14bb59629fb4d31bfd68d1
+  WRANGLER_VERSION: "4.142.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Fetch OpenZFS at the frozen commit
+        run: |
+          git init -q "$RUNNER_TEMP/openzfs"
+          git -C "$RUNNER_TEMP/openzfs" fetch -q --depth 1 https://github.com/openzfs/zfs "$OPENZFS_SHA"
+      - name: Test the checker
+        run: npm test
+      - name: Check the code printed in the Hall's figure against the frozen commit
+        run: node scripts/check-plate.mjs "$RUNNER_TEMP/openzfs" "$OPENZFS_SHA" src/assets/glass-plate.json
+      - name: Check every permalink and excerpt in ANALYSIS.md
+        run: node scripts/check-permalinks.mjs "$RUNNER_TEMP/openzfs" "$OPENZFS_SHA" ANALYSIS.md
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Check every permalink in the built site
+        run: node scripts/check-permalinks.mjs "$RUNNER_TEMP/openzfs" "$OPENZFS_SHA" $(find dist -name '*.html')
+      - name: Check every source reference in the built site against SOURCES.md
+        run: node scripts/check-sources.mjs SOURCES.md $(find dist -name '*.html')
+      - name: Deploy
+        if: vars.PUBLIC_RELEASE == 'true' && vars.CLOUDFLARE_ACCOUNT_ID != '' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          message="$(git log -1 --format=%s | head -c 100)"
+          npx --yes "wrangler@${WRANGLER_VERSION}" deploy --message "$message"

@@ -1,0 +1,351 @@
+/* The tree and the uberblock room's figure (TreeLab): controls, the 2D tree
+   and disk, the 3D canvas, panels. Contents are rendered as HTML and SVG
+   strings, so the rules are global, under the figure's root. States: the
+   accent for the new copies and the newest uberblock, muted for the old tree,
+   dashed while not flushed, the bad colour for what a cut tore or lost. */
+.tr {
+  margin: var(--space-6) 0 0;
+}
+.tr .tr-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.tr .tr-bar[hidden],
+.tr .tr-now[hidden],
+.tr [hidden] {
+  display: none;
+}
+.tr .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.tr .glabel {
+  font-size: var(--step--1);
+  color: var(--fg-muted);
+  margin-right: var(--space-2);
+}
+.tr .btn[aria-pressed="true"]::before {
+  content: "✓ " / "";
+  color: var(--accent);
+}
+.tr .btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+.tr .tr-why {
+  font-size: var(--step--1);
+  margin: 0;
+  min-height: 1.4em;
+}
+.tr .tr-stage {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--space-3);
+  min-width: 0;
+}
+.tr .tr-help {
+  font-size: var(--step--1);
+  margin: var(--space-2) 0 0;
+}
+.tr .tr-help.off {
+  visibility: hidden;
+}
+.tr-tree,
+.tr-disk {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.tr-tree {
+  max-width: 40rem;
+  margin: 0 auto;
+  font-size: 14px;
+}
+.tr-disk {
+  max-width: 36rem;
+  margin: var(--space-3) auto 0;
+}
+.tr-tree .edge {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.2;
+}
+.tr-tree .edge.e-old {
+  stroke: var(--old);
+}
+.tr-tree .edge.e-new,
+.tr-tree .edge.e-unflushed,
+.tr-tree .edge.e-mem {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+.tr-tree .edge.e-mem,
+.tr-tree .edge.e-unflushed {
+  stroke-dasharray: 4 3;
+}
+.tr-tree .edge.e-lost {
+  stroke: var(--bad);
+  stroke-dasharray: 2 3;
+}
+.tr-tree .b rect,
+.tr-tree .ub rect {
+  fill: var(--surface-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.tr-tree .b.s-old rect {
+  stroke: var(--old);
+}
+.tr-tree .b.s-dead,
+.tr-tree .b.s-lost {
+  opacity: 0.55;
+}
+.tr-tree .b.s-dead rect {
+  stroke: var(--old);
+  stroke-dasharray: 2 2;
+  fill: none;
+}
+.tr-tree .b.s-new rect,
+.tr-tree .b.s-mem rect,
+.tr-tree .b.s-unflushed rect,
+.tr-tree .ub rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: var(--accent-soft);
+}
+.tr-tree .b.s-mem rect,
+.tr-tree .b.s-unflushed rect {
+  stroke-dasharray: 4 3;
+}
+.tr-tree .b.s-lost rect {
+  stroke: var(--bad);
+  stroke-dasharray: 2 3;
+  fill: var(--bad-soft);
+}
+.tr-tree .nm,
+.tr-disk .nm {
+  fill: var(--fg);
+}
+.tr-tree .bt,
+.tr-disk .bt {
+  fill: var(--fg-muted);
+  font-family: var(--font-caption);
+  font-style: italic;
+  font-size: 13px;
+}
+.tr-tree .root {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+.tr-tree marker path {
+  fill: var(--accent);
+}
+.tr-disk .ring {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 7;
+}
+.tr-disk .slot {
+  fill: none;
+  stroke-width: 12;
+}
+.tr-disk .slot.prev {
+  stroke: var(--fg-muted);
+}
+.tr-disk .slot.next {
+  stroke: var(--fg-faint, var(--line-strong));
+  stroke-dasharray: 1 1;
+}
+.tr-disk .slot.new {
+  stroke: var(--accent);
+}
+.tr-disk .slot.torn {
+  stroke: var(--bad);
+}
+.tr-disk .seg {
+  fill: var(--surface-2);
+  stroke: var(--line-strong);
+}
+.tr-disk .seg.area {
+  fill: none;
+  stroke-dasharray: 3 3;
+}
+.tr-disk .seg.new {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: var(--accent-soft);
+}
+.tr-disk .seg.torn {
+  stroke: var(--bad);
+  stroke-width: 2;
+  fill: var(--bad-soft);
+}
+.tr .tr-3d {
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.tr .tr-canvas {
+  display: block;
+  width: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.tr .tr-canvas:active {
+  cursor: grabbing;
+}
+.tr .tr-panels {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 60rem) {
+  .tr .tr-panels {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .tr .tr-panels .tr-wide {
+    grid-column: 1 / -1;
+  }
+}
+.tr .panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+  font-size: var(--step--1);
+}
+.tr .panel h3 {
+  font-family: var(--font-caption);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--step-1);
+  color: var(--accent);
+  letter-spacing: 0;
+  margin: 0 0 var(--space-2);
+}
+.tr .panel p {
+  margin: 0 0 var(--space-2);
+}
+.tr .beats {
+  margin: 0;
+  padding-left: 1.6em;
+  display: grid;
+  gap: var(--space-2);
+}
+.tr .beats .st {
+  font-family: var(--font-caption);
+  font-style: italic;
+  color: var(--fg-muted);
+}
+.tr .beats .bt-done .st {
+  color: var(--accent);
+}
+.tr .beats .bt-next {
+  font-weight: 600;
+}
+.tr .beats .bt-todo {
+  color: var(--fg-muted);
+}
+.tr .beats .bt-cut .st {
+  color: var(--bad);
+  font-weight: 600;
+}
+.tr .imp {
+  margin: 0 0 var(--space-2);
+  padding-left: 1.1em;
+  display: grid;
+  gap: var(--space-1);
+}
+.tr .imp-verdict {
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-2);
+}
+.tr a.see {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+.tr table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.tr th,
+.tr td {
+  text-align: left;
+  padding: 0.3em 0.4em;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.tr thead th {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+.tr td.new {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tr td.torn {
+  color: var(--bad);
+  font-weight: 600;
+}
+.tr td {
+  white-space: nowrap;
+}
+.tr-legend {
+  list-style: none;
+  margin: var(--space-2) auto 0;
+  padding: 0;
+  max-width: 40rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--step--1);
+  color: var(--fg-muted);
+}
+.tr-legend .sw {
+  display: inline-block;
+  width: 1em;
+  height: 0.8em;
+  margin-right: 0.4em;
+  border-radius: 2px;
+  border: 1.5px solid var(--line-strong);
+  vertical-align: -0.05em;
+}
+.tr-legend .s-old .sw { border-color: var(--old); }
+.tr-legend .s-new .sw { border-color: var(--accent); background: var(--accent-soft); }
+.tr-legend .s-mem .sw,
+.tr-legend .s-unflushed .sw { border: 1.5px dashed var(--accent); background: var(--accent-soft); }
+.tr-legend .s-lost .sw { border: 1.5px dashed var(--bad); background: var(--bad-soft); }
+.tr-legend .s-dead .sw { border: 1.5px dashed var(--old); }
+.tr .note {
+  margin-top: var(--space-2);
+}
+.tr .tr-now {
+  margin: var(--space-4) 0 0;
+  font-size: var(--step--1);
+  max-width: 52rem;
+  min-height: 3em;
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-3);
+}
+.tr .text-version {
+  margin-top: var(--space-5);
+  max-width: var(--measure);
+  font-size: var(--step--1);
+}
+
+/* The disk table scrolls inside its own region on a narrow phone, never the page. */
+.tr .tr-scroll {
+  overflow-x: auto;
+}

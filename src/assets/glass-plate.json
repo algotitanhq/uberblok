@@ -1,0 +1,53 @@
+{
+  "width": 1800,
+  "height": 1440,
+  "image": {
+    "file": "glass.webp",
+    "sha256": "d735c313d482fa3f4af6a25e3ad0d864c73cd5d0349ec63ac3cd08f3ca1d272b"
+  },
+  "source": {
+    "file": "include/sys/uberblock_impl.h",
+    "tag": "zfs-2.4.4",
+    "sha": "71a9f9578616a90c3c14bb59629fb4d31bfd68d1",
+    "printed": [
+      36,
+      150
+    ],
+    "lens": [
+      122,
+      128
+    ],
+    "sha256": "962cfe088e19bb3bf966c6bb73ebdc34eea15acbf76fa2649c7021062ed46b02"
+  },
+  "optics": {
+    "focal": 216.1138,
+    "height": 72.0379,
+    "magnification": 1.5
+  },
+  "anchors": {
+    "struct": [
+      0.3933,
+      0.459
+    ],
+    "txg": [
+      0.4828,
+      0.5514
+    ],
+    "rootbp": [
+      0.4911,
+      0.616
+    ],
+    "listing": [
+      0.3628,
+      0.234
+    ],
+    "aim": [
+      0.3711,
+      0.5076
+    ],
+    "lensCentre": [
+      0.3713,
+      0.5081
+    ]
+  }
+}

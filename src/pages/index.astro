@@ -1,0 +1,47 @@
+---
+// The root picks a language: the one chosen before (switch), else French or Spanish
+// when the browser lists it, else English. Static hosting has no Accept-Language, so
+// this is a few lines of inline script, with every link visible for no-JS visitors.
+import "../styles/global.css";
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Uberblok</title>
+    <meta name="description" content="An interactive museum of ZFS. Un musée interactif de ZFS. Un museo interactivo de ZFS." />
+    <link rel="alternate" hreflang="en" href={new URL("/en/", Astro.site).href} />
+    <link rel="alternate" hreflang="fr" href={new URL("/fr/", Astro.site).href} />
+    <link rel="alternate" hreflang="es" href={new URL("/es/", Astro.site).href} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script is:inline>
+      (() => {
+        let lang = null;
+        try { lang = localStorage.getItem("lang"); } catch {}
+        if (lang !== "fr" && lang !== "en" && lang !== "es") {
+          // French if the browser lists French at all (as in v1), else Spanish if it lists Spanish, else English.
+          const has = (re) => (navigator.languages || [navigator.language]).some((l) => re.test(l));
+          lang = has(/^fr\b/i) ? "fr" : has(/^es\b/i) ? "es" : "en";
+        }
+        location.replace("/" + lang + "/");
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="wrap pick">
+      <p><a href="/en/" hreflang="en">Uberblok, in English</a></p>
+      <p lang="fr"><a href="/fr/" hreflang="fr">Uberblok, en français</a></p>
+      <p lang="es"><a href="/es/" hreflang="es">Uberblok, en español</a></p>
+    </main>
+  </body>
+</html>
+
+<style>
+  .pick {
+    padding-block: var(--space-8);
+    font-family: var(--font-display);
+    font-size: var(--step-2);
+  }
+</style>

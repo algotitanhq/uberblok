@@ -1,0 +1,462 @@
+---
+import Base from "../../layouts/Base.astro";
+import CompressLab from "../../components/CompressLab.astro";
+import DedupLab from "../../components/DedupLab.astro";
+import CryptLab from "../../components/CryptLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "en";
+const r = room("compression-dedup-encryption");
+const Z = "module/zfs/zio.c";
+const DDT = "module/zfs/ddt.c";
+const DDTH = "include/sys/ddt.h";
+const SPA = "include/sys/spa.h";
+const CRYPT = "module/os/linux/zfs/zio_crypt.c";
+const L = {
+  compressData: gh("module/zfs/zio_compress.c", 148, 149),
+  bpe: gh(SPA, 356, 357),
+  roundup: gh(Z, 1783, 1789),
+  minAlloc: gh("module/zfs/vdev.c", 428, 437),
+  gcd: gh("module/zfs/vdev.c", 1523, 1536),
+  asize: gh("module/zfs/vdev.c", 368, 370),
+  holeBirth: gh(Z, 2107, 2115),
+  setProps: gh(Z, 2116, 2132),
+  dedupEmpty: gh("module/zfs/dmu.c", 2465, 2472),
+  embeddedLayout: gh(SPA, 265, 323),
+  syncPass: gh(Z, 1957, 1974),
+  key: gh(DDTH, 95, 105),
+  value: gh(DDTH, 150, 169),
+  fill: gh(DDT, 724, 726),
+  addref: gh(DDT, 880, 888),
+  childWrite: gh(Z, 4110, 4114),
+  extend: gh(Z, 3780, 3789),
+  quotaComment: gh(DDT, 113, 127),
+  overQuota: gh(DDT, 1136, 1163),
+  logTxg: gh("module/zfs/ddt_log.c", 41),
+  prune: gh(DDT, 129, 134),
+  scrubDdt: gh(DDT, 180, 186),
+  cryptDedup: gh(CRYPT, 147, 163),
+  suites: gh(CRYPT, 39, 40),
+  lens: gh("include/sys/zio.h", 129, 131),
+  masterKey: gh("module/zfs/dsl_crypt.c", 37, 44),
+  shareKey: gh("module/zfs/dsl_crypt.c", 60, 62),
+  macros: gh(SPA, 452, 470),
+  iv2: gh(SPA, 531, 538),
+  encodeParams: gh(CRYPT, 751, 773),
+  encodeMac: gh(CRYPT, 809, 827),
+  noEmbed: gh(SPA, 320, 322),
+  encryptRest: gh(Z, 5183, 5199),
+  fold: gh("module/zfs/zio_checksum.c", 324, 341),
+  scrubRaw: gh("module/zfs/dsl_scan.c", 4841),
+  eacces: gh("module/zfs/dsl_crypt.c", 2818, 2823),
+  rotate: gh(CRYPT, 187),
+  dontCompress: gh(Z, 125),
+  stages: gh("include/sys/zio_impl.h", 135, 144),
+  logFlags: gh(DDT, 303, 310),
+  quotaAuto: gh("module/zcommon/zpool_prop.c", 143, 145),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="compression-dedup-encryption"
+  title="Compression, dedup, encryption · Uberblok"
+  description="Three transforms in the ZFS write pipeline, read in the OpenZFS code: the compression limit and its four outcomes, the dedup table and what it costs, and the block pointer of an encrypted block, scrubbed without its key: interactive."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Room {roomNumber(r.id)}</p>
+      <h1>{r.title.en}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          Between the application and the disk, three features can change a block. Each saves something or protects
+          something, and each has a price that the code pays on every write.
+        </p>
+        <p>
+          <strong>Compression</strong> saves space, but compressing costs CPU, and a block that shrinks by a few bytes
+          saves nothing once it is rounded up to whole sectors. <strong>Dedup</strong> avoids writing a block that is
+          already on disk, but to know that it must look every written block up in a table, keep that table on disk and
+          update it. <strong>Encryption</strong> hides the data, but the pool must still be able to check, repair and
+          send blocks for which it may not have the key. The code answers each problem with one rule, and this room
+          takes the three rules one by one. In <a href={L.stages}>the write pipeline</a> they run in this order:
+          compression, then encryption, then the checksum of what will be written, then the dedup lookup by that
+          checksum.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="compress">
+      <h2 id="compress"><span class="n">1</span> Compression: save an eighth, or store as is</h2>
+      <div class="prose">
+        <p>
+          The compressor is given a limit: seven eighths of the block, rounded down to a whole number of sectors. If its
+          output does not fit, the block is stored uncompressed. Two cases never reach the compressor or never reach
+          the disk: a block of zeros becomes a hole, and an output of 112 bytes or less is folded into the block pointer
+          itself. Choose the data, the block size, the sector size and the compression, and follow the branch that
+          decides.
+        </p>
+      </div>
+      <CompressLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="dedup">
+      <h2 id="dedup"><span class="n">2</span> Dedup: a table looked up on every write</h2>
+      <div class="prose">
+        <p>
+          With <code>dedup=on</code>, every block written is looked up in the dedup table (DDT) by its checksum. If the
+          table already has it, the new block pointer is filled with the existing copy’s address and a reference count
+          goes up: nothing is written. If not, the block is written and a new entry records where. Write blocks, write
+          the same one again, then put the table over its quota.
+        </p>
+      </div>
+      <DedupLab lang={lang} />
+      <div class="prose after cost">
+        <p>
+          <strong>What it costs.</strong> The figure counts one DDT lookup per write, hit or miss: a dataset with
+          <code>dedup=on</code> pays it for every block, not only for duplicates. Each entry is a key of
+          <a href={L.key}>40 bytes</a> (the 256-bit checksum and one word of sizes and flags) and a value of
+          <a href={L.value}>256 bytes in the traditional format, 72 in the newer flat one</a>. The table lives on disk as
+          ZAP objects, and the code says why updating it is expensive: “each entry only takes up a tiny portion of a ZAP
+          leaf node, and so required reading the whole node, updating the entry, and writing it back. On busy pools,
+          this could add serious IO and memory overheads.” The <code>fast_dedup</code> feature answers with a log:
+          modified entries are appended to an on-disk log and kept in memory, and flushed to the ZAP a little every
+          txg. Only tables created with the feature <a href={L.logFlags}>get the log</a>; a table created before it
+          keeps the rewrite of a ZAP leaf per txg. A <code>dedup_table_quota</code> can cap the table’s size on disk;
+          over it, new blocks are simply not deduplicated. Its default, <code>auto</code>, <a href={L.quotaAuto}>sets no
+          size</a> and <a href={L.overQuota}>caps the table only on a pool with a dedup or special vdev</a>: on a pool
+          of plain disks, the table grows with the data. The code gives no figure for memory per terabyte or for a dedup ratio: those depend on the
+          data, and this room does not invent them.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="crypt">
+      <h2 id="crypt"><span class="n">3</span> Encryption: secrets in the block pointer, checksums in clear</h2>
+      <div class="prose">
+        <p>
+          An encrypted block needs a salt, an IV and a MAC, and they travel where the block is referenced: in its block
+          pointer, in the place of the third copy’s address and of half the checksum. The other half of the checksum is
+          computed over the ciphertext, so the pool can check every block without the key. Compare the words of four
+          kinds of block pointer, then unload the key of an encrypted file and scrub it.
+        </p>
+      </div>
+      <CryptLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">The idea, at three depths</h2>
+
+      <div class="depth">
+        <h3>In one sentence</h3>
+        <p class="lead prose">
+          Compression keeps a block compressed only if it saves at least an eighth, counted in whole sectors; dedup replaces a
+          write with a reference when the block’s checksum is already in its table, at the price of a lookup on every
+          write; encryption puts its salt, IV and MAC in the block pointer and leaves a truncated checksum of the
+          ciphertext, so scrub needs no key.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In one paragraph</h3>
+        <p class="prose">
+          In <code>zio_write_compress</code>, an all-zero block becomes a hole; otherwise the compressor gets a limit of
+          seven eighths of the block, snapped down to the sector, and an output that does not fit leaves the block
+          uncompressed; an output of at most 112 bytes goes into the block pointer, which then holds data instead of
+          addresses; anything else is rounded up to whole sectors. Then, in an encrypted dataset, encryption uses the
+          third DVA for the salt and the start of the IV, the top of the fill count for the rest of the IV, and half of
+          the checksum for the MAC; only level-0 blocks of encrypted types are encrypted. The checksum comes next,
+          computed over what will be written, ciphertext included, and scrub, which reads blocks raw, checks its
+          remaining 128 bits. Last, with dedup, <code>zio_ddt_write</code> looks that checksum up in the DDT: a hit
+          copies the entry’s DVA into the new block pointer and adds a reference, with no write; a miss writes the block
+          and records its DVA in a new entry; a table over its quota refuses new entries, and the block is written
+          without its D bit.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In detail</h3>
+        <div class="prose">
+          <p><strong>The limit.</strong> Before compressing, the write path asks how big the output may be.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={1791}
+          to={1809}
+          symbol="zio_get_compression_max_size"
+          notes={[
+            { from: 1797, to: 1798, text: "Seven eighths of the source: at least 12.5% must be saved, a “legacy value”, says the comment." },
+            { from: 1800, to: 1802, text: "ZLE, which only compresses runs of zeros, is exempt from what follows." },
+            { from: 1804, text: `Rounded down to a multiple of <code>spa_gcd_alloc</code>, which for a pool of plain disks of one ashift is <a href="${L.minAlloc}">the sector</a> (<a href="${L.gcd}">the greatest common divisor of the vdevs’ allocation sizes</a>): a saving smaller than a sector saves nothing.` },
+            { from: 1806, to: 1807, text: `If that leaves less than one sector, the only output worth having is one that fits in a block pointer: <code>BPE_PAYLOAD_SIZE</code>, <a href="${L.bpe}">14 words of 8 bytes</a>, 112 bytes.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Seven eighths of 128 KiB is 112 KiB, already a multiple of 512 bytes, 4 KiB and 8 KiB: for the default record
+            size the snap changes nothing. It matters for small blocks: at ashift 12, seven eighths of 8 KiB snaps down to
+            4 KiB, and seven eighths of 4 KiB snaps to nothing, so a 4 KiB block on 4 KiB sectors is compressed only if it
+            shrinks to 112 bytes. The figure’s table shows the same data at the three sector sizes.
+          </p>
+          <p><strong>The four outcomes.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={1982}
+          to={2017}
+          symbol="zio_write_compress"
+          notes={[
+            { from: 1983, to: 1984, text: `None of this runs with compression off: a block of zeros is then written like any other, unless dedup is on, which <a href="${L.dedupEmpty}">turns zero detection on</a> because “storing many references to an all zeros block in the dedup table would be expensive”.` },
+            { from: 1986, to: 1987, text: "All zeros: PSIZE 0, which becomes a hole below." },
+            { from: 1991, to: 1995, text: `The compressor runs with the limit as its output size; <a href="${L.compressData}"><code>zio_compress_data</code> returns the source size</a> when the output does not fit.` },
+            { from: 1996, to: 1997, text: "A hole: compression is marked off, and PSIZE stays 0." },
+            { from: 1998, to: 2001, text: "An output that saved nothing: compression is off for this block, and it is stored at its logical size." },
+            { from: 2002, to: 2017, text: `At most 112 bytes, not encrypted, at level 0, of a type without a fill count, with <code>embedded_data</code> enabled: the data is encoded into the block pointer, whose <a href="${L.embeddedLayout}">words then hold payload</a>, and the write stops there, with no allocation.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={2018}
+          to={2039}
+          symbol="zio_write_compress"
+          notes={[
+            { from: 2027, to: 2028, text: `<code>zio_roundup_alloc_size</code> <a href="${L.roundup}">rounds up to the minimum allocation, or to a multiple of the sector above it</a>.` },
+            { from: 2029, to: 2032, text: "If that is not smaller than the block, it is stored uncompressed. The snapped limit makes this rare; ZLE, unsnapped, reaches it, and so does a 112-byte output of an encrypted block, which cannot be embedded." },
+            { from: 2034, to: 2035, text: `The tail of the last sector is zeroed and PSIZE is the rounded size, so that “the compressed size of the BP (and thus compressratio property) are correct”. A hole <a href="${L.holeBirth}">allocates nothing; if the block existed before, it keeps its size, type and level, and is born in this txg (<code>hole_birth</code>)</a>, so an incremental send sees it; other blocks <a href="${L.setProps}">get PSIZE, compression, checksum and the D bit</a>.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            On a single disk, the space allocated is PSIZE <a href={L.asize}>rounded up to the sector</a>: a block is
+            charged whole sectors, compressed or not, which is why the limit counts in sectors.
+          </p>
+          <p><strong>Dedup: the lookup.</strong> A block with the D bit goes through <code>zio_ddt_write</code>.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={3816}
+          to={3832}
+          symbol="zio_ddt_write"
+          notes={[
+            { from: 3823, text: "Every dedup write looks its block pointer up, under the DDT’s lock." },
+            { from: 3824, to: 3832, text: "NULL: the table is over its quota. The D bit is cleared and the block goes through the ordinary write pipeline, not deduplicated." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={DDT}
+          from={1374}
+          to={1387}
+          symbol="ddt_lookup"
+          notes={[
+            { from: 1376, to: 1384, text: `NULL comes from here: the key is in no table (a block never seen) and <a href="${L.overQuota}"><code>ddt_over_quota</code></a> says the table is too big. A key that is found is still returned: over quota, a duplicate is still deduplicated; <a href="${L.quotaComment}">only new entries are refused</a>.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>A hit.</strong> An entry with enough DVAs for the block’s <code>copies</code>:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={3958}
+          to={3987}
+          symbol="zio_ddt_write"
+          notes={[
+            { from: 3962, text: "The entry holds as many DVAs as the write needs." },
+            { from: 3971, to: 3981, text: "A rewrite keeps its original birth if that gives the same block pointer: then nothing at all changes." },
+            { from: 3983, to: 3986, text: `<code>ddt_bp_fill</code> copies the entry’s DVAs into the new block pointer, <a href="${L.fill}">with the current txg as logical birth and the entry’s as physical birth</a>; <a href="${L.addref}"><code>ddt_phys_addref</code></a> adds a reference; the function returns with no write I/O.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            The two births are why the figure shows “born 102, physical 100”: the data was written in txg 100, and the
+            block pointer created in txg 102. The <a href={roomUrl(lang, "send-receive")}>send / receive room</a> sends
+            by logical birth, so a block deduplicated after a snapshot is still sent.
+          </p>
+          <p><strong>A miss.</strong> A new entry has no DVA: the hit branch is not taken, and a child write is <a href={L.childWrite}>issued with the entry attached</a>.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={4156}
+          to={4167}
+          symbol="zio_ddt_write"
+          notes={[
+            { from: 4161, text: "The new entry’s refcount goes from 0 to 1 now, before the write completes; it is undone if the write fails." },
+            { from: 4165, text: `The child write runs; when it has its DVA, <a href="${L.extend}"><code>zio_ddt_child_write_ready</code> copies it into the entry</a>, for the next hit.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>The table on disk.</strong> The entries modified in a txg must reach the DDT’s storage objects.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={DDT}
+          from={136}
+          to={156}
+          symbol="DDT: the dedup log"
+          notes={[
+            { from: 138, to: 142, text: "Without the log, every modified entry was written back at the end of its txg, and an entry is a tiny part of a ZAP leaf: reading the whole leaf, updating one entry, writing the leaf back." },
+            { from: 144, to: 150, text: `With <code>fast_dedup</code>, on a table created with it (<a href="${L.logFlags}">only those get <code>DDT_FLAG_LOG</code></a>), modified entries go to an in-memory log and are appended to an on-disk log, read back only at import. By default the logs are swapped after <a href="${L.logTxg}">8 txgs at most</a>.` },
+            { from: 152, to: 156, text: "Some of the log is flushed to the ZAP every txg, as much as keeps up without hurting throughput, as the <code>zfs_dedup_log_*</code> tunables decide, “and not using too much memory”. The comment gives no number here." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Two more mechanisms complete the picture, in the same comment: <a href={L.prune}>pruning</a> removes old
+            entries that were never duplicated, to make room under the quota, and scrub <a href={L.scrubDdt}>walks the DDT
+            first</a>, so that a block referenced many times is scrubbed once.
+          </p>
+          <p><strong>The encrypted block pointer.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SPA}
+          from={188}
+          to={225}
+          symbol="blkptr_t, encrypted"
+          notes={[
+            { from: 194, to: 201, text: "The first two DVAs, as in any block pointer: an encrypted block keeps at most two copies." },
+            { from: 202, to: 205, text: `The third DVA’s two words hold the salt and IV1, the first 64 bits of the 96-bit IV (<a href="${L.encodeParams}"><code>zio_crypt_encode_params_bp</code></a>).` },
+            { from: 216, text: `IV2, the last 32 bits of the IV, in the <a href="${L.iv2}">upper half of the fill count</a>, which an encrypted level-0 block does not need.` },
+            { from: 218, to: 225, text: `128 bits of checksum, then the 128-bit MAC (<a href="${L.encodeMac}"><code>zio_crypt_encode_mac_bp</code></a>).` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            The X bit, bit 61 of word 6, has <a href={L.macros}>three meanings</a>: on a level-0 block of an encrypted type
+            it means encrypted; on a level-0 block of an unencrypted type, authenticated; on an indirect block, that the
+            MAC words hold a checksum of the MACs below. An embedded block pointer <a href={L.noEmbed}>cannot be
+            encrypted</a>: it has no words left for salt, IV and MAC. The cipher is <a href={L.suites}>AES-GCM or AES-CCM,
+            with 128, 192 or 256-bit keys</a>, authentication SHA512-HMAC, with an <a href={L.lens}>8-byte salt, a 12-byte
+            IV and a 16-byte MAC</a>.
+          </p>
+          <p><strong>What each kind of block gets.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={5123}
+          to={5153}
+          symbol="zio_encrypt"
+          notes={[
+            { from: 5123, to: 5131, text: "An indirect block is not encrypted: its block pointer gets, in the MAC words, a checksum of the MACs of the blocks it points to." },
+            { from: 5137, to: 5144, text: "The objset block carries its two MACs inside itself." },
+            { from: 5146, to: 5153, text: `A level-0 block of an unencrypted type is only authenticated: a MAC, the data in clear. <a href="${L.encryptRest}">What is left is encrypted</a>, and salt, IV and MAC are encoded in its block pointer.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="module/zfs/dmu.c"
+          from={2511}
+          to={2535}
+          symbol="dmu_write_policy"
+          notes={[
+            { from: 2523, to: 2526, text: "In an encrypted dataset, an encrypted type keeps at most two copies, since the third DVA holds salt and IV." },
+            { from: 2527, to: 2529, text: "Blocks of unencrypted types are not deduplicated: the DDT does not record object types." },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>What stays in clear, and why scrub needs no key.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={CRYPT}
+          from={85}
+          to={120}
+          symbol="zio_crypt.c, block comment"
+          notes={[
+            { from: 89, to: 91, text: "The MAC takes the second half of the checksum, “leaving the first 128 bits for a truncated regular checksum of the ciphertext which can be used for scrubbing”." },
+            { from: 94, to: 100, text: "Object types that must stay readable, the master node among them, are only authenticated, and can keep up to three copies." },
+            { from: 115, to: 120, text: "The core of every dnode stays in plaintext “for scrubbing and claiming”; only the bonus buffers are encrypted." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="module/zfs/zio_checksum.c"
+          from={508}
+          to={526}
+          symbol="zio_checksum_error_impl"
+          notes={[
+            { from: 515, to: 516, text: "A block pointer with the X bit, except an objset block." },
+            { from: 517, to: 520, text: `For a checksum not made for dedup (fletcher-4, for instance), words 2 and 3 are folded into 0 and 1, <a href="${L.fold}">as the writer did</a>.` },
+            { from: 522, to: 525, text: "Words 2 and 3 are ignored on both sides: the MAC is left to decryption." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Scrub reads with <a href={L.scrubRaw}><code>ZIO_FLAG_RAW</code></a>, which skips decryption, so this check is
+            all it does: the figure’s scrub verifies every block with the key unloaded, and catches a flipped bit. A read
+            that must decrypt <a href={L.eacces}>looks the key up and fails with <code>EACCES</code></a> when it is not
+            loaded. The key itself is a randomly generated master key, <a href={L.masterKey}>stored on disk
+            encrypted with the user’s wrapping key</a>, so changing the passphrase re-encrypts no data; snapshots and
+            clones <a href={L.shareKey}>share it</a>. Encrypted blocks can be deduplicated only if they have the same
+            ciphertext: with dedup, their salt and IV <a href={L.cryptDedup}>come from an HMAC of the plaintext</a> instead of being random, and dedup works
+            only within a clone family.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">What the figures leave out</h2>
+      <p class="prose muted">
+        The compressor’s output is an input of the figure, not computed by a real compressor: the code gives no ratio,
+        and the presets are examples. LZ4 stands for every compressor but ZLE; they all follow the same limit. Compression
+        levels are not shown, nor the rule that <a href={L.syncPass}>stops compressing</a> rewrites from
+        <a href={L.dontCompress}>sync pass 8</a> on. The pool is plain disks of one ashift, where the minimum allocation and
+        the sector are the same; raidz and mixed pools are not. Dedup writes one block per txg with
+        <code>copies=1</code>; dedup verify, collisions, more copies, the partial-DVA extension of fast dedup and the
+        log are told, not animated; DVAs are made up. The figure’s ciphertext, salt, IV and MAC are stand-ins, not AES;
+        the checksum is fletcher-4 of the figure’s bytes. Key rotation, which takes a new salt after
+        <a href={L.rotate}>400,000,000 blocks</a>, ZIL encryption and the objset MACs are not shown, and neither is any
+        throughput, memory or ratio figure: the code does not give one.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="compression-dedup-encryption" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+  .cost {
+    border-left: 2px solid var(--line-strong);
+    padding-left: var(--space-4);
+  }
+</style>

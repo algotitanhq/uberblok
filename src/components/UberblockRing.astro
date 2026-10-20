@@ -1,0 +1,459 @@
+---
+// The Hall's object: one label's 128 KiB uberblock ring. It opens in 3D after
+// the first paint of the 2D ring and commits a txg every few seconds by itself,
+// with a pause button (src/lib/hall-3d.ts, DECISIONS.md D12.5 and D14.2).
+// Under reduced motion or without WebGL, the 2D ring stays, still.
+// Slot size is 1 << clamp(ashift, 10, 13) (vdev_impl.h L491-L496), so the slot
+// count follows the sector size (DECISIONS.md D0.7). The uberblock of txg N goes
+// to slot N % count (vdev_label.c L1782-L1784, multihost off).
+import type { Lang } from "../lib/rooms";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const S = {
+  en: {
+    label: "Uberblock ring of one label",
+    ashift: "Sector size of the disks (ashift)",
+    pause: "Pause",
+    play: "Resume",
+    paused: "Paused at txg {txg}.",
+    playing: "Running: one txg every 1.3 seconds.",
+    slotOf: "slot {n} of {count}",
+    slotSize: "{size} KiB per slot",
+    summary:
+      "Ring of {count} slots of {size} KiB (ashift {ashift}). The uberblock of txg {txg} is the newest: slot {n}, because {txg} mod {count} = {n}. The uberblock of txg {prev} is still intact in slot {pn}.",
+    ariaRing: "A ring of {count} uberblock slots; slot {n} holds the newest uberblock, txg {txg}.",
+    fields: "The newest uberblock",
+    previous: "previous txg",
+    newest: "newest txg",
+    view3d: "3D view",
+    view3dLoading: "Loading the 3D view…",
+    view3dHelp: "3D view of the same ring. Drag, or use the arrow keys on the focused view, to turn it; + and − to zoom.",
+    canvasLabel: "The uberblock ring in 3D; the raised slot holds the newest uberblock.",
+    fail3d: "The 3D view could not start in this browser: the ring stays in 2D.",
+    no3d: "No WebGL in this browser: the ring stays in 2D.",
+    reduced3d: "Reduced motion is on in this browser: the ring stays in 2D, still.",
+  },
+  fr: {
+    label: "Anneau d’uberblocks d’un label",
+    ashift: "Taille de secteur des disques (ashift)",
+    pause: "Pause",
+    play: "Reprendre",
+    paused: "En pause au txg {txg}.",
+    playing: "En marche : un txg toutes les 1,3 seconde.",
+    slotOf: "case {n} sur {count}",
+    slotSize: "{size} Kio par case",
+    summary:
+      "Anneau de {count} cases de {size} Kio (ashift {ashift}). L’uberblock du txg {txg} est le plus récent : case {n}, car {txg} mod {count} = {n}. L’uberblock du txg {prev} reste intact dans la case {pn}.",
+    ariaRing: "Un anneau de {count} cases d’uberblock ; la case {n} contient l’uberblock le plus récent, txg {txg}.",
+    fields: "L’uberblock le plus récent",
+    previous: "txg précédent",
+    newest: "txg le plus récent",
+    view3d: "Vue 3D",
+    view3dLoading: "Chargement de la vue 3D…",
+    view3dHelp: "Vue 3D du même anneau. Faites glisser, ou utilisez les flèches sur la vue active, pour le tourner ; + et − pour zoomer.",
+    canvasLabel: "L’anneau d’uberblocks en 3D ; la case surélevée contient l’uberblock le plus récent.",
+    fail3d: "La vue 3D n’a pas pu démarrer dans ce navigateur : l’anneau reste en 2D.",
+    no3d: "Pas de WebGL dans ce navigateur : l’anneau reste en 2D.",
+    reduced3d: "Ce navigateur demande moins d’animations : l’anneau reste en 2D, immobile.",
+  },
+  es: {
+    label: "Anillo de uberblocks de una etiqueta",
+    ashift: "Tamaño de sector de los discos (ashift)",
+    pause: "Pausar",
+    play: "Reanudar",
+    paused: "En pausa en el txg {txg}.",
+    playing: "En marcha: un txg cada 1,3 segundos.",
+    slotOf: "ranura {n} de {count}",
+    slotSize: "{size}\u00a0KiB por ranura",
+    summary:
+      "Anillo de {count} ranuras de {size}\u00a0KiB (ashift {ashift}). El uberblock del txg {txg} es el más reciente: ranura {n}, porque {txg} mod {count} = {n}. El uberblock del txg {prev} sigue intacto en la ranura {pn}.",
+    ariaRing: "Un anillo de {count} ranuras de uberblock; la ranura {n} contiene el uberblock más reciente, txg {txg}.",
+    fields: "El uberblock más reciente",
+    previous: "txg anterior",
+    newest: "txg más reciente",
+    view3d: "Vista 3D",
+    view3dLoading: "Cargando la vista 3D…",
+    view3dHelp: "Vista 3D del mismo anillo. Arrastra, o usa las teclas de flecha sobre la vista activa, para girarlo; + y − para acercar o alejar.",
+    canvasLabel: "El anillo de uberblocks en 3D; la ranura elevada contiene el uberblock más reciente.",
+    fail3d: "La vista 3D no ha podido iniciarse en este navegador: el anillo se queda en 2D.",
+    no3d: "Este navegador no tiene WebGL: el anillo se queda en 2D.",
+    reduced3d: "El movimiento reducido está activado en este navegador: el anillo se queda en 2D, inmóvil.",
+  },
+}[lang];
+const choices = [
+  { value: "9", label: "9–10", count: 128 },
+  { value: "11", label: "11", count: 64 },
+  { value: "12", label: "12", count: 32 },
+  { value: "13", label: "13+", count: 16 },
+];
+---
+
+<figure class="ring" data-ring data-strings={JSON.stringify(S)}>
+  <div class="stage">
+    <div class="view">
+      <svg viewBox="0 0 400 400" role="img" aria-label={S.label}>
+        <g class="slots"></g>
+        <text class="center-txg" x="200" y="196" text-anchor="middle">txg 4211</text>
+        <text class="center-slot" x="200" y="228" text-anchor="middle"></text>
+        <text class="center-size" x="200" y="252" text-anchor="middle"></text>
+      </svg>
+      <div class="ring-3d" data-ring3d hidden></div>
+      <p class="help" id={`ring-help-${lang}`} data-ring3d-help hidden>{S.view3dHelp}</p>
+    </div>
+    <dl class="fields" aria-label={S.fields}>
+      <div><dt><code>ub_magic</code></dt><dd><code>0x00bab10c</code></dd></div>
+      <div><dt><code>ub_txg</code></dt><dd><code data-field="txg">4211</code></dd></div>
+      <div><dt><code>ub_rootbp</code></dt><dd><code data-field="rootbp">→ MOS</code></dd></div>
+    </dl>
+  </div>
+  <div class="controls" hidden>
+    <fieldset class="segmented">
+      <legend>{S.ashift}</legend>
+      {
+        choices.map((c) => (
+          <label>
+            <input type="radio" name={`ashift-${lang}`} value={c.value} checked={c.value === "12"} data-count={c.count} />
+            {c.label}
+          </label>
+        ))
+      }
+    </fieldset>
+    <button class="btn" type="button" data-pause>{S.pause}</button>
+    <button class="btn" type="button" data-ring3d-btn aria-pressed="false">{S.view3d}</button>
+    <p class="why" id={`ring-why-${lang}`} data-ring3d-why hidden></p>
+  </div>
+  <figcaption>
+    <p class="visually-hidden" data-live aria-live="polite"></p>
+    <p class="readout">
+      {
+        S.summary
+          .replace(/\{count\}/g, "32")
+          .replace(/\{size\}/g, "4")
+          .replace(/\{ashift\}/g, "12")
+          .replace(/\{txg\}/g, "4211")
+          .replace(/\{n\}/g, "19")
+          .replace(/\{prev\}/g, "4210")
+          .replace(/\{pn\}/g, "18")
+      }
+    </p>
+    <p class="legend" aria-hidden="true">
+      <span class="key key--new"></span>{S.newest}
+      <span class="key key--prev"></span>{S.previous}
+    </p>
+  </figcaption>
+</figure>
+
+<script>
+  // One script for both forms. The 2D ring is drawn first; after the first
+  // paint, when the ring comes near the screen, the 3D form loads (Three.js
+  // never in the first load) and the ring commits a txg every few seconds by
+  // itself until the visitor pauses it (WCAG 2.2.2). The live region speaks
+  // only on the visitor's actions, never on a tick.
+  import { s, strings, fill } from "../lib/svg";
+  import { no3dReason, onVisible, once } from "../lib/lazy3d";
+  import type { Ring3d } from "../lib/hall-3d";
+
+  type S = Record<string, string>;
+  const SIZE: Record<number, number> = { 128: 1, 64: 2, 32: 4, 16: 8 };
+  // A txg every 1.3 s, its uberblock flying 0.4 s to its slot (DECISIONS.md D16.2).
+  const TICK = 1300;
+  const load3d = once(() => import("../lib/hall-3d"));
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-ring]")) {
+    const t = strings<S>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const svg = q<SVGSVGElement>("svg");
+    const slots = q<SVGGElement>(".slots");
+    const readout = q(".readout");
+    const live = q("[data-live]");
+    const btn3d = q("[data-ring3d-btn]");
+    const pauseBtn = q("[data-pause]");
+    const host = q("[data-ring3d]");
+    const help = q("[data-ring3d-help]");
+    let txg = 4211;
+    let count = 32;
+    let ashift = "12";
+    let scene: Ring3d | null = null;
+    let on3d = false;
+    let paused = false;
+    let inView = false;
+    let timer = 0;
+    const why = no3dReason();
+    // Nothing moves by itself without WebGL or under reduced motion (or without the
+    // observer that starts the clock near the screen).
+    const moving = !why && "IntersectionObserver" in window;
+
+    const arc = (r: number, a0: number, a1: number) => {
+      const p = (a: number) => [200 + r * Math.sin(a), 200 - r * Math.cos(a)].map((v) => v.toFixed(2)).join(" ");
+      return `M ${p(a0)} A ${r} ${r} 0 0 1 ${p(a1)}`;
+    };
+    const say = (text: string) => {
+      live.textContent = "";
+      requestAnimationFrame(() => (live.textContent = text));
+    };
+
+    function draw(pulse = false) {
+      const n = txg % count;
+      const pn = (txg - 1) % count;
+      const step = (2 * Math.PI) / count;
+      const gap = Math.min(step * 0.22, 0.02);
+      slots.replaceChildren();
+      for (let i = 0; i < count; i++) {
+        const cls = i === n ? "slot slot--new" + (pulse ? " pulse" : "") : i === pn ? "slot slot--prev" : "slot";
+        slots.append(s("path", { d: arc(160, i * step + gap / 2, (i + 1) * step - gap / 2), class: cls }));
+      }
+      const vars = { count, size: SIZE[count], ashift: ashift === "9" ? "9–10" : ashift === "13" ? "13+" : ashift, txg, n, prev: txg - 1, pn };
+      svg.querySelector(".center-txg")!.textContent = `txg ${txg}`;
+      svg.querySelector(".center-slot")!.textContent = fill(t.slotOf, vars);
+      svg.querySelector(".center-size")!.textContent = fill(t.slotSize, vars);
+      svg.setAttribute("aria-label", fill(t.ariaRing, vars));
+      q('[data-field="txg"]').textContent = String(txg);
+      readout.textContent = fill(t.summary, vars);
+      if (scene && on3d) scene.draw(count, txg, pulse);
+      return vars;
+    }
+
+    // The clock runs while the ring is near the screen, the tab is shown and the visitor has not paused it.
+    function clock() {
+      clearInterval(timer);
+      timer = 0;
+      if (moving && !paused && inView && !document.hidden) {
+        timer = window.setInterval(() => {
+          txg += 1;
+          draw(true);
+        }, TICK);
+      }
+    }
+
+    async function set3d(v: boolean) {
+      if (btn3d.getAttribute("aria-busy") === "true") return;
+      if (v && !scene) {
+        btn3d.setAttribute("aria-busy", "true");
+        btn3d.textContent = t.view3dLoading;
+        try {
+          const mod = await load3d();
+          scene = mod.mount(host, { label: t.canvasLabel, describedBy: help.id, slotOf: (n, c) => fill(t.slotOf, { n, count: c }) });
+        } catch {
+          // Say so, once, and stop offering it: the 2D ring stays.
+          v = false;
+          btn3d.setAttribute("aria-disabled", "true");
+          btn3d.setAttribute("aria-describedby", q("[data-ring3d-why]").id);
+          q("[data-ring3d-why]").textContent = t.fail3d;
+          q("[data-ring3d-why]").hidden = false;
+        }
+        btn3d.removeAttribute("aria-busy");
+        btn3d.textContent = t.view3d;
+      }
+      on3d = v;
+      host.hidden = !on3d;
+      help.hidden = !on3d;
+      svg.style.display = on3d ? "none" : "";
+      btn3d.setAttribute("aria-pressed", String(on3d));
+      if (scene && on3d) scene.draw(count, txg, false);
+    }
+
+    for (const input of root.querySelectorAll<HTMLInputElement>('input[type="radio"]')) {
+      input.addEventListener("change", () => {
+        count = Number(input.dataset.count);
+        ashift = input.value;
+        draw();
+        say(readout.textContent ?? "");
+      });
+    }
+    pauseBtn.addEventListener("click", () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? t.play : t.pause;
+      clock();
+      say(paused ? fill(t.paused, { txg }) : t.playing);
+    });
+    btn3d.addEventListener("click", () => {
+      if (btn3d.getAttribute("aria-disabled")) return say(q("[data-ring3d-why]").textContent ?? "");
+      void set3d(!on3d);
+    });
+    document.addEventListener("visibilitychange", clock);
+
+    // Decided before the controls show, so that nothing in the row moves afterwards.
+    pauseBtn.hidden = !moving;
+    if (why) {
+      btn3d.setAttribute("aria-disabled", "true");
+      btn3d.setAttribute("aria-describedby", q("[data-ring3d-why]").id);
+      q("[data-ring3d-why]").textContent = t[why];
+      q("[data-ring3d-why]").hidden = false;
+    }
+    q(".controls").hidden = false;
+    draw();
+
+    if (moving) {
+      // 3D on arrival, after the first paint: loaded as the ring nears the screen.
+      onVisible(root, () => requestAnimationFrame(() => setTimeout(() => void set3d(true))));
+      new IntersectionObserver((entries) => {
+        inView = entries[entries.length - 1].isIntersecting;
+        clock();
+      }).observe(root);
+    }
+  }
+</script>
+
+<style>
+  .ring {
+    margin: 0;
+  }
+  .view {
+    min-width: 0;
+    position: relative;
+  }
+  .ring-3d[hidden],
+  .help[hidden],
+  .why[hidden],
+  [data-pause][hidden] {
+    display: none;
+  }
+  .ring-3d :global(.ring-canvas) {
+    display: block;
+    cursor: grab;
+    /* A swipe up or down over the ring still scrolls the page on a phone. */
+    touch-action: pan-y;
+  }
+  .btn[aria-disabled="true"] {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .why {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  /* Over the bottom of the square view, not below it: showing it does not move the page. */
+  .help {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    pointer-events: none;
+  }
+  .btn[aria-pressed="true"]::before {
+    content: "✓ " / "";
+    color: var(--accent);
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 26rem) minmax(0, 1fr);
+    gap: var(--space-6);
+    align-items: center;
+  }
+  svg {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    display: block;
+  }
+  svg :global(.slot) {
+    fill: none;
+    stroke: var(--line-strong);
+    stroke-width: 26;
+    transition: stroke var(--dur-2) var(--ease);
+  }
+  svg :global(.slot--prev) {
+    stroke: var(--fg-muted);
+  }
+  svg :global(.slot--new) {
+    stroke: var(--accent);
+  }
+  svg :global(.pulse) {
+    animation: pulse var(--dur-3) var(--ease);
+  }
+  @keyframes pulse {
+    from {
+      stroke-width: 40;
+      opacity: 0.4;
+    }
+    to {
+      stroke-width: 26;
+      opacity: 1;
+    }
+  }
+  .center-txg {
+    font-family: var(--font-display);
+    font-size: 40px;
+    font-weight: 300;
+    fill: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+  .center-slot,
+  .center-size {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: 21px;
+    fill: var(--fg-muted);
+  }
+  .fields {
+    margin: 0;
+    display: grid;
+    gap: var(--space-3);
+    font-size: var(--step--1);
+  }
+  .fields div {
+    display: grid;
+    grid-template-columns: 8rem 1fr;
+    border-top: 1px solid var(--line);
+    padding-top: var(--space-2);
+  }
+  .fields dt code {
+    color: var(--fg-muted);
+  }
+  .fields dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-4) var(--space-6);
+    margin-top: var(--space-5);
+  }
+  .controls[hidden] {
+    display: none;
+  }
+  figcaption {
+    margin-top: var(--space-4);
+    max-width: var(--measure);
+  }
+  .readout {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .legend {
+    margin-top: var(--space-2);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .key {
+    display: inline-block;
+    width: 0.9em;
+    height: 0.9em;
+    border-radius: 2px;
+  }
+  .key--new {
+    background: var(--accent);
+  }
+  .key--prev {
+    background: var(--fg-muted);
+    margin-left: var(--space-3);
+  }
+  @media (max-width: 44rem) {
+    .stage {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

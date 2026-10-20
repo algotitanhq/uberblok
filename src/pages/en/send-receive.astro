@@ -1,0 +1,428 @@
+---
+import Base from "../../layouts/Base.astro";
+import SendLab from "../../components/SendLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "en";
+const r = room("send-receive");
+const TR = "module/zfs/dmu_traverse.c";
+const SEND = "module/zfs/dmu_send.c";
+const RECV = "module/zfs/dmu_recv.c";
+const IOC = "include/sys/zfs_ioctl.h";
+const L = {
+  record: gh(IOC, 246, 259),
+  types: gh(IOC, 247, 252),
+  begin: gh(IOC, 235, 244),
+  magic: gh(IOC, 171),
+  overlay: gh(IOC, 374, 387),
+  size: gh(SEND, 266, 267),
+  logical: gh(TR, 80, 81),
+  getBirth: gh(TR, 78, 84),
+  birthComment: gh("include/sys/spa.h", 483, 488),
+  minTxg: gh(TR, 653),
+  holesDefault: gh(TR, 44),
+  fromtxg: gh(SEND, 2370),
+  flags: gh(SEND, 2088),
+  doDump: gh(SEND, 2568, 2574),
+  dnodeLoop: gh(TR, 402, 404),
+  objectRange: gh(SEND, 894, 898),
+  dumpDnode: gh(SEND, 732, 742),
+  bonus: gh(SEND, 793),
+  freeEnd: gh(SEND, 796, 799),
+  dumpFree: gh(SEND, 367, 403),
+  freeAtOnce: gh(SEND, 396, 398),
+  writeFlush: gh(SEND, 482, 486),
+  freeobjMerge: gh(SEND, 683, 698),
+  maxobj: gh(SEND, 653, 666),
+  holeMeta: gh(SEND, 1012, 1017),
+  holeFile: gh(SEND, 1018, 1034),
+  fullFrees: gh(SEND, 326, 328),
+  payloadSum: gh(SEND, 295, 298),
+  end: gh(SEND, 2619, 2626),
+  guids: gh(SEND, 2049, 2050),
+  enodev: gh(RECV, 463, 479),
+  recvBegin: gh(RECV, 1304, 1306),
+  recvPayload: gh(RECV, 2813),
+  queue: gh(RECV, 3500, 3513),
+  endCheck: gh(RECV, 3000, 3007),
+  cleanup: gh(RECV, 3582, 3588),
+  writer: gh(RECV, 3285, 3294),
+  recvObject: gh(RECV, 1968, 1989),
+  recvFreeobjects: gh(RECV, 2208, 2215),
+  recvFree: gh(RECV, 2666, 2684),
+  recvFreeCase: gh(RECV, 3235, 3240),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="send-receive"
+  title="send / receive · Uberblok"
+  description="How zfs send finds the difference between two snapshots from birth txgs alone, skipping unchanged subtrees whole, and writes it as a stream that checks itself: interactive, with the OpenZFS code."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Room {roomNumber(r.id)}</p>
+      <h1>{r.title.en}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          Keeping a copy of a filesystem on another machine looks simple: compare the two sides and copy what differs.
+          But comparing means reading. To find the few blocks that changed since yesterday, a file-by-file tool reads or
+          at least lists every file on both sides, every time, and it can only see a change through the contents it
+          compares or the dates and sizes it trusts.
+        </p>
+        <p>
+          ZFS does not compare. Every block pointer records the txg in which its block was born, and a snapshot taken in
+          txg F holds no block born after F. So the difference between two snapshots is the blocks of the newer one born
+          after the older one’s txg. Copy-on-write rewrites every block above a changed one, so a subtree with an old root
+          has not changed below: one comparison at its top skips it whole, unread. What the traversal finds becomes a
+          <em>stream</em> of records, each but the first carrying a checksum of everything before it, which the
+          receiving side checks record by record, before applying each one.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="lab">
+      <h2 id="lab"><span class="n">1</span> Send @s4, from the snapshot you choose</h2>
+      <div class="prose">
+        <p>
+          <code>tank/fs</code> has four snapshots, one per txg of its history. The figure sends the last one,
+          <code>@s4</code>: its tree, every block pointer with its logical birth txg. Choose the from-snapshot the
+          receiver already holds, or none for a full stream, then play the send step by step: at each block pointer the
+          birth is compared with F, the from-snapshot’s txg, records drop into the stream with their checksums, and the
+          receiver checks and applies them until its files are those of <code>@s4</code>. “Flip a bit” damages the
+          stream on the way.
+        </p>
+      </div>
+      <SendLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">The idea, at three depths</h2>
+
+      <div class="depth">
+        <h3>In one sentence</h3>
+        <p class="lead prose">
+          An incremental send walks the newer snapshot’s tree and skips every block pointer born at or before the older
+          snapshot’s txg, with everything below it, and writes what is left as a stream of records whose running
+          checksum the receiver verifies before replaying them.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In one paragraph</h3>
+        <p class="prose">
+          <code>zfs send -i @from @to</code> traverses the tree of <code>@to</code> with a lower bound, F, the txg in which
+          <code>@from</code> was created. A block pointer born at or before F was already in <code>@from</code>, and so
+          was the whole subtree under it, since <a href={roomUrl(lang, "copy-on-write")}>copy-on-write</a> gives a new
+          birth to every block above a change: the traversal returns without reading it. Everything it does visit
+          becomes records: an OBJECT for each dnode it meets, a WRITE for each data block, a FREE for each hole,
+          FREEOBJECTS for each empty dnode slot. The stream starts with BEGIN, which names both snapshots by GUID, and
+          ends with END. Every record but BEGIN carries the fletcher-4 checksum of every byte of the stream up to that checksum;
+          the receiver keeps the same sum and refuses the stream at the first header that disagrees, before applying
+          the record it follows. With no from-snapshot, F is 0, every block is visited, and the stream rebuilds the
+          whole filesystem.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In detail</h3>
+        <div class="prose">
+          <p>
+            <strong>A stream of records.</strong> A send stream is a sequence of <a href={L.record}><code>dmu_replay_record_t</code></a>,
+            each a 312-byte header with <a href={L.types}>one of eleven types</a>, sometimes followed by a payload: the
+            data of a WRITE follows its header. BEGIN carries the magic number <a href={L.magic}><code>0x2F5bacbacULL</code></a>,
+            <a href={L.begin}>the GUID of the snapshot sent and of the one it starts from</a>.
+          </p>
+          <p><strong>The bound.</strong> The traversal that feeds a send starts here.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={1203}
+          to={1221}
+          symbol="send_traverse_thread"
+          notes={[
+            {
+              from: 1211,
+              to: 1213,
+              text: `The dataset is traversed from <code>fromtxg</code>, the from-snapshot’s <a href="${L.fromtxg}">creation txg</a>, 0 for a full stream. <code>TRAVERSE_LOGICAL</code> joins the <a href="${L.flags}">flags of the send</a>, among them <code>TRAVERSE_PRE</code>: a block’s callback runs before its children.`,
+            },
+            {
+              from: 1217,
+              to: 1218,
+              text: `An end-of-stream marker follows the last range. The ranges <code>send_cb</code> queues reach the main thread through more queues, in order, and <a href="${L.doDump}">become records there</a>.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>The test that skips a subtree.</strong> Every block pointer of the snapshot goes through this.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={TR}
+          from={249}
+          to={279}
+          symbol="traverse_visitbp"
+          notes={[
+            {
+              from: 249,
+              to: 276,
+              text: `A hole of birth 0 was never written, or was made before the <code>hole_birth</code> feature. These lines would skip it in some cases, but only when <code>send_holes_without_birth_time</code> is 0, and it is <a href="${L.holesDefault}">1 by default</a>: such holes are visited. The figure has none; a hole punched in b carries the txg of the free, and goes through the test below.`,
+            },
+            {
+              from: 277,
+              to: 278,
+              text: `The rule. <code>td_min_txg</code> is <a href="${L.minTxg}">the bound</a>, F. Born at or before it, the block is in the from-snapshot: the function returns before reading it or calling the callback, so nothing below it is reached. In the figure the chip turns dashed and its subtree fades.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>Logical birth.</strong> <code>get_birth_time</code> <a href={L.getBirth}>returns the logical birth</a>
+            when <code>TRAVERSE_LOGICAL</code> is set, as it is for a send. A block pointer has two births, and
+            <a href={L.birthComment}>the comment that defines them</a> says the physical one can be smaller than the
+            logical one for dedup and block cloning, and bigger for remapped and rewritten blocks, and that the logical one is
+            the one for incremental replication. Send <a href={L.logical}>compares the logical one</a>, the txg in which
+            the user changed the data: a block deduplicated or cloned onto an older copy is still sent, since the user
+            wrote it after F, and a block that was only rewritten or remapped on disk is not resent.
+          </p>
+          <p><strong>Every dnode of a dnode block.</strong> When a dnode block is visited, each of its dnodes is <a href={L.dnodeLoop}>handed to this</a>.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={TR}
+          from={534}
+          to={550}
+          symbol="traverse_dnode"
+          notes={[
+            {
+              from: 534,
+              to: 543,
+              text: "The callback runs for the dnode itself. No birth is tested here: every dnode of a visited dnode block reaches <code>send_cb</code>, changed or not.",
+            },
+            {
+              from: 545,
+              to: 550,
+              text: "Then each of the dnode’s block pointers goes through <code>traverse_visitbp</code>, and its test.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            That is why, sending <code>@s4</code> from <code>@s3</code>, the stream holds OBJECT records for a and b,
+            whose data did not change: deleting c rewrote the dnode block they share with it. Their data blocks are
+            still skipped, one level down.
+          </p>
+          <p><strong>From visited blocks to records.</strong> The callback decides what each visit produces.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={1098}
+          to={1120}
+          symbol="send_cb"
+          notes={[
+            {
+              from: 1098,
+              to: 1108,
+              text: "A dnode becomes an OBJECT range, except the meta-dnode, object 0.",
+            },
+            {
+              from: 1109,
+              to: 1116,
+              text: `A dnode block becomes an OBJECT_RANGE, which <a href="${L.objectRange}">only a raw stream writes</a>.`,
+            },
+            {
+              from: 1117,
+              to: 1120,
+              text: "The objset block and every indirect block that is not a hole make no record: they are read only to reach what is below them.",
+            },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={1130}
+          to={1146}
+          symbol="send_cb"
+          notes={[
+            {
+              from: 1130,
+              to: 1135,
+              text: "Nothing past the end of the object.",
+            },
+            {
+              from: 1140,
+              to: 1146,
+              text: `What is left is a data block (a WRITE) or a hole (a FREE of <a href="${L.holeFile}">its range</a>; a hole among the dnode blocks <a href="${L.holeMeta}">frees objects</a>). REDACT belongs to redacted sends.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            An OBJECT range goes to <a href={L.dumpDnode}><code>dump_dnode</code></a>. A dnode slot with no object in it
+            becomes FREEOBJECTS; a file becomes OBJECT, with its bonus buffer as <a href={L.bonus}>payload</a>, followed
+            at once by <a href={L.freeEnd}>a FREE from the file’s end to <code>DMU_OBJECT_END</code></a>, so that a
+            receiver whose copy was longer cuts it. <a href={L.dumpFree}><code>dump_free</code></a> keeps a FREE pending and
+            merges the next one into it when it continues it, which is why the two holes of b travel as one FREE; a FREE
+            to the end is <a href={L.freeAtOnce}>written at once</a>, and any other record <a href={L.writeFlush}>writes
+            the pending one first</a>. FREEOBJECTS are <a href={L.freeobjMerge}>merged the same way</a>, and objects
+            past the last dnode block <a href={L.maxobj}>are dropped</a>. A full stream carries frees too,
+            <a href={L.fullFrees}>so that it can be received as a clone</a>.
+          </p>
+          <p><strong>The checksum that runs through the stream.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SEND}
+          from={257}
+          to={283}
+          symbol="dump_record"
+          notes={[
+            {
+              from: 268,
+              to: 270,
+              text: "The running fletcher-4 sum is carried on over the record, up to its last 32 bytes.",
+            },
+            {
+              from: 271,
+              to: 277,
+              text: `Except for BEGIN, that value goes into those 32 bytes, <code>drr_checksum</code>, <a href="${L.overlay}">overlaid on every record type</a>.`,
+            },
+            {
+              from: 281,
+              to: 283,
+              text: `Then the 32 bytes are summed, and <a href="${L.payloadSum}">the payload</a> after them. So each record’s <code>drr_checksum</code> is the fletcher-4 of every byte of the stream before it, its own header up to the checksum included. The figure shows the low 32 bits of its last word.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            END carries one more: <a href={L.end}><code>drr_end.drr_checksum</code></a>, the checksum of everything
+            before it.
+          </p>
+          <p><strong>The receiving side checks before it applies.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={RECV}
+          from={2843}
+          to={2868}
+          symbol="receive_read_payload_and_next_header"
+          notes={[
+            {
+              from: 2843,
+              to: 2851,
+              text: `The receiver keeps its own sum: it <a href="${L.recvBegin}">starts over the whole BEGIN record</a>, goes on <a href="${L.recvPayload}">over each payload</a>, and here over the next header, up to its checksum.`,
+            },
+            {
+              from: 2861,
+              to: 2866,
+              text: "A header whose <code>drr_checksum</code> disagrees stops the receive: <code>ECKSUM</code>. A checksum of all zeros is not checked.",
+            },
+            {
+              from: 2868,
+              text: "The stored value is then summed, as the sender did.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            This runs when a record’s payload and the header after it have been read, and only then is the record
+            <a href={L.queue}>queued for the writer</a>: a record whose bytes were damaged is never applied. END is
+            checked once more, <a href={L.endCheck}>its <code>drr_end.drr_checksum</code> against the sum before it</a>.
+            On an error, <a href={L.cleanup}>what the receive created is destroyed</a>: the receiver still holds the
+            from-snapshot. Before any of this, an incremental stream’s BEGIN <a href={L.guids}>names the from-snapshot by
+            GUID</a>, and the receiver <a href={L.enodev}>refuses it (<code>ENODEV</code>) unless it holds a snapshot with
+            that GUID</a>.
+          </p>
+          <p><strong>Records dispatched by type.</strong> The writer thread <a href={L.writer}>takes each record off the queue</a> and hands it here.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={RECV}
+          from={3188}
+          to={3213}
+          symbol="receive_process_record"
+          notes={[
+            {
+              from: 3189,
+              to: 3196,
+              text: `OBJECT goes to <code>receive_object</code>, which <a href="${L.recvObject}">creates the object, or keeps one that exists</a>.`,
+            },
+            {
+              from: 3197,
+              to: 3203,
+              text: `FREEOBJECTS goes to <code>receive_freeobjects</code>, which <a href="${L.recvFreeobjects}">frees each object of the range that exists</a>: c disappears.`,
+            },
+            {
+              from: 3204,
+              to: 3206,
+              text: `WRITE goes to <code>receive_process_write_record</code>. FREE, <a href="${L.recvFreeCase}">further down</a>, goes to <code>receive_free</code>, which <a href="${L.recvFree}">frees the range in the object</a>.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>What the receiver ends with.</strong> Starting from the from-snapshot’s files, the records of the
+            stream bring back exactly <code>@s4</code>: the figure compares the two at the end, for every from-snapshot,
+            and its tests check it against the hand-worked records of each stream.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">What the figure leaves out</h2>
+      <p class="prose muted">
+        The figure is small: files of four 512-byte blocks under one indirect block, dnode blocks of four dnodes (a real
+        16 KiB dnode block holds 32), a meta-dnode drawn with its two dnode blocks, no bonus buffer. The send runs as one
+        sequence where the code joins several threads (traversal, merge, reader, the main thread) by queues that keep the
+        order, and the receiver starts once the stream is complete, where the code receives through a pipe as the stream
+        is written. Record headers are laid out as <code>dmu_replay_record_t</code>, with only the fields the figure
+        uses filled in. Redacted, raw (encrypted), compressed and resumable streams, embedded data, WRITE_BYREF and spill
+        blocks are not shown; neither are throughput figures, which depend on the disks and the network, not on this
+        code.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="send-receive" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

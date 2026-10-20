@@ -1,0 +1,14 @@
+// Static site served by Cloudflare Workers (static assets only, no Worker code).
+// Built by `npm run build` into dist/. Deployed by .github/workflows/ci.yml,
+// only once PUBLIC_RELEASE is set (see README "Deploy"). No public preview URLs.
+{
+  "name": "uberblok",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  },
+  "workers_dev": true,
+  "preview_urls": false
+}

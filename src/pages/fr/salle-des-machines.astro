@@ -1,0 +1,203 @@
+---
+import Base from "../../layouts/Base.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { room, roomNumber, roomUrl } from "../../lib/rooms";
+import { OPENZFS_SHA, OPENZFS_TAG } from "../../lib/openzfs";
+import { COUNTS, REPO_URL, repoFile, VERSIONS } from "../../lib/stack";
+
+const lang = "fr";
+const r = room("engine-room");
+const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
+---
+
+<Base
+  lang={lang}
+  roomId="engine-room"
+  title="Salle des machines · Uberblok"
+  description="Comment Uberblok a été construit : le commit d’OpenZFS qu’il lit, ce dont le site est fait, les vérifications qui gardent chaque extrait et chaque source exacts, et le dépôt."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Salle {roomNumber(r.id)}</p>
+      <h1>{r.title.fr}</h1>
+      <div class="prose intro">
+        <p class="lead">
+          Le colophon du musée : le code qu’il lit, ce dont le site est fait, et comment il a été construit et vérifié.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">Le code qu’il lit</h2>
+      <div class="prose">
+        <p>
+          Chaque salle lit OpenZFS <code>{OPENZFS_TAG}</code>, la version la plus récente quand le travail a commencé,
+          figée au commit <a href={tree}><code class="sha">{OPENZFS_SHA}</code></a>. Chaque lien vers le code sur ce site
+          pointe vers des lignes de ce commit, jamais vers une branche : il ouvre toujours les lignes qui ont été lues,
+          même quand le code évolue.
+        </p>
+        <p>
+          Les extraits sont de courtes citations de ce code, sous la
+          <a href="https://opensource.org/licenses/CDDL-1.0">Common Development and Distribution License 1.0</a> (CDDL),
+          droits réservés à leurs auteurs : Sun Microsystems, Oracle, Delphix, le Lawrence Livermore National Laboratory
+          et les contributeurs d’OpenZFS, comme l’indique l’en-tête de chaque fichier. Chaque extrait nomme son fichier et
+          ses lignes, et renvoie vers elles. Aucun n’est recopié à la main : les pages les lisent à la construction dans
+          <a href={repoFile("ANALYSIS.md")}><code>ANALYSIS.md</code></a>, qui en contient {COUNTS.excerpts}, et une
+          vérification prouve que chacun est identique, octet pour octet, à son fichier au commit figé. Le site ne
+          redistribue aucun fichier d’OpenZFS, et ses propres licences ne couvrent pas les extraits.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="stack">
+      <h2 id="stack">Ce dont le site est fait</h2>
+      <dl class="stack prose">
+        <div>
+          <dt>Pages</dt>
+          <dd>
+            <a href="https://astro.build/">Astro</a> {VERSIONS.astro} et TypeScript, compilés en HTML statique : le hall,
+            l’aile de l’histoire, {COUNTS.rooms} salles et celle-ci, en français, en anglais et en espagnol, chacune à sa propre adresse.
+          </dd>
+        </div>
+        <div>
+          <dt>Figures</dt>
+          <dd>
+            SVG et TypeScript écrits à la main, sans framework d’interface. La plupart des figures font tourner un petit
+            modèle transcrit du code qu’elles montrent, testé sur des cas calculés à la main à partir de ce code. Hormis
+            quelques lignes pour le thème et la langue, JavaScript ne tourne que dans les figures, et chaque figure a une alternative
+            textuelle.
+          </dd>
+        </div>
+        <div>
+          <dt>3D</dt>
+          <dd>
+            <a href="https://threejs.org/">Three.js</a> {VERSIONS.three}, dans le hall et dans les deux salles spatiales
+            par nature, l’arbre et les vdevs. Il n’est chargé qu’à l’ouverture de la vue 3D, après la figure 2D, qui reste
+            la solution de repli sans WebGL ou avec les animations réduites.
+          </dd>
+        </div>
+        <div>
+          <dt>Code</dt>
+          <dd><a href="https://shiki.style/">Shiki</a> {VERSIONS.shiki}, qui colore les extraits à la construction.</dd>
+        </div>
+        <div>
+          <dt>Polices</dt>
+          <dd>Fraunces, Inter et Instrument Serif, servies avec le site.</dd>
+        </div>
+        <div>
+          <dt>Hébergement</dt>
+          <dd>
+            Des fichiers statiques sur Cloudflare Workers. Ni code serveur, ni cookie, ni mesure d’audience : le
+            navigateur garde deux choix dans son stockage local, le thème et la langue.
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="section" aria-labelledby="built">
+      <h2 id="built">Comment il a été construit</h2>
+      <div class="prose">
+        <p>
+          Le site a été écrit par des agents d’IA, à partir d’une mission fixée par un humain qui en
+          valide la publication. La méthode était l’essentiel, la voici.
+        </p>
+        <ul class="steps">
+          <li>
+            <strong>Le code avant les figures.</strong> Avant la première figure, <code>ANALYSIS.md</code> a cartographié
+            l’architecture et, pour chaque salle, les fonctions et les structures qui sont son idée, avec leurs extraits.
+            Une figure qui ne correspond à rien dans le code n’a pas été dessinée.
+          </li>
+          <li>
+            <strong>Une tranche à la fois.</strong> Quatorze tranches, de cette analyse à cette salle, chacune construite
+            de bout en bout : le modèle, la figure, les deux langues, les vérifications et les mesures.
+          </li>
+          <li>
+            <strong>Une revue par tranche.</strong> Un agent de QA distinct a rejoué chaque figure contre le code et lu
+            les captures, et la tranche n’a été fusionnée qu’une fois approuvée.
+          </li>
+          <li>
+            <strong>Des vérifications à chaque modification.</strong> Les tests des modèles des salles ; chaque
+            extrait et chaque lien vers le code vérifiés au commit figé ; chaque note de l’histoire vérifiée contre sa
+            ligne de <a href={repoFile("SOURCES.md")}><code>SOURCES.md</code></a> ({COUNTS.sources} sources) ; la
+            typographie française vérifiée dans les pages construites.
+          </li>
+          <li>
+            <strong>Dans un vrai navigateur.</strong> Dès la première page, Playwright a capturé les pages dans les deux
+            langues, les deux thèmes, sur téléphone et sur ordinateur, et les a parcourues au clavier seul ;
+            Lighthouse les a mesurées.
+          </li>
+          <li>
+            <strong>Des décisions écrites.</strong> Chaque choix de structure, avec les options écartées, est dans
+            <a href={repoFile("DECISIONS.md")}><code>DECISIONS.md</code></a>, et chaque tranche, avec ses mesures et ce
+            qu’elle a laissé de côté, dans <a href={repoFile("BUILDLOG.md")}><code>BUILDLOG.md</code></a>.
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="repo">
+      <h2 id="repo">Le dépôt</h2>
+      <div class="prose">
+        <p>
+          Les sources et ces notes :
+          <a href={REPO_URL}>github.com/algotitanhq/uberblok</a>. Le code du site est sous licence MIT, ses textes et
+          ses illustrations sous <a href="https://creativecommons.org/licenses/by/4.0/deed.fr">CC BY 4.0</a>, et les
+          extraits sous CDDL, comme plus haut. Uberblok n’a aucun lien avec le projet OpenZFS.
+        </p>
+        <p class="muted">
+          La visite s’arrête ici. Le <a href={`${roomUrl(lang, "hall")}#map`}>plan de la visite</a> ramène à chaque
+          salle.
+        </p>
+      </div>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="engine-room" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+  }
+  .intro {
+    margin-top: var(--space-6);
+  }
+  .sha {
+    overflow-wrap: anywhere;
+  }
+  .stack {
+    margin: 0;
+    display: grid;
+    gap: 0;
+  }
+  .stack > div {
+    display: grid;
+    grid-template-columns: 7rem 1fr;
+    gap: var(--space-1) var(--space-4);
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--line);
+  }
+  .stack dt {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+    color: var(--accent);
+    line-height: 1.3;
+  }
+  .stack dd {
+    margin: 0;
+  }
+  .steps {
+    padding-left: 1.2em;
+  }
+  .steps li + li {
+    margin-top: var(--space-3);
+  }
+  @media (max-width: 30rem) {
+    .stack > div {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,0 +1,201 @@
+---
+// A museum figure: a rendered image with its plate (DECISIONS.md D15.2, D16.4).
+// The plate is HTML over the image: leaders (SVG, in the image's own coordinates,
+// from the anchors the render script finds), numerals as text at a fixed size,
+// an optional dashed axis, and the figcaption's list, which is the accessible
+// text. Fig. 1 (the Hall's glass) and Fig. 2 (the disk, in the dedication) use it.
+import type { ImageMetadata } from "astro";
+import { Picture } from "astro:assets";
+
+interface Part {
+  /** A key of the plate's anchors. */
+  id: string;
+  /** Where the numeral sits, in fractions of the image. */
+  at: [number, number];
+  /** The list's text (HTML: code names in <code>). */
+  label: string;
+}
+interface Props {
+  image: ImageMetadata;
+  plate: { width: number; height: number; anchors: Record<string, number[]> };
+  parts: Part[];
+  fig: string;
+  /** HTML. */
+  caption: string;
+  alt: string;
+  /** Two anchors joined by a dashed line (the disk's spindle). */
+  axis?: [string, string];
+  sizes: string;
+  loading?: "eager" | "lazy";
+  /** Keep the leaders on a phone (few callouts, numerals off the picture's subject). */
+  phoneLeaders?: boolean;
+  /** Encoder quality, when the default makes the largest size too heavy (≤ 150 KB, D16.4). */
+  quality?: number;
+  /** Dim the picture in the dark theme, when its paper outshines the page (D17.1). */
+  dimInDark?: boolean;
+}
+const { image, plate, parts, fig, caption, alt, axis, sizes, loading = "eager", quality, phoneLeaders = false, dimInDark = false } = Astro.props;
+const { width: VW, height: VH, anchors } = plate;
+const anchor = (id: string) => {
+  const a = anchors[id];
+  if (!a) throw new Error(`no anchor ${id}`);
+  return a;
+};
+const X = (f: number) => (f * VW).toFixed(1);
+const Y = (f: number) => (f * VH).toFixed(1);
+const pc = (f: number) => `${(f * 100).toFixed(2)}%`;
+---
+
+<figure class:list={["exhibit", { "phone-leaders": phoneLeaders, "dim-in-dark": dimInDark }]}>
+  <div class="plate" style={`--ratio:${VW} / ${VH}`}>
+    <Picture
+      src={image}
+      formats={["avif", "webp"]}
+      fallbackFormat="webp"
+      widths={[360, 576, 720, 1152, 1440]}
+      width={Math.min(1440, image.width)}
+      height={Math.round((Math.min(1440, image.width) * image.height) / image.width)}
+      quality={quality}
+      sizes={sizes}
+      alt={alt}
+      loading={loading}
+      decoding="async"
+    />
+    <svg class="leaders" viewBox={`0 0 ${VW} ${VH}`} aria-hidden="true" focusable="false">
+      {axis && <line class="axis" x1={X(anchor(axis[0])[0])} y1={Y(anchor(axis[0])[1])} x2={X(anchor(axis[1])[0])} y2={Y(anchor(axis[1])[1])} />}
+      {
+        parts.map((p) => (
+          <g>
+            <line x1={X(anchor(p.id)[0])} y1={Y(anchor(p.id)[1])} x2={X(p.at[0])} y2={Y(p.at[1])} />
+            <circle cx={X(anchor(p.id)[0])} cy={Y(anchor(p.id)[1])} r={(VW / 150).toFixed(1)} />
+          </g>
+        ))
+      }
+    </svg>
+    {
+      parts.map((p, i) => (
+        <span class="num" aria-hidden="true" style={`--x:${pc(p.at[0])};--y:${pc(p.at[1])};--ax:${pc(anchor(p.id)[0])};--ay:${pc(anchor(p.id)[1])}`}>
+          {i + 1}
+        </span>
+      ))
+    }
+  </div>
+  <figcaption>
+    <p class="caption"><span class="fig">{fig}.</span> <Fragment set:html={caption} /></p>
+    <ol class="parts">
+      {parts.map((p) => <li set:html={p.label} />)}
+    </ol>
+  </figcaption>
+</figure>
+
+<style>
+  .exhibit {
+    margin: 0;
+  }
+  .plate {
+    position: relative;
+  }
+  .plate :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: var(--ratio);
+  }
+  :global(:root[data-theme="dark"]) .dim-in-dark .plate :global(img) {
+    filter: brightness(0.91);
+  }
+  .leaders {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .leaders line {
+    stroke: var(--fg-faint);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .leaders .axis {
+    stroke: var(--line-strong);
+    stroke-dasharray: 6 5;
+  }
+  .leaders circle {
+    fill: var(--accent);
+  }
+  .num {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    transform: translate(-50%, -50%);
+    display: grid;
+    place-items: center;
+    min-width: 1.6em;
+    height: 1.6em;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    font-family: var(--font-caption);
+    font-size: max(0.8rem, var(--step--1));
+    line-height: 1;
+    color: var(--fg-muted);
+  }
+  figcaption {
+    margin-top: var(--space-3);
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--line);
+  }
+  .fig {
+    color: var(--fg);
+  }
+  /* The figure's caption one step below the global caption, beside a hero. */
+  .caption {
+    font-size: var(--step-0);
+  }
+  /* Monospace in an italic serif: smaller and tighter, upright. */
+  .caption :global(code) {
+    font-size: 0.74em;
+    letter-spacing: -0.02em;
+    font-style: normal;
+  }
+  /* The release tag never breaks at its hyphen (zfs-2.4.4, D15.3). */
+  .caption :global(code.tag) {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  /* The list's numerals in the plate's italic serif. */
+  .parts {
+    margin: var(--space-2) 0 0;
+    padding-left: 1.8em;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+  .parts li::marker {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: 1.1em;
+    color: var(--fg-faint);
+  }
+  @media (min-width: 38rem) {
+    .parts {
+      columns: 2;
+      column-gap: var(--space-6);
+    }
+    .parts li {
+      break-inside: avoid;
+    }
+  }
+  /* On a phone, the leaders would tangle: each numeral sits on its part instead. */
+  @media (max-width: 40rem) {
+    .exhibit:not(.phone-leaders) .leaders line:not(.axis),
+    .exhibit:not(.phone-leaders) .leaders circle {
+      display: none;
+    }
+    .exhibit:not(.phone-leaders) .num {
+      left: var(--ax);
+      top: var(--ay);
+    }
+  }
+</style>

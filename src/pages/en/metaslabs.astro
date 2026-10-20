@@ -1,0 +1,511 @@
+---
+import Base from "../../layouts/Base.astro";
+import MetaslabLab from "../../components/MetaslabLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "en";
+const r = room("metaslabs");
+const M = "module/zfs/metaslab.c";
+const SMC = "module/zfs/space_map.c";
+const SMH = "include/sys/space_map.h";
+const L = {
+  struct: gh("include/sys/metaslab_impl.h", 339),
+  trees: gh("include/sys/metaslab_impl.h", 375, 388),
+  lifecycle: gh("include/sys/metaslab_impl.h", 285, 338),
+  rollback: gh("include/sys/metaslab_impl.h", 295, 302),
+  deferSize: gh("include/sys/txg.h", 49),
+  setSize: gh("module/zfs/vdev.c", 3021, 3026),
+  sizeTable: gh("module/zfs/vdev.c", 3006, 3013),
+  msCount: gh("module/zfs/vdev.c", 91),
+  shift: gh(M, 2920, 2921),
+  lbas: gh("include/sys/metaslab_impl.h", 506),
+  fallback: gh(M, 1933, 1954),
+  threshold: gh(M, 169),
+  freePct: gh(M, 177),
+  maxSearch: gh(M, 192),
+  minSearch: gh(M, 199),
+  picker: gh(M, 1771, 1802),
+  merge: gh("module/zfs/range_tree.c", 387, 394),
+  freeing: gh(M, 5518, 5528),
+  swap: gh(M, 4493, 4494),
+  early: gh(M, 4279, 4284),
+  intro: gh(SMC, 529, 543),
+  emptyTree: gh(SMC, 775, 778),
+  smpAlloc: gh(SMC, 780, 783),
+  feature: gh("module/zcommon/zfeature_common.c", 427, 431),
+  sentinel: gh(SMH, 163),
+  macros: gh(SMH, 175, 203),
+  bf64: gh("include/sys/bitops.h", 46, 48),
+  pad: gh(SMC, 615, 631),
+  kinds: gh(SMC, 63, 80),
+  iterate: gh(SMC, 121, 142),
+  loadLength: gh(SMC, 423, 443),
+  syncedLength: gh(M, 2514),
+  loadDefer: gh(M, 2649, 2652),
+  neverWritten: gh(M, 2543, 2557),
+  stayDirty: gh(M, 4645, 4651),
+  slop: gh(M, 4573, 4578),
+  condenseCall: gh(M, 4363, 4365),
+  condensePct: gh(M, 89),
+  blockThreshold: gh(M, 104),
+  blksz: gh(M, 74),
+  blkszLog: gh(M, 81),
+  estimate: gh(SMC, 1033, 1085),
+  histogram: gh("module/zfs/range_tree.c", 131, 132),
+  condenseTree: gh(M, 3949, 3957),
+  condensing: gh(M, 3974),
+  truncate: gh(SMC, 908, 910),
+  rotor: gh(M, 5431, 5464),
+  weight: gh("include/sys/metaslab_impl.h", 469),
+  logSm: gh(M, 4373, 4396),
+  unflushed: gh("include/sys/metaslab_impl.h", 521, 522),
+  logFeature: gh("module/zcommon/zfeature_common.c", 481, 491),
+  createAll: gh("cmd/zpool/zpool_main.c", 1959, 1961),
+  logDesign: gh("module/zfs/spa_log_spacemap.c", 36, 52),
+  blkszWhy: gh(M, 66, 81),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="metaslabs"
+  title="Metaslabs and space maps · Uberblok"
+  description="How OpenZFS 2.4.4 finds free space: vdevs cut into metaslabs, a free tree in memory, and an append-only space map of ALLOC and FREE entries, condensed when it grows too long. Interactive, with the code."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Room {roomNumber(r.id)}</p>
+      <h1>{r.title.en}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          Copy-on-write never overwrites a block: every write allocates new space and every overwrite frees the old block.
+          Allocation is on the path of every write, so it has to be fast, and what is free has to be recorded on disk, so
+          that the pool still knows it after a reboot.
+        </p>
+        <p>
+          The obvious record is a bitmap of the whole pool, one bit per sector. A pool of 16 TiB with 4 KiB sectors has
+          2<sup>32</sup> of them: 512 MiB of bitmap to keep in memory, and it would have to be updated in place on every change, which is exactly what
+          copy-on-write forbids. ZFS does something else. It cuts each vdev into a few hundred <em>metaslabs</em>, keeps the
+          free space of a metaslab as a tree of free segments in memory, and records on disk only what changed, as a
+          <em>space map</em>: a log of ALLOC and FREE extents that is only ever appended to, and rewritten short when it has
+          grown too long.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="lab">
+      <h2 id="lab"><span class="n">1</span> Write, delete, sync</h2>
+      <div class="prose">
+        <p>
+          Below, a vdev of 8 GiB with 4 KiB sectors, cut into 16 metaslabs of 512 MiB; every write goes to metaslab 2,
+          drawn underneath. Two files are already there: A, 32 MiB, written in txg 10, and B, 4 MiB, in txg 11. The tape
+          is the metaslab’s space map, 64-bit words on disk; select an entry to see its bits.
+        </p>
+        <p>
+          Delete A and sync: a FREE entry joins the tape, but A’s space is deferred, not free, for two more txgs. Sync twice
+          to get it back, then write 160 MiB: dynamic fit does not go back to A’s hole, and a run that long needs a two-word
+          entry. Press Load to rebuild the free tree from the tape, and Condense: it is refused while the map is short.
+          Rewrite the database until the test says yes, then condense.
+        </p>
+      </div>
+      <MetaslabLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">The idea, at three depths</h2>
+
+      <div class="depth">
+        <h3>In one sentence</h3>
+        <p class="lead prose">
+          ZFS keeps free space per metaslab, as a tree in memory and an append-only log on disk that, replayed, rebuilds the
+          tree, and it rewrites the log from the tree when the log has grown much longer than the tree.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In one paragraph</h3>
+        <p class="prose">
+          A top-level vdev is cut into metaslabs, about 200 by default, from 512 MiB to 16 GiB each (fewer and smaller on small vdevs). A loaded metaslab
+          has its free segments in a range tree, <code>ms_allocatable</code>. An allocation takes a segment from that tree,
+          by default with the dynamic-fit allocator, which searches forward from where the last allocation of that size
+          ended, and puts it in a per-txg tree, <code>ms_allocating</code>; a free goes to <code>ms_freeing</code>.
+          Nothing reaches the disk until the txg syncs: then the txg’s allocations and frees are appended to the
+          metaslab’s space map, a debug word and ALLOC entries, a debug word and FREE entries, one or two 64-bit words per
+          extent. Freed space becomes allocatable again only two txgs later, so that the pool can be rolled back to an
+          older uberblock without finding its blocks reused. Loading a metaslab replays its map, adding FREE and removing
+          ALLOC extents. And when the map is at least twice as long as the free tree would be written alone, and longer
+          than four blocks, the next sync condenses it if the metaslab is loaded: the map is truncated and rewritten from the tree.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In detail</h3>
+        <div class="prose">
+          <p>
+            <strong>Metaslabs.</strong> A metaslab, <a href={L.struct}><code>struct metaslab</code></a>, is a range of
+            a vdev with <a href={L.trees}>its in-core trees</a>: <code>ms_allocatable</code>, the free tree,
+            <code>ms_allocating[]</code>, one per txg in flight, <code>ms_freeing</code>, <code>ms_freed</code> and
+            <code>ms_defer[]</code>; a comment in the header <a href={L.lifecycle}>draws their life cycle</a>. Their size
+            comes from <a href={L.setSize}><code>vdev_metaslab_set_size</code></a>: it aims at
+            <a href={L.msCount}>200 metaslabs</a>, within 512 MiB and 16 GiB, and <a href={L.sizeTable}>at least 16</a>
+            on a small vdev. The figure’s vdev, 8 GiB, gets 16 metaslabs of 512 MiB. A metaslab’s map counts in sectors:
+            <a href={L.shift}>its shift is the vdev’s <code>ashift</code></a>, so a unit is 4 KiB here.
+          </p>
+          <p><strong>Taking a block.</strong> Allocating from a metaslab:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={M}
+          from={4863}
+          to={4890}
+          symbol="metaslab_block_alloc"
+          notes={[
+            { from: 4864, text: "No allocation from a metaslab whose map is being condensed: its free tree is being written out." },
+            {
+              from: 4868,
+              text: "The class’s allocator, dynamic fit by default, returns an offset in this metaslab.",
+            },
+            { from: 4877, text: "The extent leaves the free tree." },
+            {
+              from: 4880,
+              to: 4881,
+              text: "The first allocation of a txg marks the metaslab dirty, so the sync will visit it.",
+            },
+            {
+              from: 4883,
+              to: 4884,
+              text: "The extent goes into <code>ms_allocating</code> for this txg. Nothing is written to disk yet. In the figure, the orange extents.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Dynamic fit.</strong> Which offset the allocator returns:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={M}
+          from={1905}
+          to={1931}
+          symbol="metaslab_df_alloc"
+          notes={[
+            {
+              from: 1905,
+              to: 1906,
+              text: `One cursor per power-of-two alignment, <a href="${L.lbas}"><code>ms_lbas[]</code></a>. Every block in the figure is 128 KiB, so one cursor, <code>ms_lbas[17]</code>, the black mark above the metaslab.`,
+            },
+            {
+              from: 1917,
+              to: 1921,
+              text: `Under <a href="${L.freePct}">4% free</a>, or when no free segment is as large as <a href="${L.threshold}">128 KiB</a>, no forward search.`,
+            },
+            {
+              from: 1923,
+              to: 1924,
+              text: `Otherwise <a href="${L.picker}"><code>metaslab_block_picker</code></a>: the first free segment at or after the cursor that fits, searched at most <a href="${L.maxSearch}">16 MiB</a> past the first candidate, and always at least <a href="${L.minSearch}">100 segments</a>; the cursor moves to the end of what was taken.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            If that finds nothing, <a href={L.fallback}>the fallback</a> takes, from a tree of the same free segments sorted
+            by size, a segment of exactly the size asked or the next larger one, and moves the cursor there. So space freed
+            behind the cursor is not reused until the cursor reaches the end of the metaslab, or the metaslab runs low: in
+            the figure, the 160 MiB file lands after B, not in A’s hole. Blocks taken one after the other are adjacent, and
+            the range tree <a href={L.merge}>merges adjacent segments</a>, so a file written in one txg is one extent, and one
+            entry on the map.
+          </p>
+          <p>
+            <strong>Freeing.</strong> A free <a href={L.freeing}>goes to <code>ms_freeing</code></a>, in syncing
+            context. The block stays allocated until the sync is over.
+          </p>
+          <p><strong>Syncing: appending to the map.</strong> In <code>metaslab_sync</code>:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={M}
+          from={4367}
+          to={4405}
+          symbol="metaslab_sync"
+          notes={[
+            {
+              from: 4373,
+              to: 4396,
+              text: "With a log space map, the txg’s allocations and frees go to one pool-wide log instead, with the vdev’s id. See below; the figure takes the other branch.",
+            },
+            {
+              from: 4400,
+              to: 4403,
+              text: "The txg’s allocation tree is appended as ALLOC entries, then <code>ms_freeing</code> as FREE entries, to the metaslab’s own map, without a vdev id. Nothing already on disk is rewritten.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Each append <a href={L.intro}>starts with a debug word</a>, which records the txg and the sync pass, and an
+            empty tree <a href={L.emptyTree}>appends nothing</a>; ALLOC adds to the map’s allocated total,
+            <code>smp_alloc</code>, and FREE subtracts from it (<a href={L.smpAlloc}>L780–L783</a>). A metaslab without
+            any allocation or free in a txg <a href={L.early}>is left alone</a>. Then <a href={L.swap}><code>ms_freeing</code>
+            becomes <code>ms_freed</code></a>. How many words an extent takes:
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SMC}
+          from={704}
+          to={739}
+          symbol="space_map_write_impl"
+          notes={[
+            {
+              from: 708,
+              to: 711,
+              text: "Offset and length in units of 4 KiB, from the start of the metaslab.",
+            },
+            {
+              from: 728,
+              to: 734,
+              text: `Two words when the offset does not fit in 47 bits, the run is longer than <code>SM_RUN_MAX</code>, 2<sup>15</sup> units (128 MiB here), or a vdev id must be stored, and the <code>spacemap_v2</code> feature is active. It is <a href="${L.feature}">activated as soon as it is enabled</a>, which a new pool does.`,
+            },
+            { from: 732, to: 733, text: "A test tunable, off by default." },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>The words.</strong> The layout, as the header draws it:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SMH}
+          from={104}
+          to={140}
+          symbol="space map entries"
+          notes={[
+            { from: 104, to: 111, text: "A debug word: prefix 10, the action (0 ALLOC, 1 FREE), the sync pass, the txg." },
+            {
+              from: 114,
+              to: 120,
+              text: "A one-word entry: top bit 0, a 47-bit offset, a type bit and a 15-bit run. The run is stored minus one, so it goes from 1 to 2<sup>15</sup>.",
+            },
+            {
+              from: 123,
+              to: 135,
+              text: "A two-word entry: prefix 11, a 36-bit run and a 24-bit vdev id, then the type and a 63-bit offset.",
+            },
+            {
+              from: 137,
+              to: 139,
+              text: "In the figure, a pad word appears when a two-word entry would start on the last word of a 16 KiB block.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            The three kinds are told apart <a href={L.kinds}>by their top bits</a>. The figure encodes every word with
+            <a href={L.macros}>the header’s macros</a>, <code>BF64_ENCODE</code> <a href={L.bf64}>masking then shifting</a>:
+            A’s ALLOC entry, offset 0 and 8192 units, is <code>0x0000000000001FFF</code>; the 160 MiB extent, offset 0x2400
+            and 40960 units, is <code>0xC000009FFF000000</code> then <code>0x0000000000002400</code>. The vdev field of
+            that first word is 0: <a href={L.sentinel}><code>SM_NO_VDEVID</code></a> is <code>1 &lt;&lt; 24</code>, and the
+            24-bit mask drops it. The words are written here:
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SMC}
+          from={633}
+          to={663}
+          symbol="space_map_write_seg"
+          notes={[
+            { from: 633, text: "A run longer than the format allows is cut; with two-word entries that is 2<sup>36</sup> units, never reached in a metaslab." },
+            { from: 636, to: 638, text: "One word: offset, type, run." },
+            { from: 643, to: 651, text: "Two words: prefix, run and vdev; then type and offset." },
+            { from: 659, text: "The map grows by one or two words. It only ever grows, until it is condensed." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Before a two-word entry, <a href={L.pad}>the last word of a block is padded</a> with an empty debug word, which
+            loading <a href={L.iterate}>skips</a>.
+          </p>
+          <p><strong>Two txgs of grace.</strong> At the end of each txg’s sync:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={M}
+          from={4624}
+          to={4638}
+          symbol="metaslab_sync_done"
+          notes={[
+            {
+              from: 4630,
+              to: 4631,
+              text: "The frees deferred two txgs ago go back into the free tree: <code>defer_tree</code> is <code>ms_defer[txg % TXG_DEFER_SIZE]</code>.",
+            },
+            { from: 4632, to: 4633, text: "This txg’s frees take their place." },
+            {
+              from: 4634,
+              to: 4637,
+              text: `Not deferred only when the pool is <a href="${L.slop}">almost full, or a vdev is being removed or expanded</a>.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <a href={L.deferSize}><code>TXG_DEFER_SIZE</code> is 2</a>: a block freed in txg T is on the map as FREE after the
+            sync of T, but allocatable only after the sync of T + 2. The header says why: <a href={L.rollback}>“a safety net
+            for uberblock rollback”</a>; the pool can be rolled back two txgs and find none of its blocks reused. A metaslab
+            with deferred space <a href={L.stayDirty}>stays dirty</a> until the frees are back.
+          </p>
+          <p><strong>Loading: replaying the log.</strong> Each entry of the map, in order:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SMC}
+          from={401}
+          to={416}
+          symbol="space_map_load_callback"
+          notes={[
+            { from: 405, to: 409, text: "Loading free space: a FREE entry is added to the tree." },
+            { from: 410, to: 413, text: "An ALLOC entry is removed from it." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            The tree <a href={L.loadLength}>starts as the whole metaslab</a>, so replaying the log from the start leaves
+            exactly the free space. <code>metaslab_load</code> replays up to <a href={L.syncedLength}>the length at the last
+            sync</a> and then <a href={L.loadDefer}>removes the deferred trees</a>, which are FREE on the map but not
+            allocatable yet. A metaslab whose map was never written <a href={L.neverWritten}>loads as free</a>. The figure’s
+            Load does exactly this and compares the result with the tree it had.
+          </p>
+          <p><strong>When to condense.</strong> At each sync, in its first pass, if the metaslab is loaded, <code>metaslab_sync</code> <a href={L.condenseCall}>asks</a>:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={M}
+          from={3835}
+          to={3861}
+          symbol="metaslab_should_condense"
+          notes={[
+            { from: 3851, to: 3853, text: "An empty free tree, or a requested condense: always." },
+            { from: 3855, text: "A record is the larger of the map’s block size and a sector." },
+            {
+              from: 3857,
+              to: 3858,
+              text: `The optimal size: an estimate of the free tree written alone, from <a href="${L.histogram}">its histogram of segment sizes</a>, one word per segment under 128 MiB, two above, plus padding (<a href="${L.estimate}">space_map.c L1033–L1085</a>).`,
+            },
+            {
+              from: 3860,
+              to: 3861,
+              text: `Condense when the map is at least <a href="${L.condensePct}">200%</a> of that, and longer than <a href="${L.blockThreshold}">4 records</a>. Without a log space map, <a href="${L.blksz}">a block is 16 KiB</a>: 64 KiB. In the figure, the two tests under the tape.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            In the figure, A, B and a deleted C make a map of 96 bytes against an optimal 32: twice as long, but far from
+            64 KiB, so no. The rewrites of a 64 MiB database, 128 random blocks per txg, append a FREE entry for almost every
+            old block; after about 70 txgs the map passes 64 KiB, while the free tree, about two hundred segments, would
+            take under 2 KiB.
+          </p>
+          <p><strong>Condensing.</strong> The map is rewritten from the tree:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={M}
+          from={3994}
+          to={4013}
+          symbol="metaslab_condense"
+          notes={[
+            {
+              from: 3994,
+              to: 4003,
+              text: "This txg’s own entries are still appended after the condensed map, as usual.",
+            },
+            { from: 4009, to: 4010, text: "One ALLOC entry for the whole metaslab: 2<sup>17</sup> units, a two-word entry." },
+            { from: 4011, text: "One FREE entry per free segment." },
+            {
+              from: 4012,
+              text: `Then the condense tree: <a href="${L.condenseTree}">the deferred frees and the allocations of the txgs in flight</a>, which are free as far as the old map knows.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Before writing, the metaslab is <a href={L.condensing}>marked as condensing</a>, so nothing is allocated from it
+            meanwhile, and the map is <a href={L.truncate}>truncated to length 0</a>. Replaying the short map gives the same
+            tree as replaying the long one: the figure’s Load, after a condense, says so.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="logsm">
+      <h2 id="logsm">Coda: the log space map</h2>
+      <div class="prose">
+        <p>
+          <code>zpool create</code> <a href={L.createAll}>enables every feature</a> unless told otherwise, among them
+          <a href={L.logFeature}><code>log_spacemap</code></a>, and then <code>metaslab_sync</code> takes
+          <a href={L.logSm}>the other branch</a>: each txg’s allocations and frees, for every metaslab, are appended to one
+          log for the whole pool, as two-word entries that carry the vdev’s id, and each metaslab keeps them in memory as
+          <a href={L.unflushed}>unflushed changes</a>. Every txg, <a href={L.logDesign}>a selected group of metaslabs is
+          flushed</a>: their changes are written to their own maps, the same entries as in the figure, in blocks of
+          <a href={L.blkszLog}>128 KiB</a> rather than 16 KiB. The design comment names the workload it is for: random writes,
+          which free a little everywhere and would otherwise <a href={L.blkszWhy}>touch many metaslabs’ maps every txg</a>.
+          The figure shows a metaslab’s own map, written at every sync, because that is where the idea is: the log delays
+          the same entries and gathers them.
+        </p>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">What the figure leaves out</h2>
+      <p class="prose muted">
+        The figure runs the functions above on one metaslab of one vdev, with 4 KiB sectors and no log space map. Every block
+        is 128 KiB, so one cursor; there is one txg in flight, synced at once in one pass, without quiescing, so
+        <code>ms_allocating</code> has one tree in use. Which metaslab an allocation goes to, by
+        <a href={L.weight}>weight</a> and through <a href={L.rotor}>the rotor over vdevs</a>, is left out: everything goes
+        to metaslab 2, and a write that does not fit is refused instead of moving on. So are allocation throttling, gang
+        blocks, ditto copies, checkpoints, trim and the space map’s histogram. Condensing follows
+        <code>metaslab_should_condense</code>, at the sync that writes to the map, as <code>metaslab_sync</code> does; the
+        rewrites stop just before such a sync, so it can be watched. Load is shown on a txg with nothing pending. The rest of
+        the visit is in <a href={roomUrl(lang, "txg")}>Transaction groups</a> for when a txg syncs, and in
+        <a href={roomUrl(lang, "snapshots")}>Snapshots and clones</a> for when a block is freed at all.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="metaslabs" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

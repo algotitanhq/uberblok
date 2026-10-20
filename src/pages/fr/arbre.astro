@@ -1,0 +1,403 @@
+---
+import Base from "../../layouts/Base.astro";
+import TreeLab from "../../components/TreeLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "fr";
+const r = room("tree");
+const VL = "module/zfs/vdev_label.c";
+const L = {
+  rootbp: gh("include/sys/uberblock_impl.h", 128),
+  metaDnode: gh("include/sys/dmu_objset.h", 81),
+  blkptr: gh("include/sys/dnode.h", 257),
+  nlevels: gh("include/sys/dnode.h", 216),
+  indMax: gh("include/sys/dnode.h", 71),
+  bpSize: gh("include/sys/spa.h", 361, 362),
+  dsBp: gh("include/sys/dsl_dataset.h", 167),
+  dirty: gh("module/zfs/dbuf.c", 2552),
+  setdirty: gh("module/zfs/dbuf.c", 2583),
+  newAddr: gh("module/zfs/zio.c", 2102, 2104),
+  rootSet: gh("module/zfs/dsl_pool.c", 593),
+  flush: gh(VL, 2085, 2098),
+  even: gh(VL, 2109),
+  pair: gh(VL, 1946, 1952),
+  slot: gh(VL, 1782, 1784),
+  ubWrite: gh(VL, 1792, 1796),
+  odd: gh(VL, 2154),
+  ubFlush: gh(VL, 1826, 1854),
+  good: gh(VL, 1854),
+  labels: gh("include/sys/vdev_impl.h", 562),
+  boot: gh("include/sys/vdev_impl.h", 555, 560),
+  ring: gh("include/sys/vdev_impl.h", 482),
+  slotSize: gh("include/sys/vdev_impl.h", 491, 496),
+  load: gh(VL, 1570, 1588),
+  loadDone: gh(VL, 1547, 1553),
+  labelCksum: gh(VL, 197, 200),
+  readConfigCall: gh(VL, 1647),
+  dirtyList: gh(VL, 1962, 1984),
+  minVdevs: gh("include/sys/spa.h", 363),
+  firstTxg: gh("module/zfs/spa.c", 4750, 4751),
+  importUpdate: gh("module/zfs/spa.c", 5721, 5736),
+  configUpdate: gh("module/zfs/spa_config.c", 489, 491),
+  mmpTie: gh(VL, 1507, 1527),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="tree"
+  title="L’arbre et l’uberblock · Uberblok"
+  description="Comment un pool ZFS change d’état sans fsck, lu dans le code d’OpenZFS : un arbre de pointeurs de bloc sous un seul uberblock, une écriture qui copie son chemin, et une validation en quatre temps qu’une coupure de courant ne peut pas déchirer : interactif, en 2D et en 3D."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Salle {roomNumber(r.id)}</p>
+      <h1>{r.title.fr}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          ZFS n’a pas de fsck. Après un plantage, le pool doit s’ouvrir soit dans l’état d’avant le dernier groupe de
+          transactions, soit dans l’état d’après, jamais dans un mélange des deux, alors qu’un seul txg écrit des milliers de
+          blocs sur plusieurs disques.
+        </p>
+        <p>
+          Tout le changement d’état doit donc se ramener à une seule petite écriture, qui a eu lieu ou non. Et cette écriture
+          ne doit pas pouvoir détruire l’état précédent si le courant part en plein milieu. Le code y arrive avec un arbre
+          suspendu à un seul pointeur, une règle qui interdit d’écraser un bloc vivant, et un ordre d’écriture à la fin de
+          chaque txg.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="tree">
+      <h2 id="tree"><span class="n">1</span> Tout est suspendu à un pointeur</h2>
+      <div class="prose">
+        <p>
+          L’uberblock contient un seul pointeur de bloc, <a href={L.rootbp}><code>ub_rootbp</code></a>. Il pointe vers le
+          meta objset du pool, le MOS, qui commence par un dnode, <a href={L.metaDnode}>le meta-dnode</a>, dont les blocs
+          sont des blocs de dnodes. Un dnode est la racine d’un objet : ses <a href={L.blkptr}><code>dn_blkptr[]</code></a>
+          pointent vers <a href={L.nlevels}><code>dn_nlevels</code></a> − 1 niveaux de blocs indirects, et le dernier niveau
+          pointe vers les données. Chaque pointeur est un <code>blkptr_t</code> de 128 octets qui contient
+          <a href={L.bpSize}>jusqu’à trois adresses</a> et la somme de contrôle du bloc d’en dessous. Depuis l’uberblock, il
+          n’en faut pas plus pour trouver chaque bloc du pool. La figure dessine un fichier à trois niveaux et quatre blocs de
+          données sous l’objset.
+        </p>
+      </div>
+      <TreeLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="write">
+      <h2 id="write"><span class="n">2</span> Une écriture copie tout son chemin</h2>
+      <div class="prose">
+        <p>
+          Un bloc modifié n’est jamais réécrit sur place : il reçoit <a href={L.newAddr}>une nouvelle adresse</a>. Son parent
+          contient son pointeur, adresse et somme de contrôle, donc le parent change aussi : <code>dbuf_dirty</code>
+          <a href={L.dirty}>marque le parent comme modifié</a>, et ainsi de suite jusqu’au dnode, <a href={L.setdirty}>marqué
+          à son tour</a> dans son bloc de dnodes, jusqu’à l’objset. Un bloc de données modifié donne une nouvelle copie de
+          lui-même et de chaque bloc de son chemin vers la racine ; tous les autres blocs sont partagés par l’ancien arbre et
+          le nouveau. L’ancien arbre n’est pas touché : le dernier uberblock synchronisé l’atteint encore tout entier. Dans
+          la figure, écrivez D2, puis D3 dans le même txg : leurs ancêtres communs ne sont copiés qu’une fois. La
+          <a href={roomUrl(lang, "copy-on-write")}>salle suivante</a> suit les sommes de contrôle le long de ce chemin.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="beats">
+      <h2 id="beats"><span class="n">3</span> La validation, en quatre temps</h2>
+      <div class="prose">
+        <p>
+          À la fin d’un txg, une fois que <code>spa_sync</code> a écrit les nouveaux blocs, <code>vdev_config_sync</code>
+          enchaîne quatre étapes dans un ordre fixe. D’abord, il <a href={L.flush}>vide le cache d’écriture</a> de chaque
+          disque écrit dans le txg, pour que le nouvel arbre soit sur un support stable avant que quoi que ce soit pointe
+          vers lui. Puis il écrit les <a href={L.even}>labels pairs</a>, L0 et L2, avec la nouvelle configuration. Puis
+          l’uberblock, dans la <a href={L.slot}>case <code>ub_txg</code> modulo le nombre de cases</a> des <a href={L.ubWrite}>quatre
+          labels</a>, que l’uberblock du txg précédent n’occupe pas : cette écriture est la validation, l’instant où le
+          pointeur racine bascule vers le nouvel arbre. Enfin, les <a href={L.odd}>labels impairs</a>, L1 et L3. Chaque
+          disque porte <a href={L.labels}>quatre labels</a> de 256 Kio, deux à son début et deux à sa fin, et chaque label
+          se termine par un <a href={L.ring}>anneau de 128 Kio</a> de cases d’uberblock : 128 cases sur les secteurs de
+          512 octets de la figure, <a href={L.slotSize}>32 sur des disques à secteurs de 4 Kio</a>.
+        </p>
+        <p>
+          Les labels ne sont écrits que pour les <a href={L.dirtyList}>vdevs dont la configuration a changé</a> dans ce txg.
+          Dans la plupart des txg, aucune n’a changé : les temps 2 et 4 n’écrivent rien, et seul l’uberblock est nouveau.
+          Désactivez « La configuration des vdevs change dans ce txg » et refaites les étapes.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="plug">
+      <h2 id="plug"><span class="n">4</span> Débrancher la prise, puis importer</h2>
+      <div class="prose">
+        <p>
+          À l’import, ZFS <a href={L.load}>lit chaque case de chaque label</a>. Une case ne compte que si
+          <a href={L.labelCksum}>sa somme de contrôle</a> et son nombre magique sont justes, donc une écriture déchirée est
+          ignorée ; parmi les autres, <a href={L.loadDone}>l’<code>ub_txg</code> le plus élevé gagne</a>. Puis la
+          configuration est lue dans <a href={L.readConfigCall}>le label dont la configuration est la plus récente sans être
+          plus récente que cet uberblock</a>. Débranchez la prise à chaque étape et importez. Avant le temps 3, aucun
+          uberblock du nouveau txg n’existe : l’ancien gagne, les labels pairs déjà écrits sont plus récents que lui et sont
+          écartés, les labels impairs lui correspondent encore. Dès qu’une copie du nouvel uberblock est arrivée, elle
+          gagne, et les labels pairs lui correspondent. L’arbre est l’ancien ou le nouveau, jamais un mélange. Réglez le
+          nombre d’écritures d’uberblock qui arrivent avant une coupure au temps 3 : zéro donne le cas (1) du commentaire du
+          code, une ou plus le cas (2).
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">L’idée, à trois profondeurs</h2>
+
+      <div class="depth">
+        <h3>En une phrase</h3>
+        <p class="lead prose">
+          Chaque bloc du pool est suspendu au seul pointeur de l’uberblock, une écriture copie son chemin au lieu de
+          l’écraser, et le nouvel uberblock va dans une case que l’ancien n’occupe pas, une fois le nouvel arbre sur le
+          disque : le pool est donc l’ancien arbre ou le nouveau, quel que soit l’instant où le courant part.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En un paragraphe</h3>
+        <p class="prose">
+          <code>ub_rootbp</code> pointe vers l’<code>objset_phys_t</code> du MOS ; les blocs de son meta-dnode contiennent
+          des dnodes ; les <code>dn_blkptr[]</code> d’un dnode mènent, à travers <code>dn_nlevels</code> − 1 niveaux de blocs
+          indirects, jusqu’aux données. <code>dbuf_dirty</code> marque le parent d’un bloc, récursivement, si bien qu’une
+          feuille modifiée donne à la synchronisation de nouvelles copies de la feuille et de tous ses ancêtres, chacune à une
+          nouvelle adresse. <code>vdev_config_sync</code> vide ensuite le cache des disques écrits dans le txg, écrit la
+          configuration des labels pairs, écrit l’uberblock dans la case <code>ub_txg %
+          VDEV_UBERBLOCK_COUNT</code> des quatre labels et le vide du cache, puis écrit les labels impairs. À l’import,
+          <code>vdev_uberblock_load</code> garde l’uberblock valide au txg le plus élevé, et
+          <code>vdev_label_read_config</code> prend le label dont le txg de configuration est le plus élevé sans dépasser le
+          sien. Une coupure avant l’arrivée de tout nouvel uberblock laisse l’ancien uberblock et les labels impairs ; une
+          coupure après l’arrivée d’un seul laisse le nouvel uberblock et les labels pairs. Chacune de ces paires est
+          cohérente.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En détail</h3>
+        <div class="prose">
+          <p><strong>Le sommet de l’arbre.</strong> L’uberblock désigne un txg et un pointeur de bloc.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="include/sys/uberblock_impl.h"
+          from={122}
+          to={139}
+          symbol="struct uberblock"
+          notes={[
+            { from: 125, text: "<code>ub_txg</code> : le txg que cet uberblock valide. À l’import, le plus élevé des valides gagne." },
+            { from: 127, text: "<code>ub_timestamp</code> : départage deux uberblocks du même txg." },
+            { from: 128, text: `<code>ub_rootbp</code> : le seul pointeur. <code>dsl_pool_sync_mos</code> <a href="${L.rootSet}">le fixe</a> une fois le MOS écrit.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="include/sys/dmu_objset.h"
+          from={80}
+          to={95}
+          symbol="objset_phys_t"
+          notes={[
+            { from: 81, text: `Un objset commence par un dnode entier, le meta-dnode. Ses blocs sont les blocs de dnodes de l’objset : l’objet <var>n</var> est le dnode <var>n</var>. L’objset propre d’un système de fichiers est suspendu au MOS de la même façon, par le <a href="${L.dsBp}"><code>ds_bp</code></a> de son dataset.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path="include/sys/dnode.h"
+          from={213}
+          to={229}
+          symbol="dnode_phys_t"
+          notes={[
+            { from: 215, text: `La taille des blocs indirects de l’objet, <a href="${L.indMax}">128 Kio au plus</a> : 1024 pointeurs de bloc de 128 octets.` },
+            { from: 216, text: "La hauteur de l’arbre de l’objet ; 1 quand le dnode pointe directement vers les données." },
+            { from: 217, text: `Combien des pointeurs racines, <a href="${L.blkptr}"><code>dn_blkptr[]</code></a>, sont utilisés.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Une écriture remonte jusqu’à la racine.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/dbuf.c"
+          from={2537}
+          to={2554}
+          symbol="dbuf_dirty"
+          notes={[
+            { from: 2537, text: "Un bloc sous le niveau le plus haut de son objet a un bloc indirect parent." },
+            { from: 2542, to: 2545, text: "Le parent est au niveau + 1, bloc numéro <code>blkid >> epbs</code>, avec 2<sup>epbs</sup> pointeurs par bloc indirect (1024 pour 128 Kio). La figure en met 2, pour rester petite." },
+            { from: 2552, text: `Marquer un bloc marque son parent, et ainsi de suite ; le niveau le plus haut est tenu par le dnode, <a href="${L.setdirty}">marqué à son tour</a>. Chaque bloc marqué est écrit à <a href="${L.newAddr}">un nouvel endroit</a> à la synchronisation.` },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Les quatre temps.</strong> D’abord le vidage du cache.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2085}
+          to={2098}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2085, to: 2090, text: "La raison du vidage, dans les mots du code : les blocs de ce txg atteignent un support stable « before any uberblock that references them », avant tout uberblock qui les référence." },
+            { from: 2093, to: 2098, text: "Chaque vdev écrit dans ce txg est vidé ; l’attente les couvre tous." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2100}
+          to={2139}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2100, to: 2108, text: "Le temps 2, et ce que veut dire une coupure pendant celui-ci : les labels pairs plus récents que tout uberblock sont invalides, les impairs restent valides." },
+            { from: 2109, text: `Les labels pairs : <code>vdev_label_sync</code> écrit les labels <code>l</code> et <code>l + 2</code>, <a href="${L.pair}">L0 et L2</a>.` },
+            { from: 2118, to: 2131, text: "Le temps 3, et les deux cas d’une coupure pendant celui-ci : aucun nouvel uberblock n’est arrivé, ou au moins un. La figure rejoue les deux." },
+            { from: 2133, text: `Les uberblocks ; <code>vdev_uberblock_sync_list</code> les <a href="${L.ubFlush}">vide ensuite du cache</a>, et réussit si <a href="${L.good}">au moins une écriture</a> a réussi.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={1768}
+          to={1797}
+          symbol="vdev_uberblock_sync"
+          notes={[
+            { from: 1768, to: 1781, text: "Pourquoi la case doit différer de la case courante : un écrasement déchiré de l’uberblock validé pourrait le perdre. Le commentaire parle de l’extension RAID-Z, qui réutilise un txg ; la règle de la case, plus bas, vaut pour chaque txg." },
+            { from: 1782, to: 1784, text: "La case : <code>ub_txg</code> modulo le nombre de cases (une de moins avec multihost). Des txg consécutifs prennent des cases consécutives ; le txg suivant ne tombe jamais sur la case du précédent." },
+            { from: 1792, to: 1796, text: "La même case dans les quatre labels du disque." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={2144}
+          to={2161}
+          symbol="vdev_config_sync"
+          notes={[
+            { from: 2145, to: 2152, text: "Le temps 4 : les labels impairs en dernier. Une coupure ici laisse les labels pairs et les nouveaux uberblocks, qui suffisent." },
+            { from: 2154, text: "La même fonction qu’au temps 2, avec <code>l = 1</code> : L1 et L3." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Quels disques reçoivent labels et uberblocks : <a href={L.dirtyList}>seuls les vdevs de la liste des modifiés</a>
+            reçoivent des labels ; si cette liste est vide, l’uberblock va à <a href={L.minVdevs}>trois</a> vdevs de premier
+            niveau au plus.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/spa.c"
+          from={10792}
+          to={10819}
+          symbol="spa_sync_rewrite_vdev_config"
+          notes={[
+            { from: 10792, to: 10815, text: "Pas de changement de configuration : trois vdevs de premier niveau au plus, à partir d’un vdev tiré au hasard, sans les logs ni les vdevs sans metaslab. Un pool d’un seul disque reçoit chaque uberblock sur ce disque." },
+            { from: 10816, to: 10818, text: "Un changement de configuration : chaque vdev de premier niveau." },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Où sont les labels.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={158}
+          to={170}
+          symbol="vdev_label_offset"
+          notes={[
+            { from: 165, to: 166, text: "Le décalage tombe dans un label, et la taille du périphérique est un multiple d’un label." },
+            { from: 168, to: 169, text: `Les labels 0 et 1 au début, 2 et 3 dans les 512 derniers Kio. Sur le disque de 1 Gio de la figure : 0, 256 Kio, 1023,5 Mio et 1023,75 Mio. Après les deux labels du début vient <a href="${L.boot}">une zone de démarrage de 3,5 Mio</a>.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>L’import.</strong> Chaque case de chaque label est lue, et <a href={L.loadDone}>une case valide est gardée
+            si elle bat la meilleure trouvée jusque-là</a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={1495}
+          to={1505}
+          symbol="vdev_uberblock_compare"
+          notes={[
+            { from: 1498, text: "Le txg le plus élevé gagne." },
+            { from: 1503, text: `À txg égal, l’horodatage le plus tardif ; puis la <a href="${L.mmpTie}">séquence multihost</a>, que la figure laisse de côté.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VL}
+          from={832}
+          to={863}
+          symbol="vdev_label_read_config"
+          notes={[
+            { from: 835, to: 837, text: `Un label ne compte que si sa lecture réussit, et la lecture vérifie <a href="${L.labelCksum}">la somme de contrôle propre au label</a> : un label déchiré est ignoré.` },
+            { from: 852, to: 856, text: `Le label au txg de configuration le plus élevé sans dépasser <code>txg</code>, celui de l’uberblock gagnant (<a href="${L.readConfigCall}">l’appel</a>). C’est ainsi que les labels pairs d’un txg qui n’a pas été validé sont écartés.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Après l’import, le txg suivant est <a href={L.firstTxg}>celui du gagnant + 1</a> : quand l’ancien arbre a gagné, le
+            txg perdu est réécrit, et son uberblock va dans la même case, par-dessus la case déchirée. L’import
+            <a href={L.importUpdate}>demande aussi une mise à jour de la configuration</a>, qui <a href={L.configUpdate}>marque
+            chaque vdev comme modifié</a> pour ce txg : il réécrit les quatre labels, déchirés compris, quoi qu’il change d’autre.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">Ce que la figure laisse de côté</h2>
+      <p class="prose muted">
+        Un seul dataset et très peu de blocs : deux pointeurs par bloc indirect au lieu de 1024 au plus, les niveaux
+        indirects propres au meta-dnode et le passage du MOS à l’objset d’un système de fichiers repliés en un seul bloc de
+        dnodes. Un seul disque, si bien que chaque uberblock et chaque label y arrivent ; ses 128 cases sont celles de
+        secteurs de 512 octets. Le code lance ensemble les écritures d’un même temps ; la figure les fait arriver dans
+        l’ordre (L0 puis L2, L1 puis L3, les uberblocks de L0 à L3) et déchire celle en cours quand la prise est débranchée.
+        Le contenu de la configuration, la nouvelle tentative avec <code>ZIO_FLAG_IO_RETRY</code>, multihost, l’extension
+        RAID-Z, les passes de synchronisation multiples d’un txg et la libération des anciens blocs (la
+        <a href={roomUrl(lang, "snapshots")}>salle des instantanés</a>) ne sont pas montrés. La vue 3D dessine le même état
+        que la vue 2D.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="tree" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

@@ -1,0 +1,352 @@
+---
+import Base from "../../layouts/Base.astro";
+import RaidzMap from "../../components/RaidzMap.astro";
+import WriteHole from "../../components/WriteHole.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "es";
+const r = room("raidz");
+const V = "module/zfs/vdev_raidz.c";
+const L = {
+  maxParity: gh("include/sys/fs/zfs.h", 929),
+  pqr: gh(V, 121, 123),
+  pad: gh("module/zfs/zio.c", 4718, 4729),
+  nskip: gh(V, 699, 700),
+  skipPlace: gh(V, 509, 580),
+  skipIo: gh(V, 553, 572),
+  dataLoop: gh(V, 548, 576),
+  oneSector: gh(V, 2300, 2303),
+  skipOpt: gh(V, 2481, 2506),
+  genP: gh(V, 1141, 1156),
+  startWrite: gh(V, 2443, 2462),
+  readRow: gh(V, 2573, 2588),
+  cksum: gh(V, 2767, 2772),
+  readAll: gh(V, 3886, 3910),
+  combrecCall: gh(V, 3959),
+  order: gh(V, 3467, 3490),
+  simulate: gh(V, 3283, 3299),
+  einval: gh(V, 3385, 3392),
+  parityChoice: gh(V, 2125, 2155),
+  ecksum: gh(V, 3403, 3428),
+  verify: gh(V, 3132, 3163),
+  repair: gh(V, 3166, 3210),
+  scrubRead: gh(V, 2580, 2582),
+  state: gh(V, 3977, 3983),
+  swap: gh(V, 725, 734),
+  recurse: gh("module/zfs/dsl_scan.c", 2248, 2255),
+  visit: gh("module/zfs/dsl_scan.c", 2440),
+  window: gh("module/zfs/dsl_scan.c", 4844, 4848),
+  needIo: gh("module/zfs/dsl_scan.c", 4878, 4880),
+  dtlWindow: gh("module/zfs/dsl_scan.c", 914, 915),
+  expansion: gh(V, 152, 162),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="raidz"
+  title="RAID-Z · Uberblok"
+  description="Cómo RAID-Z da a cada bloque su propia banda, de ancho variable, de modo que no hay agujero de escritura, y cómo descubre a un disco que miente: interactivo, con el código de OpenZFS."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Sala {roomNumber(r.id)}</p>
+      <h1>{r.title.es}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          El RAID-5 clásico mantiene una banda fija sobre sus discos: unos datos y la paridad de esos datos. Para cambiar
+          un fragmento, debe escribir los datos nuevos y la paridad nueva, in situ, en dos escrituras separadas. Un corte
+          de corriente entre ambas deja una banda cuya paridad ya no coincide con sus datos, y nada en el disco lo indica.
+          Cuando más tarde muere un disco, su contenido se reconstruye a partir de esa paridad: erróneo, sin ningún aviso.
+          Es el <em>agujero de escritura</em> («write hole»).
+        </p>
+        <p>
+          Una escritura pequeña también sale cara: para calcular la paridad nueva, el RAID-5 tiene que leer primero el
+          resto de la banda, o los datos antiguos y la paridad antigua. RAID-Z no hace ni lo uno ni lo otro, porque nunca
+          actualiza una banda: cada bloque recibe una banda propia, tan ancha como el bloque necesite.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="map">
+      <h2 id="map"><span class="n">1</span> Un bloque, una banda</h2>
+      <div class="prose">
+        <p>
+          Cuando ZFS escribe un bloque en un vdev raidz, <code>vdev_raidz_map_alloc</code> corta ese bloque, y solo ese
+          bloque, en columnas, una por disco hijo. Las <a href={L.pqr}>columnas de paridad van primero</a>, P, y después Q
+          y R para raidz2 y raidz3 (<a href={L.maxParity}>3 como máximo</a>). Les siguen las columnas de datos, cada una
+          <a href={L.dataLoop}>un tramo contiguo del bloque</a>: no un sector por disco por turnos, como suele dibujarse el
+          RAID. Después vienen los sectores de relleno que redondean la asignación hacia arriba. Elige un tamaño, una
+          paridad, un número de discos y un tamaño de sector: el mapa y cada número son lo que calcula el código.
+        </p>
+      </div>
+      <RaidzMap lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="hole">
+      <h2 id="hole"><span class="n">2</span> Sin agujero de escritura</h2>
+      <div class="prose">
+        <p>
+          La paridad de un bloque RAID-Z se <a href={L.genP}>calcula a partir de sus propias columnas de datos</a>, y
+          <a href={L.startWrite}>todas las columnas se envían a la vez a sus discos</a>: no se lee nada antiguo, no se
+          reescribe nada antiguo. El bloque va al espacio libre, como todo bloque en ZFS
+          (<a href={roomUrl(lang, "copy-on-write")}>copia en escritura</a>), y la versión antigua se queda donde estaba
+          hasta que un grupo de transacciones que ya no la necesita se confirma con una sola escritura de uberblock
+          (<a href={roomUrl(lang, "txg")}>grupos de transacciones</a>). Un corte de corriente a mitad deja una banda a
+          medio escribir a la que nada apunta.
+        </p>
+        <p class="muted">
+          Esa mitad del argumento no está en <code>vdev_raidz.c</code>: RAID-Z escribe una banda entera, y la copia en
+          escritura y la confirmación del txg garantizan que nadie la lea antes de que esté entera.
+        </p>
+      </div>
+      <WriteHole lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">La idea, a tres profundidades</h2>
+
+      <div class="depth">
+        <h3>En una frase</h3>
+        <p class="lead prose">
+          RAID-Z nunca actualiza una banda: cada bloque se escribe en espacio libre como una banda propia, datos y paridad
+          juntos, y la suma de comprobación de su padre dice qué disco miente cuando se vuelve a leer el bloque.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En un párrafo</h3>
+        <p class="prose">
+          Un vdev raidz de <em>n</em> hijos con <em>p</em> de paridad es un único espacio de direcciones, intercalado
+          sector a sector entre los hijos. Un bloque de <em>s</em> sectores empieza en algún punto de él y ocupa
+          ⌈<em>s</em> / (<em>n</em> − <em>p</em>)⌉ filas: sus datos en columnas que contienen cada una un tramo contiguo
+          del bloque, y <em>p</em> columnas de paridad tan largas como la columna de datos más larga. Un bloque pequeño
+          solo usa las columnas que necesita: <a href={L.oneSector}>un sector de datos cuesta siempre <em>p</em> + 1
+          sectores</a>, sea cual sea el ancho. Cada asignación se <a href={L.nskip}>redondea hacia arriba a un múltiplo de
+          <em>p</em> + 1</a> sectores, el tamaño del bloque más pequeño. En una lectura, ZFS lee solo las columnas de
+          datos y las comprueba con la suma de comprobación del puntero de bloque padre. Si falla y ningún disco ha
+          señalado un error, ZFS lo lee todo y prueba, una combinación tras otra, de qué discos desconfiar, hasta que la
+          suma de comprobación se verifica; después reescribe la columna errónea.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En detalle</h3>
+        <div class="prose">
+          <p>
+            <strong>Cortar el bloque.</strong> Cuando la E/S llega al vdev raidz, su tamaño ya se ha
+            <a href={L.pad}>rellenado hasta un sector entero</a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={615}
+          to={649}
+          symbol="vdev_raidz_map_alloc"
+          notes={[
+            {
+              from: 617,
+              to: 623,
+              text: "Todo va en sectores de <code>1 &lt;&lt; ashift</code>. <code>b</code> es donde empieza el bloque en el vdev, <code>s</code> su tamaño. El sector <code>b</code> del vdev está en el hijo <code>b % dcols</code>, en el sector <code>b / dcols</code> de ese hijo.",
+            },
+            {
+              from: 628,
+              text: "Una fila: en un raidz que no se está ampliando, el bloque entero es una sola banda.",
+            },
+            {
+              from: 634,
+              to: 643,
+              text: "<code>q</code> filas completas de datos, <code>r</code> sectores sobrantes. Las <code>bc</code> «columnas grandes» reciben un sector más: las <code>r</code> columnas de datos que contienen el resto, y las columnas de paridad, que deben ser tan largas como la columna de datos más larga.",
+            },
+            {
+              from: 649,
+              text: "<code>tot</code>: datos más paridad, los sectores que realmente se escriben.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Colocar las columnas.</strong> La misma función da después a cada columna su hijo, su desplazamiento y su tamaño.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={677}
+          to={700}
+          symbol="vdev_raidz_map_alloc"
+          notes={[
+            {
+              from: 679,
+              to: 686,
+              text: "La columna <code>c</code> está en el hijo <code>f + c</code>. Pasado el último hijo, vuelve al hijo 0, un sector más abajo: el bloque es un tramo de sectores consecutivos del espacio de direcciones del vdev.",
+            },
+            {
+              from: 688,
+              to: 693,
+              text: "Una columna más allá de <code>acols</code> no contiene datos (un bloque más estrecho que el vdev); las <code>bc</code> primeras columnas tienen <code>q + 1</code> sectores, las demás <code>q</code>.",
+            },
+            {
+              from: 699,
+              to: 700,
+              text: `El redondeo: <code>roundup(tot, nparity + 1) - tot</code> sectores de relleno, a partir de la columna <code>bc</code>. <a href="${L.skipPlace}">Dónde caen</a>: uno detrás de cada columna corta, volviendo a las columnas de paridad si la banda se queda sin columnas. Se escriben como ceros, <a href="${L.skipIo}">en la misma E/S que su columna</a>, o <a href="${L.skipOpt}">como una E/S opcional propia</a> para una columna sin datos, de modo que la cola del disco pueda fusionar escrituras contiguas.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <strong>Lo que reserva el asignador.</strong> El mapa escribe <code>tot</code> sectores; el asignador ya ha
+            reservado el tamaño redondeado, calculado solo a partir del tamaño.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={2305}
+          to={2317}
+          symbol="vdev_raidz_psize_to_asize"
+          notes={[
+            { from: 2315, text: "Sectores de datos: <code>psize</code> redondeado hacia arriba a un sector." },
+            { from: 2316, text: "Más <code>nparity</code> sectores de paridad por cada fila empezada de <code>cols - nparity</code> sectores de datos." },
+            {
+              from: 2317,
+              text: "Redondeado hacia arriba a un múltiplo de <code>nparity + 1</code>. En un raidz2 de 12 discos con sectores de 4 KiB, un bloque de 4 KiB ocupa 12 KiB, uno de 8 KiB 24 KiB (dos sectores de relleno), uno de 40 KiB 48 KiB: la figura calcula cualquier otro.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            En raidz1, la columna de paridad y la primera columna de datos <a href={L.swap}>intercambian sus hijos en
+            uno de cada dos megabytes</a> del vdev, para que la paridad no esté siempre en el mismo disco; el comentario
+            dice que el beneficio es dudoso, pero que el formato en disco debe conservarlo para siempre. Pon el primer
+            sector <code>b</code> en 256 con sectores de 4 KiB para verlo.
+          </p>
+          <p>
+            <strong>Volver a leerlo.</strong> Una lectura normal <a href={L.readRow}>solo pide las columnas de
+            datos</a>; la paridad se lee cuando falta un disco, o durante un scrub o un resilver (la resincronización de un disco). El bloque se reensambla y
+            <a href={L.cksum}>se comprueba con la suma de comprobación de su puntero de bloque padre</a>. Un disco ausente
+            es un error que ZFS conoce: su columna de datos se reconstruye a partir de la primera columna de paridad aún
+            válida, P antes que Q antes que R (<a href={L.parityChoice}>la elección</a>). Pero un disco también puede
+            devolver bytes erróneos e informar de que todo ha ido bien. Entonces la suma de comprobación falla y ningún disco tiene la
+            culpa. ZFS <a href={L.readAll}>lee todas las columnas</a> y
+            <a href={L.combrecCall}>llama a <code>vdev_raidz_combrec</code></a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={3523}
+          to={3558}
+          symbol="vdev_raidz_combrec"
+          notes={[
+            { from: 3523, text: "Suponer que un disco miente, después dos, hasta <code>nparity</code>." },
+            {
+              from: 3532,
+              to: 3536,
+              text: `<code>n</code> hijos lógicos. Sin ampliación es el número de discos, y el hijo lógico <em>i</em> es <a href="${L.simulate}">el disco <em>i</em></a>.`,
+            },
+            {
+              from: 3542,
+              to: 3546,
+              text: `La primera combinación, los discos 0 a <code>num_failures - 1</code>; el bucle que sigue a este extracto recorre las demás en <a href="${L.order}">el orden que enumera el comentario de encima de la función</a>.`,
+            },
+            {
+              from: 3549,
+              to: 3558,
+              text: `<code>raidz_reconstruct</code> da esos discos por muertos, reconstruye sus columnas de datos a partir de la paridad y vuelve a consultar la suma de comprobación. <code>EINVAL</code>: con los errores ya conocidos, <a href="${L.einval}">más columnas muertas que paridad</a>; probar con más fallos. 0: la suma de comprobación se verifica.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            La suma de comprobación es el oráculo. La paridad sola puede reconstruir una columna que ZFS sabe que falta,
+            pero no puede decir cuál de las columnas que tiene miente; la suma de comprobación, guardada un nivel más
+            arriba en el árbol, sí puede. Cuando una combinación se verifica, <a href={L.ecksum}>sus columnas de datos se
+            marcan como errores de suma de comprobación</a>, la paridad leída pero no usada se
+            <a href={L.verify}>regenera y se compara</a>, y <a href={L.repair}>los datos buenos se vuelven a escribir</a>
+            en cada columna que resultó errónea. Un disco que devuelve paridad errónea no queda al descubierto en una
+            lectura normal, que no lee la paridad; <a href={L.scrubRead}>un scrub lee todas las columnas</a>. Con más
+            discos ausentes que paridad, el vdev <a href={L.state}>no se puede abrir</a>; con entre uno y
+            <code>nparity</code>, está degradado.
+          </p>
+          <p>
+            <strong>Resilver.</strong> Cuando vuelve un disco al que le faltan algunas escrituras, ZFS no copia el disco
+            entero. Un resilver recorre el árbol de punteros de bloque,
+            <a href={L.recurse}>bloque indirecto a bloque indirecto</a>, y <a href={L.visit}>visita cada bloque</a>. Se
+            salta los bloques <a href={L.window}>nacidos fuera del intervalo de txg</a> que a
+            <a href={L.dtlWindow}>algún disco le faltan</a>, y después <a href={L.needIo}>pregunta al vdev</a> si ese
+            bloque toca uno de esos discos.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_raidz.c"
+          from={4011}
+          to={4037}
+          symbol="vdev_raidz_need_resilver"
+          notes={[
+            { from: 4018, to: 4019, text: "El bloque no nació mientras a un disco le faltaban escrituras: no hay nada que hacer." },
+            { from: 4021, to: 4022, text: "Un bloque con al menos tantas columnas como discos los toca todos." },
+            {
+              from: 4024,
+              to: 4035,
+              text: "Si no, solo si a alguno de los <code>s + nparity</code> discos a partir de la primera columna le faltan escrituras. En la figura, marca un disco como ausente y lee: el resultado dice si un resilver reescribiría este bloque.",
+            },
+          ]}
+        />
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">Lo que la figura deja fuera</h2>
+      <p class="prose muted">
+        La figura ejecuta la aritmética de <code>vdev_raidz_map_alloc</code> y de <code>vdev_raidz_psize_to_asize</code>
+        tal como la escribe el código, así que cada disposición y cada número son los del código. La lectura sigue las
+        decisiones del código (qué columnas se leen, qué paridad reconstruye qué, el orden de las combinaciones, qué se
+        vuelve a escribir), pero solo registra si cada columna es correcta o errónea, no sus bytes: una reconstrucción es
+        correcta exactamente cuando todas las columnas que lee son correctas. Deja fuera los discos a los que les faltan
+        escrituras (leídos como obsoletos, no como ausentes), los discos lentos que se omiten a propósito, los bloques
+        gang, el camino del scrub y dRAID. Los bloques se limitan a 128 KiB y 16 discos para que el mapa siga siendo
+        legible. La ampliación de RAID-Z, que <a href={L.expansion}>añade un disco a un raidz existente</a> y da a los
+        bloques más antiguos mapas de varias filas, queda para otra ocasión.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="raidz" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

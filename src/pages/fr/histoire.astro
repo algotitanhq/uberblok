@@ -1,0 +1,60 @@
+---
+import Base from "../../layouts/Base.astro";
+import Timeline from "../../components/Timeline.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { room, roomNumber } from "../../lib/rooms";
+import { SOURCES_URL } from "../../lib/sources";
+
+const lang = "fr";
+const r = room("history");
+---
+
+<Base
+  lang={lang}
+  roomId="history"
+  title="Aile de l’histoire · Uberblok"
+  description="L’histoire de ZFS, de Sun Microsystems à OpenZFS, en une chronologie où chaque fait, chaque date et chaque nom renvoie à sa source."
+>
+  <article class="wrap" data-sourced-page="history">
+    <header class="room-head">
+      <p class="kicker">Aile {roomNumber(r.id)}</p>
+      <h1>{r.title.fr}</h1>
+      <div class="prose">
+        <p class="lead">
+          Le code cité dans les salles de ce musée a une histoire : une équipe, une entreprise, une licence, des
+          embranchements et des retrouvailles. Cette aile la raconte en jalons datés, et ne dit rien qu’une source ne
+          dise.
+        </p>
+        <p class="muted">
+          Chaque fait, date, nom et citation ci-dessous porte une note numérotée qui mène à sa source, et chaque source
+          est listée, avec l’affirmation qu’elle étaye, dans <a href={SOURCES_URL}><code>SOURCES.md</code></a>. Faute
+          de source, un fait a été retiré. Les citations restent dans leur langue d’origine ; les traductions sont les
+          nôtres.
+        </p>
+      </div>
+    </header>
+    <Timeline lang={lang}>
+      <p>
+        Billets d’origine, notes de version, commits et communiqués quand ils existent ; une copie archivée (Wayback
+        Machine) quand la page d’origine a disparu. Les titres des sources restent en anglais. L’affirmation que chaque
+        source étaye est dans <a href={SOURCES_URL}><code>SOURCES.md</code></a>.
+      </p>
+    </Timeline>
+  </article>
+  <RoomNav lang={lang} roomId="history" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+  }
+  .room-head .prose {
+    margin-top: var(--space-6);
+  }
+  .room-head + :global(.eras) {
+    margin-top: var(--space-6);
+  }
+</style>

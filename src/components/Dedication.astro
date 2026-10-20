@@ -1,0 +1,193 @@
+---
+// "Why this museum?": the Hall's dedication, by the exit of the visit
+// (DECISIONS.md D15.3). Every fact carries a numbered note to SOURCES.md, as in
+// the History wing; scripts/check-sources.mjs checks the built page.
+import { CITE, source } from "../lib/sources";
+import { gh } from "../lib/openzfs";
+import DriveExhibit from "./DriveExhibit.astro";
+import type { Lang } from "../lib/rooms";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const AUTHORS = gh("AUTHORS", 1, 729);
+const t = {
+  en: {
+    kicker: "Dedication",
+    title: "Why this museum?",
+    source: "Source",
+    sources: "Sources",
+    paras: [
+      "Keeping data safe is critical work, and seldom seen. A file system is handed everything people keep, and it has to stay right through crashes, failing disks and writes cut short. One of the principles ZFS was designed on, in Bill Moore’s words: <q>never, ever trust the underlying hardware.</q>[[S04]]",
+      "This museum pays homage to that piece of engineering, and to the people who built it. Jeff Bonwick led the development of ZFS, with Bill Moore as co-lead;[[S02]] Matt Ahrens was one of its two original authors.[[S03]] The work began in 2001 with two engineers at Sun Microsystems[[S01]] and was integrated into Solaris on 31 October 2005,[[S07]] a step Bonwick summed up as <q>584 files, 92,000 lines of change, 56 patents, 5 years</q>.[[S08]] On 17 November he wrote: <q>I’m incredibly proud of the ZFS team, and deeply grateful: no one person can do something on this scale.</q>[[S41]]",
+      "It pays homage, too, to the engineering at Sun in those years, where engineers published how their systems worked: the slab allocator, presented by Jeff Bonwick at USENIX in 1994;[[S42]] DTrace, by Bryan Cantrill, Michael Shapiro and Adam Leventhal, in 2004;[[S43]] and the source of ZFS itself, released under the CDDL as part of OpenSolaris.[[S12]]",
+      "And to those who carry it on: OpenZFS, announced in 2013[[S28]] and founded by members of the Linux, FreeBSD, Mac OS X and illumos communities.[[S29]] The release this museum reads lists more than 700 people in its <a href=\"{authors}\">AUTHORS</a> file.",
+    ],
+  },
+  fr: {
+    kicker: "Dédicace",
+    title: "Pourquoi ce musée ?",
+    source: "Source",
+    sources: "Sources",
+    paras: [
+      "Garder les données intactes est un travail critique, et qui se voit rarement. Un système de fichiers reçoit tout ce que l’on conserve, et il doit rester exact malgré les pannes, les disques défaillants et les écritures interrompues. L’un des principes de conception de ZFS, selon les mots de Bill Moore : <q lang=\"en\">never, ever trust the underlying hardware.</q> <span class=\"translation\">(ne jamais, au grand jamais, faire confiance au matériel sous-jacent ; notre traduction)</span>[[S04]]",
+      "Ce musée rend hommage à cette pièce d’ingénierie, et à ceux qui l’ont bâtie. Jeff Bonwick a dirigé le développement de ZFS, avec Bill Moore pour codirecteur ;[[S02]] Matt Ahrens en fut l’un des deux auteurs originels.[[S03]] Les travaux ont commencé en 2001 avec deux ingénieurs de Sun Microsystems[[S01]] et ZFS a été intégré à Solaris le 31 octobre 2005,[[S07]] étape que Bonwick résume ainsi : <q lang=\"en\">584 files, 92,000 lines of change, 56 patents, 5 years</q> <span class=\"translation\">(584 fichiers, 92 000 lignes modifiées, 56 brevets, 5 ans ; notre traduction)</span>.[[S08]] Le 17 novembre, il écrivait : <q lang=\"en\">I’m incredibly proud of the ZFS team, and deeply grateful: no one person can do something on this scale.</q> <span class=\"translation\">(je suis immensément fier de l’équipe ZFS, et profondément reconnaissant : personne ne peut, seul, faire quelque chose à cette échelle ; notre traduction)</span>[[S41]]",
+      "Il rend hommage, aussi, à l’ingénierie de Sun en ces années-là, où les ingénieurs publiaient le fonctionnement de leurs systèmes : l’allocateur slab, présenté par Jeff Bonwick à USENIX en 1994 ;[[S42]] DTrace, de Bryan Cantrill, Michael Shapiro et Adam Leventhal, en 2004 ;[[S43]] et le code source de ZFS lui-même, publié sous licence CDDL dans le cadre d’OpenSolaris.[[S12]]",
+      "Et à ceux qui le font vivre : OpenZFS, annoncé en 2013[[S28]] et fondé par des membres des communautés Linux, FreeBSD, Mac OS X et illumos.[[S29]] La version que ce musée lit compte plus de 700 personnes dans son fichier <a href=\"{authors}\">AUTHORS</a>.",
+    ],
+  },
+  es: {
+    kicker: "Dedicatoria",
+    title: "¿Por qué este museo?",
+    source: "Fuente",
+    sources: "Fuentes",
+    paras: [
+      "Mantener los datos a salvo es un trabajo crítico, y que rara vez se ve. A un sistema de archivos se le confía todo lo que la gente guarda, y tiene que seguir siendo correcto a pesar de las caídas, los discos que fallan y las escrituras interrumpidas. Uno de los principios sobre los que se diseñó ZFS, en palabras de Bill Moore: <q lang=\"en\">never, ever trust the underlying hardware.</q> <span class=\"translation\">(no confiar jamás, bajo ningún concepto, en el hardware subyacente; traducción nuestra)</span>[[S04]]",
+      "Este museo rinde homenaje a esa obra de ingeniería, y a las personas que la construyeron. Jeff Bonwick dirigió el desarrollo de ZFS, con Bill Moore como codirector;[[S02]] Matt Ahrens fue uno de sus dos autores originales.[[S03]] El trabajo comenzó en 2001 con dos ingenieros de Sun Microsystems[[S01]] y ZFS se integró en Solaris el 31 de octubre de 2005,[[S07]] un paso que Bonwick resumió así: <q lang=\"en\">584 files, 92,000 lines of change, 56 patents, 5 years</q> <span class=\"translation\">(584 archivos, 92\u202f000 líneas modificadas, 56 patentes, 5 años; traducción nuestra)</span>.[[S08]] El 17 de noviembre escribió: <q lang=\"en\">I’m incredibly proud of the ZFS team, and deeply grateful: no one person can do something on this scale.</q> <span class=\"translation\">(estoy increíblemente orgulloso del equipo de ZFS, y profundamente agradecido: nadie puede hacer por sí solo algo de esta envergadura; traducción nuestra)</span>[[S41]]",
+      "Rinde homenaje, también, a la ingeniería de Sun en aquellos años, en los que los ingenieros publicaban cómo funcionaban sus sistemas: el asignador slab, presentado por Jeff Bonwick en USENIX en 1994;[[S42]] DTrace, de Bryan Cantrill, Michael Shapiro y Adam Leventhal, en 2004;[[S43]] y el propio código fuente de ZFS, publicado bajo la CDDL como parte de OpenSolaris.[[S12]]",
+      "Y a quienes lo mantienen vivo: OpenZFS, anunciado en 2013[[S28]] y fundado por miembros de las comunidades de Linux, FreeBSD, Mac OS X e illumos.[[S29]] La versión que lee este museo recoge a más de 700 personas en su archivo <a href=\"{authors}\">AUTHORS</a>.",
+    ],
+  },
+}[lang];
+
+// Note numbers follow the first citation in reading order, one per reference:
+// ids whose SOURCES.md rows cite the same document share a number and a note
+// (`data-entry` lists them all, for scripts/check-sources.mjs).
+const notes = new Map<string, { n: number; ids: string[] }>(); // by reference html
+const number = new Map<string, number>(); // by source id
+for (const p of t.paras)
+  for (const [, id] of p.matchAll(CITE)) {
+    if (number.has(id)) continue;
+    const html = source(id).html;
+    const note = notes.get(html) ?? { n: notes.size + 1, ids: [] };
+    notes.set(html, note);
+    note.ids.push(id);
+    number.set(id, note.n);
+  }
+const cite = (html: string) =>
+  html.replace(CITE, (_, id: string) => {
+    const n = number.get(id)!;
+    return `<a class="fn" href="#note-${n}" data-source="${id}" aria-label="${t.source} ${n}">${n}</a>`;
+  });
+---
+
+<section class="dedication" id="why" aria-labelledby="why-title">
+  <p class="kicker">{t.kicker}</p>
+  <h2 id="why-title">{t.title}</h2>
+  <div class="body">
+    <div class="text">
+      {t.paras.map((p) => <p set:html={cite(p.replace("{authors}", AUTHORS))} />)}
+    </div>
+    <!-- Fig. 2, the hardware the first paragraph says never to trust (D16.4). -->
+    <div class="art">
+      <DriveExhibit lang={lang} />
+    </div>
+  </div>
+  <h3 class="visually-hidden">{t.sources}</h3>
+  <ol class="notes">
+    {
+      [...notes].map(([html, { n, ids }]) => (
+        <li id={`note-${n}`} data-entry={ids.join(" ")}>
+          <span class="n">{n}</span>
+          <span class="ref" set:html={html} />
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<style>
+  /* A plaque by the exit: a hairline, the display serif at a reading size, no box. */
+  .dedication {
+    margin-top: var(--space-9);
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--line);
+    scroll-margin-top: 4rem;
+  }
+  h2 {
+    margin-top: var(--space-2);
+  }
+  .text {
+    margin-top: var(--space-5);
+    max-width: 34rem;
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    line-height: 1.6;
+    font-variant-numeric: oldstyle-nums;
+    text-wrap: pretty;
+  }
+  /* Fig. 2 beside the text on a wide screen, after it on a narrow one. */
+  .body {
+    display: grid;
+    gap: var(--space-6);
+  }
+  .art {
+    max-width: 34rem;
+  }
+  @media (min-width: 60rem) {
+    .body {
+      grid-template-columns: minmax(0, 34rem) minmax(0, 1fr);
+      column-gap: var(--space-7);
+      align-items: start;
+    }
+    .art {
+      max-width: none;
+      margin-top: var(--space-5);
+      position: sticky;
+      top: var(--space-6);
+    }
+  }
+  .text p + p {
+    margin-top: var(--space-4);
+  }
+  .text :global(.translation) {
+    font-family: var(--font-body);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .text :global(.fn) {
+    font-family: var(--font-body);
+    font-size: 0.62em;
+    font-weight: 600;
+    font-variant-numeric: lining-nums tabular-nums;
+    color: var(--accent);
+    text-decoration: none;
+    vertical-align: 0.6em;
+    line-height: 1;
+    padding: 0.3em 0.2em;
+    margin-left: 0.05em;
+  }
+  .text :global(.fn:hover) {
+    text-decoration: underline;
+  }
+  .notes {
+    list-style: none;
+    margin: var(--space-6) 0 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+    font-size: 0.875rem;
+    color: var(--fg-muted);
+    max-width: 52rem;
+  }
+  .notes li {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: var(--space-2);
+    scroll-margin-top: var(--space-6);
+  }
+  .notes li:target {
+    background: var(--accent-soft);
+    border-radius: var(--radius);
+  }
+  .notes .n {
+    text-align: right;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .ref {
+    overflow-wrap: anywhere;
+  }
+</style>

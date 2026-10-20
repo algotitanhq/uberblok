@@ -1,0 +1,102 @@
+/*
+ * Design tokens (DECISIONS.md D1.3). Dark is "Nocturne" and light is "Paper",
+ * the two editorial themes of Almanak, carried over to the web: warm black and
+ * paper ink, one amber accent, Fraunces for display, Instrument Serif italic for
+ * captions, Inter for text. Every text colour is at least 4.5:1 on its ground.
+ */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e0d0b;
+  --surface: #171512;
+  --surface-2: #1f1c18;
+  --line: #2e2a24;
+  --line-strong: #4a443b;
+  --fg: #f2ede4;
+  --fg-muted: #b5afa5;
+  --fg-faint: #857f76;
+  --accent: #e89e5c;
+  --accent-soft: rgb(232 158 92 / 0.14);
+  --ok: #8cc79b;
+  --ok-soft: rgb(140 199 155 / 0.14);
+  --bad: #f2837a;
+  --bad-soft: rgb(242 131 122 / 0.16);
+  --old: #6b665e;
+  --focus: #f2ede4;
+  /* code */
+  --code-comment: #958d80;
+  --code-keyword: #e89e5c;
+  --code-type: #c9b8e8;
+  --code-string: #b9d08a;
+  --code-number: #e6c07b;
+  --code-function: #8fc1e3;
+  --code-mark: rgb(232 158 92 / 0.12);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #efe8da;
+  --surface: #f7f2e8;
+  --surface-2: #e6decd;
+  --line: #d3c9b5;
+  --line-strong: #a99e88;
+  --fg: #1f1b16;
+  --fg-muted: #564e44;
+  --fg-faint: #6e6559;
+  --accent: #a2461e;
+  --accent-soft: rgb(162 70 30 / 0.1);
+  --ok: #2b6a3b;
+  --ok-soft: rgb(43 106 59 / 0.12);
+  --bad: #b0271f;
+  --bad-soft: rgb(176 39 31 / 0.1);
+  --old: #a59b8b;
+  --focus: #1f1b16;
+  --code-comment: #6b6256;
+  --code-keyword: #a2461e;
+  --code-type: #6a3fa0;
+  --code-string: #4e6b12;
+  --code-number: #8a5a00;
+  --code-function: #1d5e8c;
+  --code-mark: rgb(162 70 30 / 0.1);
+}
+
+:root {
+  /* type */
+  --font-display: "Fraunces Variable", "Iowan Old Style", Georgia, serif;
+  --font-caption: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --font-body: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --step--1: clamp(0.83rem, 0.8rem + 0.1vw, 0.88rem);
+  --step-0: clamp(1rem, 0.96rem + 0.2vw, 1.0625rem);
+  --step-1: clamp(1.2rem, 1.1rem + 0.45vw, 1.4rem);
+  --step-2: clamp(1.45rem, 1.25rem + 0.9vw, 1.95rem);
+  --step-3: clamp(1.9rem, 1.5rem + 1.9vw, 2.9rem);
+  --step-4: clamp(2.4rem, 1.7rem + 3.3vw, 4.4rem);
+  --leading: 1.6;
+  --measure: 66ch;
+  /* space */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+  --space-9: 7rem;
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+  --radius: 6px;
+  /* motion: slow ease-out, as on the TV apps */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-1: 160ms;
+  --dur-2: 320ms;
+  --dur-3: 560ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+  }
+}

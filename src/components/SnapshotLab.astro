@@ -1,0 +1,834 @@
+---
+// The figure of the Snapshots and clones room: fs, its snapshots and one clone,
+// each drawn as its ds_bp, a root block and four data blocks labelled with
+// their birth txg, with their deadlists. The visitor queues changes and sync
+// tasks in the open txg and syncs it; src/lib/snapshots.ts (a transcription of
+// dsl_dataset_block_kill, dsl_deadlist_insert, the snapshot, clone and destroy
+// sync functions) decides every outcome, and src/lib/snapshots-view.ts draws
+// it, at build time for the opening state (readable without JavaScript) and in
+// the browser after. Refs: ANALYSIS.md, room "Snapshots and clones";
+// simplifications: DECISIONS.md D5.2.
+import type { Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+import { gh } from "../lib/openzfs";
+import { fr } from "../lib/fr";
+import { opening } from "../lib/snapshots";
+import { board, describe, summary, waiting, ownerPanel, type SnStrings } from "../lib/snapshots-view";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const DS = "module/zfs/dsl_dataset.c";
+const refs = {
+  birth: gh("module/zfs/metaslab.c", 6061),
+  kill: gh(DS, 294),
+  free: gh(DS, 312, 315),
+  insert: gh("module/zfs/dsl_deadlist.c", 487, 501),
+  snapshot: gh(DS, 1830, 1839),
+  clone: gh(DS, 1213, 1227),
+  destroy: gh("module/zfs/dsl_destroy.c", 415, 424),
+  eexist: gh("module/zfs/dsl_destroy.c", 83, 86),
+  eagain: gh(DS, 1534, 1539),
+  order: gh("module/zfs/dsl_pool.c", 747, 753),
+};
+const S0 = {
+  en: {
+    figure: "fs, its snapshots and a clone: each one a ds_bp over a root block and four data blocks, with its deadlist",
+    openTxg: "Open txg",
+    sync: "Sync txg {txg}",
+    snapshot: "Snapshot fs",
+    reset: "Start again",
+    snapEagain: "One snapshot of fs per txg (EAGAIN): sync first.",
+    snapLimit: "The figure keeps four snapshots at most: destroy one first.",
+    waiting: "Waiting in txg {txg}: {list}.",
+    nothing: "Nothing waiting in txg {txg}. Write a block, select one to change it, or take a snapshot; then sync.",
+    wWrite: "write {slot} in {ds}",
+    wDelete: "delete {slot} in {ds}",
+    wSnapshot: "snapshot fs",
+    wClone: "clone {snap}",
+    wDestroy: "destroy {snap}",
+    tagWrite: "new data in txg {txg}",
+    tagDelete: "deleted in txg {txg}",
+    tagClone: "clone at the end of txg {txg}",
+    tagDestroy: "destroy at the end of txg {txg}",
+    writeSlot: "Write {slot}",
+    emptySlot: "{slot}: empty",
+    none: "empty",
+    semi: "; ",
+    keyTitle: "blocks born after txg {key}, up to the next key",
+    kHead: "head, writable",
+    kSnapshot: "snapshot of txg {txg}",
+    kClone: "clone of {origin}, created in txg {txg}",
+    clone: "Clone",
+    destroy: "Destroy",
+    cancel: "Cancel",
+    overwrite: "Overwrite in {ds}",
+    delete: "Delete in {ds}",
+    freedIn: "Freed in txg {txg}:",
+    see: "code",
+    and: "and",
+    aBlock: "{slot}{birth}, born in txg {birth}",
+    aRoot: "R{birth}, the root, born in txg {birth}",
+    aOfClone: "(written by the clone)",
+    eBorn: "{ds} writes {b}, born in txg {txg}.",
+    eRoot: "{ds} writes a new root, {b}, born in txg {txg}: its ds_bp points there now.",
+    eFree: "{ds} kills {b}: born {birth} &gt; ds_prev_snap_txg {prev}, no snapshot can hold it. Freed.",
+    eDead: "{ds} kills {b}: born {birth} &gt; {prev} is false, a snapshot holds it. Onto the deadlist of {ds}, entry &gt; {key}.",
+    eSnap: "{snap} is created in txg {txg}. Its ds_bp is {root}, the head’s, and nothing else is copied. It takes fs’s deadlist as it was; fs gets empty entries with the keys {keys}, and its ds_prev_snap_txg goes from {old} to {txg}.",
+    eClone: "The clone is created from {origin}. Its ds_bp is {root}, its ds_prev_snap_txg is {txg}, and its deadlist starts with the keys {keys}, empty.",
+    eDestroy: "{snap} is destroyed. The entries of {next}’s deadlist from key {prev} up hold blocks born after txg {prev} and killed after {snap} was taken: only {snap} held them. Freed: {freed}. {merged}{from}",
+    eMerged: "Its own deadlist moves into the next one: {list}. ",
+    eRemoved: "Key {key} is removed from {list}; its entry joins the one below.",
+    nothingFreed: "nothing",
+    eEagain: "Refused: a second snapshot of fs in the same txg (EAGAIN).",
+    eexist: "Origin of the clone: cannot be destroyed (EEXIST).",
+    eEnoent: "Refused: no such snapshot (ENOENT).",
+    eSynced: "Txg {txg} is synced.",
+    pick: "Select a block to see its birth txg and who holds it.",
+    oBlock: "Block {name}, born in txg {birth}",
+    oRoot: "Root block {name}, born in txg {birth}",
+    oFreed: "Freed in txg {txg}: no dataset references it any more.",
+    oRefs: "Referenced by {list}.",
+    oOnDl: "On the deadlist of {ds}, entry &gt; {key} (killed by {killer} in txg {txg}).",
+    oRangeOpen: "taken in or after txg {birth}, its birth",
+    oRangeKilled: "taken from txg {birth}, its birth, to txg {last} (fs killed it in txg {k}, before that txg’s sync tasks)",
+    oRangeOne: "taken in txg {birth}, its birth (fs killed it in txg {k}, before that txg’s sync tasks)",
+    oSnaps: "Held by the snapshots {range}: {list}.",
+    oNoSnap: "No snapshot holds it: none was {range}.",
+    oCloneOwn: "Written by the clone after its origin: only the clone holds it, and no snapshot.",
+    oWouldFree: "If {ds} killed it now: {birth} &gt; {prev}, freed.",
+    oWouldDead: "If {ds} killed it now: {birth} &gt; {prev} is false, onto the deadlist of {ds}, entry &gt; {key}.",
+    tIntro: "The open txg is {txg}. The datasets, in order:",
+    tDataset: "{name}, {kind}: ds_prev_snap_txg {prev}; ds_bp points to the {root}; data blocks: {blocks}. Deadlist: {dl}.",
+    tEntry: "entry &gt; {key}: {list}",
+    tFreed: "Freed so far: {list}.",
+    tFreedOne: "{b} (in txg {txg})",
+    summary: "Open txg {txg}. Snapshots: {snaps}{clone}. {live}",
+    live0: "No block on disk.",
+    live1: "1 block on disk.",
+    liveN: "{n} blocks on disk.",
+    summaryClone: "; a clone of {origin}",
+    noSnapshots: "none",
+    logLabel: "What the sync did",
+    ownerLabel: "Which snapshot owns this block?",
+    legendBirth: "block A, born in txg 8",
+    legendRoot: "root block (the objset ds_bp points to)",
+    legendClone: "written by the clone",
+    legendFreed: "freed",
+  },
+  fr: {
+    figure: "fs, ses instantanés et un clone : chacun un ds_bp au-dessus d’un bloc racine et de quatre blocs de données, avec sa deadlist",
+    openTxg: "Txg ouvert",
+    sync: "Synchroniser le txg {txg}",
+    snapshot: "Instantané de fs",
+    reset: "Recommencer",
+    snapEagain: "Un instantané de fs par txg (EAGAIN) : synchronisez d’abord.",
+    snapLimit: "La figure garde quatre instantanés au plus : détruisez-en un d’abord.",
+    waiting: "En attente dans le txg {txg} : {list}.",
+    nothing: "Rien en attente dans le txg {txg}. Écrivez un bloc, sélectionnez-en un pour le modifier, ou prenez un instantané ; puis synchronisez.",
+    wWrite: "écrire {slot} dans {ds}",
+    wDelete: "supprimer {slot} dans {ds}",
+    wSnapshot: "instantané de fs",
+    wClone: "cloner {snap}",
+    wDestroy: "détruire {snap}",
+    tagWrite: "nouvelles données au txg {txg}",
+    tagDelete: "supprimé au txg {txg}",
+    tagClone: "clone à la fin du txg {txg}",
+    tagDestroy: "destruction à la fin du txg {txg}",
+    writeSlot: "Écrire {slot}",
+    emptySlot: "{slot} : vide",
+    none: "vide",
+    semi: " ; ",
+    keyTitle: "blocs nés après le txg {key}, jusqu’à la clé suivante",
+    kHead: "tête, modifiable",
+    kSnapshot: "instantané du txg {txg}",
+    kClone: "clone de {origin}, créé au txg {txg}",
+    clone: "Cloner",
+    destroy: "Détruire",
+    cancel: "Annuler",
+    overwrite: "Réécrire dans {ds}",
+    delete: "Supprimer dans {ds}",
+    freedIn: "Libérés au txg {txg} :",
+    see: "code",
+    and: "et",
+    aBlock: "{slot}{birth}, né au txg {birth}",
+    aRoot: "R{birth}, la racine, née au txg {birth}",
+    aOfClone: "(écrit par le clone)",
+    eBorn: "{ds} écrit {b}, né au txg {txg}.",
+    eRoot: "{ds} écrit une nouvelle racine, {b}, née au txg {txg} : son ds_bp pointe désormais sur elle.",
+    eFree: "{ds} tue {b} : né au txg {birth} &gt; ds_prev_snap_txg {prev}, aucun instantané ne peut le détenir. Libéré.",
+    eDead: "{ds} tue {b} : {birth} &gt; {prev} est faux, un instantané le détient. Dans la deadlist de {ds}, entrée &gt; {key}.",
+    eSnap: "{snap} est créé au txg {txg}. Son ds_bp est {root}, celui de la tête, et rien d’autre n’est copié. Il prend la deadlist de fs telle quelle ; fs reçoit des entrées vides aux clés {keys}, et son ds_prev_snap_txg passe de {old} à {txg}.",
+    eClone: "Le clone est créé à partir de {origin}. Son ds_bp est {root}, son ds_prev_snap_txg vaut {txg}, et sa deadlist commence avec les clés {keys}, vides.",
+    eDestroy: "{snap} est détruit. Les entrées de la deadlist de {next} à partir de la clé {prev} contiennent des blocs nés après le txg {prev} et tués après la prise de {snap} : seul {snap} les détenait. Libérés : {freed}. {merged}{from}",
+    eMerged: "Sa propre deadlist passe dans la suivante : {list}. ",
+    eRemoved: "La clé {key} est retirée de {list} ; son entrée rejoint celle du dessous.",
+    nothingFreed: "rien",
+    eEagain: "Refusé : un second instantané de fs dans le même txg (EAGAIN).",
+    eexist: "Origine du clone : ne peut pas être détruit (EEXIST).",
+    eEnoent: "Refusé : cet instantané n’existe pas (ENOENT).",
+    eSynced: "Le txg {txg} est synchronisé.",
+    pick: "Sélectionnez un bloc pour voir son txg de naissance et qui le détient.",
+    oBlock: "Bloc {name}, né au txg {birth}",
+    oRoot: "Bloc racine {name}, né au txg {birth}",
+    oFreed: "Libéré au txg {txg} : plus aucun dataset ne le référence.",
+    oRefs: "Référencé par {list}.",
+    oOnDl: "Dans la deadlist de {ds}, entrée &gt; {key} (tué par {killer} au txg {txg}).",
+    oRangeOpen: "pris au txg {birth}, celui de sa naissance, ou après",
+    oRangeKilled: "pris du txg {birth}, celui de sa naissance, au txg {last} (fs l’a tué au txg {k}, avant les tâches de synchronisation de ce txg)",
+    oRangeOne: "pris au txg {birth}, celui de sa naissance (fs l’a tué au txg {k}, avant les tâches de synchronisation de ce txg)",
+    oSnaps: "Détenu par les instantanés {range} : {list}.",
+    oNoSnap: "Aucun instantané ne le détient : aucun n’a été {range}.",
+    oCloneOwn: "Écrit par le clone après son origine : seul le clone le détient, et aucun instantané.",
+    oWouldFree: "Si {ds} le tuait maintenant : {birth} &gt; {prev}, libéré.",
+    oWouldDead: "Si {ds} le tuait maintenant : {birth} &gt; {prev} est faux, dans la deadlist de {ds}, entrée &gt; {key}.",
+    tIntro: "Le txg ouvert est le {txg}. Les datasets, dans l’ordre :",
+    tDataset: "{name}, {kind} : ds_prev_snap_txg {prev} ; ds_bp pointe sur la {root} ; blocs de données : {blocks}. Deadlist : {dl}.",
+    tEntry: "entrée &gt; {key} : {list}",
+    tFreed: "Libérés jusqu’ici : {list}.",
+    tFreedOne: "{b} (au txg {txg})",
+    summary: "Txg ouvert {txg}. Instantanés : {snaps}{clone}. {live}",
+    live0: "Aucun bloc sur le disque.",
+    live1: "1 bloc sur le disque.",
+    liveN: "{n} blocs sur le disque.",
+    summaryClone: " ; un clone de {origin}",
+    noSnapshots: "aucun",
+    logLabel: "Ce que la synchronisation a fait",
+    ownerLabel: "À quel instantané appartient ce bloc ?",
+    legendBirth: "bloc A, né au txg 8",
+    legendRoot: "bloc racine (l’objset sur lequel pointe ds_bp)",
+    legendClone: "écrit par le clone",
+    legendFreed: "libéré",
+  },
+  es: {
+    figure: "fs, sus instantáneas y un clon: cada uno un ds_bp sobre un bloque raíz y cuatro bloques de datos, con su deadlist",
+    openTxg: "Txg abierto",
+    sync: "Sincronizar el txg {txg}",
+    snapshot: "Tomar una instantánea de fs",
+    reset: "Reiniciar",
+    snapEagain: "Una instantánea de fs por txg (EAGAIN): sincroniza primero.",
+    snapLimit: "La figura guarda como máximo cuatro instantáneas: destruye una primero.",
+    waiting: "En espera en el txg {txg}: {list}.",
+    nothing: "Nada en espera en el txg {txg}. Escribe un bloque, selecciona uno para cambiarlo o toma una instantánea; después sincroniza.",
+    wWrite: "escribir {slot} en {ds}",
+    wDelete: "borrar {slot} en {ds}",
+    wSnapshot: "tomar una instantánea de fs",
+    wClone: "clonar {snap}",
+    wDestroy: "destruir {snap}",
+    tagWrite: "datos nuevos en el txg {txg}",
+    tagDelete: "borrado en el txg {txg}",
+    tagClone: "clon al final del txg {txg}",
+    tagDestroy: "destrucción al final del txg {txg}",
+    writeSlot: "Escribir {slot}",
+    emptySlot: "{slot}: vacío",
+    none: "vacía",
+    semi: "; ",
+    keyTitle: "bloques nacidos después del txg {key}, hasta la clave siguiente",
+    kHead: "cabeza, modificable",
+    kSnapshot: "instantánea del txg {txg}",
+    kClone: "clon de {origin}, creado en el txg {txg}",
+    clone: "Clonar",
+    destroy: "Destruir",
+    cancel: "Cancelar",
+    overwrite: "Sobrescribir en {ds}",
+    delete: "Borrar en {ds}",
+    freedIn: "Liberados en el txg {txg}:",
+    see: "código",
+    and: "y",
+    aBlock: "{slot}{birth}, nacido en el txg {birth}",
+    aRoot: "R{birth}, la raíz, nacida en el txg {birth}",
+    aOfClone: "(escrito por el clon)",
+    eBorn: "{ds} escribe {b}, nacido en el txg {txg}.",
+    eRoot: "{ds} escribe una raíz nueva, {b}, nacida en el txg {txg}: ahora su ds_bp apunta a ella.",
+    eFree: "{ds} mata {b}: nacido en el txg {birth} &gt; ds_prev_snap_txg {prev}, ninguna instantánea puede retenerlo. Liberado.",
+    eDead: "{ds} mata {b}: {birth} &gt; {prev} es falso, una instantánea lo retiene. A la deadlist de {ds}, entrada &gt; {key}.",
+    eSnap: "{snap} se crea en el txg {txg}. Su ds_bp es {root}, el de la cabeza, y no se copia nada más. Toma la deadlist de fs tal como estaba; fs recibe entradas vacías con las claves {keys}, y su ds_prev_snap_txg pasa de {old} a {txg}.",
+    eClone: "El clon se crea a partir de {origin}. Su ds_bp es {root}, su ds_prev_snap_txg es {txg}, y su deadlist empieza con las claves {keys}, vacías.",
+    eDestroy: "{snap} se destruye. Las entradas de la deadlist de {next} a partir de la clave {prev} contienen bloques nacidos después del txg {prev} y matados después de tomarse {snap}: solo {snap} los retenía. Liberados: {freed}. {merged}{from}",
+    eMerged: "Su propia deadlist pasa a la siguiente: {list}. ",
+    eRemoved: "La clave {key} se elimina de {list}; su entrada se une a la de debajo.",
+    nothingFreed: "nada",
+    eEagain: "Rechazado: una segunda instantánea de fs en el mismo txg (EAGAIN).",
+    eexist: "Origen del clon: no se puede destruir (EEXIST).",
+    eEnoent: "Rechazado: esa instantánea no existe (ENOENT).",
+    eSynced: "El txg {txg} está sincronizado.",
+    pick: "Selecciona un bloque para ver su txg de nacimiento y quién lo retiene.",
+    oBlock: "Bloque {name}, nacido en el txg {birth}",
+    oRoot: "Bloque raíz {name}, nacido en el txg {birth}",
+    oFreed: "Liberado en el txg {txg}: ya ningún dataset lo referencia.",
+    oRefs: "Referenciado por {list}.",
+    oOnDl: "En la deadlist de {ds}, entrada &gt; {key} (matado por {killer} en el txg {txg}).",
+    oRangeOpen: "tomadas en el txg {birth}, el de su nacimiento, o después",
+    oRangeKilled: "tomadas desde el txg {birth}, el de su nacimiento, hasta el txg {last} (fs lo mató en el txg {k}, antes de las tareas de sincronización de ese txg)",
+    oRangeOne: "tomadas en el txg {birth}, el de su nacimiento (fs lo mató en el txg {k}, antes de las tareas de sincronización de ese txg)",
+    oSnaps: "Lo retienen las instantáneas {range}: {list}.",
+    oNoSnap: "Ninguna instantánea lo retiene: no hay instantáneas {range}.",
+    oCloneOwn: "Escrito por el clon después de su origen: solo lo retiene el clon, y ninguna instantánea.",
+    oWouldFree: "Si {ds} lo matara ahora: {birth} &gt; {prev}, liberado.",
+    oWouldDead: "Si {ds} lo matara ahora: {birth} &gt; {prev} es falso, a la deadlist de {ds}, entrada &gt; {key}.",
+    tIntro: "El txg abierto es el {txg}. Los datasets, por orden:",
+    tDataset: "{name}, {kind}: ds_prev_snap_txg {prev}; ds_bp apunta a {root}; bloques de datos: {blocks}. Deadlist: {dl}.",
+    tEntry: "entrada &gt; {key}: {list}",
+    tFreed: "Liberados hasta ahora: {list}.",
+    tFreedOne: "{b} (en el txg {txg})",
+    summary: "Txg abierto: {txg}. Instantáneas: {snaps}{clone}. {live}",
+    live0: "Ningún bloque en el disco.",
+    live1: "1 bloque en el disco.",
+    liveN: "{n} bloques en el disco.",
+    summaryClone: "; un clon de {origin}",
+    noSnapshots: "ninguna",
+    logLabel: "Lo que ha hecho la sincronización",
+    ownerLabel: "¿Qué instantánea es dueña de este bloque?",
+    legendBirth: "bloque A, nacido en el txg 8",
+    legendRoot: "bloque raíz (el objset al que apunta ds_bp)",
+    legendClone: "escrito por el clon",
+    legendFreed: "liberado",
+  },
+}[lang];
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs } as unknown as SnStrings;
+const t = UI[lang];
+const s0 = opening();
+const sum = summary(s0, S);
+---
+
+<figure class="sn" data-snaps data-strings={JSON.stringify(S)} data-lang={lang} aria-label={S.figure}>
+  <div class="sn-bar" hidden>
+    <p class="txg"><span class="muted">{S.openTxg}</span> <strong data-txg>{s0.txg}</strong></p>
+    <div class="buttons">
+      <button class="btn btn--primary" type="button" data-act="sync">{S.sync.replace("{txg}", String(s0.txg))}</button>
+      <button class="btn" type="button" data-act="snapshot">{S.snapshot}</button>
+      <button class="btn" type="button" data-act="reset">{S.reset}</button>
+    </div>
+    <p class="sn-waiting muted" data-waiting set:html={waiting(s0, S)} />
+  </div>
+  <p class="visually-hidden" data-summary>{sum}</p>
+  <p class="visually-hidden" data-say aria-live="polite"></p>
+  <div class="sn-board" data-board set:html={board(s0, S, false)} />
+  <ul class="sn-legend" aria-hidden="true">
+    <li><span class="chip">A<sub>8</sub></span>{S.legendBirth}</li>
+    <li><span class="chip root">R<sub>8</sub></span>{S.legendRoot}</li>
+    <li><span class="chip c">A<sub>12</sub></span>{S.legendClone}</li>
+    <li><span class="chip gone">A<sub>8</sub></span>{S.legendFreed}</li>
+  </ul>
+  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <div class="sn-panels" hidden>
+    <section class="sn-owner" aria-labelledby={`sn-owner-${lang}`}>
+      <h3 id={`sn-owner-${lang}`}>{S.ownerLabel}</h3>
+      <div data-owner set:html={ownerPanel(s0, S, null, true)} />
+    </section>
+    <section class="sn-log" aria-labelledby={`sn-log-${lang}`}>
+      <h3 id={`sn-log-${lang}`}>{S.logLabel}</h3>
+      <ol data-log></ol>
+    </section>
+  </div>
+  <details class="text-version">
+    <summary>{t.textVersion}</summary>
+    <div data-describe set:html={describe(s0, S)} />
+  </details>
+</figure>
+
+<script>
+  import { strings, fill, wait, reducedMotion } from "../lib/svg";
+  import { opening, sync, change, cancelChange, ask, cancelTask, taskRefusal, type State, type Change, type Dir } from "../lib/snapshots";
+  import { board, describe, summary, waiting, ownerPanel, eventLine, type SnStrings } from "../lib/snapshots-view";
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-snaps]")) {
+    const S = strings<SnStrings>(root);
+    const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
+    const boardEl = q("[data-board]");
+    const ownerEl = q("[data-owner]");
+    const logEl = q("[data-log]");
+    // One live region, one announcement per action: what the action did, in one text.
+    const say = (text: string) => (q("[data-say]").textContent = text.replace(/\s+/g, " ").trim());
+    const syncBtn = q<HTMLButtonElement>("[data-act=sync]");
+    const snapBtn = q<HTMLButtonElement>("[data-act=snapshot]");
+    let s: State = opening();
+    let selected: number | null = null;
+    let freedLast: number[] = [];
+    let run = 0;
+
+    // Keep focus on the same control across a re-render.
+    const keyOf = (el: Element | null) => {
+      if (!(el instanceof HTMLElement) || !root.contains(el)) return null;
+      for (const a of ["data-act", "data-task", "data-cancel-task", "data-write", "data-change", "data-cancel"]) if (el.hasAttribute(a)) return `[${a}="${el.getAttribute(a)}"]`;
+      if (el.dataset.b !== undefined) return `[data-b="${el.dataset.b}"][data-at="${el.dataset.at}"]`;
+      return null;
+    };
+
+    function render(focusKey: string | null = keyOf(document.activeElement)) {
+      boardEl.innerHTML = board(s, S, true, freedLast);
+      if (selected !== null && s.blocks[selected]?.freed !== undefined && !freedLast.includes(selected)) selected = null;
+      for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) {
+        const on = Number(c.dataset.b) === selected;
+        c.classList.toggle("sel", on);
+        if (c.tagName === "BUTTON") c.setAttribute("aria-pressed", String(on));
+      }
+      ownerEl.innerHTML = ownerPanel(s, S, selected, true);
+      q("[data-txg]").textContent = String(s.txg);
+      syncBtn.textContent = fill(S.sync, { txg: s.txg });
+      const why = taskRefusal(s, { kind: "snapshot" });
+      snapBtn.disabled = !!why;
+      snapBtn.title = why === "EAGAIN" ? S.snapEagain : why === "limit" ? S.snapLimit : "";
+      q("[data-waiting]").innerHTML = waiting(s, S) + (why === "limit" ? ` ${S.snapLimit}` : "");
+      q("[data-summary]").textContent = summary(s, S);
+      q("[data-describe]").innerHTML = describe(s, S);
+      if (focusKey) {
+        const el = root.querySelector<HTMLElement>(focusKey);
+        if (el) el.focus({ preventScroll: true });
+        else if (focusKey.startsWith("[data-change") || focusKey.startsWith("[data-cancel=")) ownerEl.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+      }
+    }
+
+    // FLIP: each chip that moved (tree -> deadlist, or into a new row) slides from where it was.
+    function rects() {
+      const m = new Map<string, DOMRect>();
+      for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) m.set(`${c.dataset.b}|${c.dataset.at}`, c.getBoundingClientRect());
+      const byBlock = new Map<string, DOMRect>();
+      for (const [k, r] of m) byBlock.set(k.split("|")[0], r);
+      return { m, byBlock };
+    }
+
+    async function doSync() {
+      const me = ++run;
+      const before = rects();
+      const ev = sync(s);
+      freedLast = ev.flatMap((e) => (e.k === "kill" && e.freed ? [e.block] : e.k === "destroy" ? e.freed : []));
+      render();
+      logEl.replaceChildren();
+      if (!reducedMotion()) {
+        for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) {
+          const k = `${c.dataset.b}|${c.dataset.at}`;
+          if (before.m.has(k)) continue;
+          const from = before.byBlock.get(c.dataset.b!);
+          if (!from) {
+            c.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 420, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+            continue;
+          }
+          const to = c.getBoundingClientRect();
+          c.animate([{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }], { duration: 640, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+        }
+        for (const c of boardEl.querySelectorAll<HTMLElement>(".freed .chip")) c.animate([{ opacity: 1 }, { opacity: 0.45 }], { duration: 900, fill: "none" });
+      }
+      for (const e of ev) {
+        const li = document.createElement("li");
+        li.className = e.k === "kill" ? (e.freed ? "free" : "dead") : e.k;
+        li.innerHTML = eventLine(s, S, e);
+        logEl.append(li);
+        await wait(e.k === "born" ? 60 : 140);
+        if (me !== run) return;
+      }
+      say(ev.length ? [...logEl.children].slice(-ev.length).map((li) => li.textContent).join(" ") : (q("[data-summary]").textContent ?? ""));
+    }
+
+    root.addEventListener("click", (e) => {
+      const el = (e.target as Element).closest<HTMLElement>("button");
+      if (!el || !root.contains(el)) return;
+      const d = el.dataset;
+      if (d.act === "sync") return void doSync();
+      run++;
+      if (d.act === "snapshot") ask(s, { kind: "snapshot" });
+      else if (d.act === "reset") {
+        s = opening();
+        selected = null;
+        freedLast = [];
+        logEl.replaceChildren();
+      } else if (d.b !== undefined) {
+        selected = Number(d.b);
+      } else if (d.write) {
+        const [dir, slot] = d.write.split(":");
+        change(s, dir as Dir, Number(slot), "write");
+      } else if (d.change) {
+        const [dir, slot, c] = d.change.split(":");
+        change(s, dir as Dir, Number(slot), c as Change);
+      } else if (d.cancel) {
+        const [dir, slot] = d.cancel.split(":");
+        cancelChange(s, dir as Dir, Number(slot));
+      } else if (d.task) {
+        const [kind, id] = d.task.split(":");
+        ask(s, kind === "clone" ? { kind: "clone", origin: id } : { kind: "destroy", snap: id });
+      } else if (d.cancelTask !== undefined) cancelTask(s, Number(d.cancelTask));
+      else return;
+      render();
+      say((d.b !== undefined ? ownerEl : d.act === "reset" ? q("[data-summary]") : q("[data-waiting]")).textContent ?? "");
+    });
+
+    render(null);
+    q(".sn-bar").hidden = false;
+    q(".sn-panels").hidden = false;
+  }
+</script>
+
+<style>
+  .sn {
+    margin: var(--space-6) 0 0;
+  }
+  .sn-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-5);
+    align-items: center;
+    margin-bottom: var(--space-4);
+  }
+  .sn-bar[hidden],
+  .sn-panels[hidden] {
+    display: none;
+  }
+  .txg {
+    font-variant-numeric: tabular-nums;
+  }
+  .txg strong {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .sn-waiting {
+    flex-basis: 100%;
+    font-size: var(--step--1);
+    max-width: 48rem;
+    min-height: 1.5em;
+  }
+  .sn-board :global(.board) {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .sn-board :global(.ds) {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--space-3) var(--space-4);
+    display: grid;
+    gap: var(--space-2);
+  }
+  .sn-board :global(.ds.head) {
+    border-color: var(--line-strong);
+  }
+  .sn-board :global(.ds.clone) {
+    border-style: dashed;
+    border-color: var(--line-strong);
+  }
+  .sn-board :global(header) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+    align-items: baseline;
+  }
+  .sn-board :global(h3) {
+    margin: 0;
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    font-size: var(--step-0);
+    font-weight: 600;
+  }
+  .sn-board :global(h3 code) {
+    font-size: 1em;
+  }
+  .sn-board :global(.kind) {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--fg-muted);
+    font-size: var(--step-0);
+  }
+  .sn-board :global(.meta) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .sn-board :global(.meta strong) {
+    color: var(--fg);
+  }
+  .sn-board :global(.acts) {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+    margin-left: auto;
+  }
+  .sn-board :global(.tree),
+  .sn-board :global(.dl) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .sn-board :global(.lbl) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    min-width: 4.6rem;
+  }
+  .sn-board :global(.arrow) {
+    color: var(--fg-faint);
+  }
+  .sn-board :global(.slots) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .sn-board :global(.slot),
+  .sn-board :global(.slot-none) {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .sn-board :global(.slot-none) {
+    justify-content: center;
+  }
+  .sn-board :global(.slot-none),
+  .sn-board :global(.slot-empty) {
+    font-size: var(--step--1);
+    color: var(--fg-faint);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius);
+    padding: 0 0.7em;
+    min-height: 44px;
+    min-width: 3.4rem;
+    display: inline-flex;
+    align-items: center;
+    background: transparent;
+    font: inherit;
+    font-size: var(--step--1);
+  }
+  .sn-board :global(.slot-empty) {
+    color: var(--accent);
+    border-color: var(--accent);
+    cursor: pointer;
+  }
+  .sn-board :global(.dl ul) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .sn-board :global(.entry) {
+    display: inline-flex;
+    gap: var(--space-1);
+    align-items: center;
+    border-left: 2px solid var(--line-strong);
+    padding-left: var(--space-2);
+    min-height: 44px;
+  }
+  .sn-board :global(.entry.empty) {
+    border-left-color: var(--line);
+  }
+  .sn-board :global(.key) {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    margin-right: 2px;
+  }
+  .sn-board :global(.none) {
+    font-size: 0.75rem;
+    color: var(--fg-faint);
+  }
+  .chip,
+  .sn-board :global(.chip) {
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    min-width: 2.9rem;
+    min-height: 44px;
+    padding: 0 0.5em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .sn-board :global(button.chip) {
+    cursor: pointer;
+  }
+  .chip :global(sub),
+  .sn-board :global(.chip sub) {
+    font-weight: 400;
+    color: var(--fg-muted);
+    font-size: 0.72em;
+    margin-left: 1px;
+  }
+  .chip.root,
+  .sn-board :global(.chip.root) {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .chip.c,
+  .sn-board :global(.chip.c) {
+    border-style: dashed;
+    border-color: var(--ok);
+  }
+  .chip.gone,
+  .sn-board :global(.chip.gone) {
+    background: transparent;
+    border: 1px dashed var(--line);
+    color: var(--fg-faint);
+    text-decoration: line-through;
+  }
+  .sn-board :global(.chip.sel) {
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
+    background: var(--accent-soft);
+  }
+  .sn-board :global(.pending .chip) {
+    opacity: 0.55;
+  }
+  .sn-board :global(.tag) {
+    font-size: 0.7rem;
+    line-height: 1.2;
+    color: var(--accent);
+    max-width: 7.5rem;
+  }
+  .sn-board :global(.tag.delete) {
+    color: var(--bad);
+  }
+  .sn-board :global(.refuse) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .sn-board :global(.btn.sm),
+  .sn-owner :global(.btn.sm) {
+    padding: 0.35em 0.9em;
+  }
+  .sn-board :global(.freed) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+    margin-top: var(--space-3);
+  }
+  .sn-legend {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-4) 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .sn-legend li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .sn-legend .chip {
+    min-height: 1.8rem;
+    min-width: 2.4rem;
+    font-size: 0.78rem;
+  }
+  .sn-panels {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-5);
+    margin-top: var(--space-6);
+  }
+  .sn-panels h3 {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-1);
+    color: var(--accent);
+    letter-spacing: 0;
+    margin-bottom: var(--space-3);
+  }
+  .sn-owner :global(h4) {
+    margin: 0 0 var(--space-2);
+    font-size: var(--step-0);
+    font-weight: 600;
+  }
+  .sn-owner :global(h4 sub) {
+    font-weight: 400;
+  }
+  .sn-owner :global(p) {
+    font-size: var(--step--1);
+    margin-top: var(--space-2);
+    max-width: 40rem;
+  }
+  .sn-owner :global(.would) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .sn-owner :global(.acts) {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .sn-owner :global(.tag) {
+    font-size: 0.75rem;
+    color: var(--accent);
+  }
+  .sn-log ol {
+    margin: 0;
+    padding-left: 1.6em;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--step--1);
+  }
+  .sn-log :global(li.free) {
+    color: var(--fg-muted);
+  }
+  .sn-log :global(li.dead b),
+  .sn-log :global(li.snapshot code),
+  .sn-log :global(li.clone code) {
+    color: var(--accent);
+  }
+  .sn-log :global(li.synced) {
+    color: var(--fg-muted);
+    list-style: none;
+  }
+  .sn-log :global(li.refused) {
+    color: var(--bad);
+  }
+  .sn :global(a.see) {
+    font-size: 0.85em;
+    color: var(--fg-muted);
+  }
+  .text-version {
+    margin-top: var(--space-5);
+    max-width: var(--measure);
+    font-size: var(--step--1);
+  }
+  .text-version summary {
+    color: var(--fg-muted);
+    padding-block: var(--space-2);
+  }
+  .text-version :global(ol) {
+    padding-left: 1.2em;
+    display: grid;
+    gap: var(--space-1);
+  }
+  @media (max-width: 48rem) {
+    .sn-panels {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 30rem) {
+    .sn-board :global(.ds) {
+      padding: var(--space-2) var(--space-3);
+    }
+    .sn-board :global(.lbl) {
+      min-width: 0;
+      flex-basis: 100%;
+    }
+    .sn-board :global(.arrow) {
+      display: none;
+    }
+    .sn-board :global(.acts) {
+      margin-left: 0;
+    }
+  }
+</style>

@@ -1,0 +1,86 @@
+---
+import { ROOMS, roomUrl, type Lang } from "../lib/rooms";
+import { UI } from "../lib/ui";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const t = UI[lang];
+---
+
+<ol class="map" start="0">
+  {
+    ROOMS.map((r, i) => (
+      <li class={r.open ? "open" : "coming"}>
+        <span class="num" aria-hidden="true">{String(i).padStart(2, "0")}</span>
+        <div class="body">
+          {r.open ? (
+            <a href={roomUrl(lang, r.id)} class="title">{r.title[lang]}</a>
+          ) : (
+            <span class="title">
+              {r.title[lang]} <span class="status">{t.coming}</span>
+            </span>
+          )}
+          <span class="teaser">{r.teaser[lang]}</span>
+        </div>
+      </li>
+    ))
+  }
+</ol>
+
+<style>
+  .map {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+    gap: 0 var(--space-6);
+  }
+  li {
+    display: grid;
+    grid-template-columns: 2.5rem 1fr;
+    gap: var(--space-2);
+    padding: var(--space-4) 0;
+    border-top: 1px solid var(--line);
+  }
+  .num {
+    font-family: var(--font-display);
+    font-size: var(--step-1);
+    font-weight: 300;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.3;
+  }
+  .open .num {
+    color: var(--accent);
+  }
+  .body {
+    display: grid;
+    gap: var(--space-1);
+  }
+  .title {
+    font-family: var(--font-display);
+    font-size: var(--step-1);
+    font-weight: 350;
+    line-height: 1.3;
+  }
+  a.title {
+    text-decoration-color: var(--accent);
+  }
+  .coming .title {
+    color: var(--fg-muted);
+  }
+  .status {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-0);
+    display: block;
+    white-space: nowrap;
+  }
+  .teaser {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+</style>

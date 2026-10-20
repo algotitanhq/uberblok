@@ -1,0 +1,277 @@
+---
+import Base from "../../layouts/Base.astro";
+import CowTree from "../../components/CowTree.astro";
+import MirrorHeal from "../../components/MirrorHeal.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomNumber } from "../../lib/rooms";
+
+const lang = "fr";
+const r = room("copy-on-write");
+const L = {
+  bp: gh("include/sys/spa.h", 374, 382),
+  bpSize: gh("include/sys/spa.h", 361),
+  cksum: gh("include/sys/spa.h", 381),
+  dvas: gh("include/sys/spa.h", 362),
+  compute: gh("module/zfs/zio_checksum.c", 411, 417),
+  passRewrite: gh("module/zfs/zio.c", 128),
+  allocStage: gh("include/sys/zio_impl.h", 153),
+  hole: gh("module/zfs/zio.c", 4345, 4346),
+  metaslab: gh("module/zfs/zio.c", 4380, 4382),
+  hole0: gh("module/zfs/zio.c", 2107, 2115),
+  ddt: gh("module/zfs/zio.c", 2126, 2131),
+  nop: gh("module/zfs/zio.c", 2133, 2136),
+  writeDone: gh("module/zfs/dbuf.c", 5152, 5154),
+  kill: gh("module/zfs/dsl_dataset.c", 294),
+  dead: gh("module/zfs/dsl_dataset.c", 332, 345),
+  childVerify: gh("module/zfs/zio.c", 1631, 1639),
+  label: gh("module/zfs/zio_checksum.c", 175, 177),
+  labelVerifier: gh("module/zfs/zio_checksum.c", 295, 298),
+  embedded: gh("module/zfs/zio_checksum.c", 386, 393),
+  gang: gh("module/zfs/zio_checksum.c", 178, 180),
+  zilog: gh("module/zfs/zio_checksum.c", 181, 182),
+  zilog2: gh("module/zfs/zio_checksum.c", 190, 191),
+  off: gh("module/zfs/zio_checksum.c", 173, 174),
+  fletcherDefault: gh("include/sys/zio.h", 119, 120),
+  fletcher: gh("module/zcommon/zfs_fletcher.c", 317, 338),
+  childSelect: gh("module/zfs/vdev_mirror.c", 793, 802),
+  repairCond: gh("module/zfs/vdev_mirror.c", 883, 886),
+  noGood: gh("module/zfs/vdev_mirror.c", 878, 881),
+  counter: gh("module/zfs/zio.c", 5295, 5300),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="copy-on-write"
+  title="Copie sur écriture, sommes de contrôle et autoréparation · Uberblok"
+  description="Pourquoi un pool ZFS reste cohérent sans fsck, et comment une somme de contrôle rangée dans le parent démasque un disque qui ment : en interactif, avec le code d’OpenZFS."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Salle {roomNumber(r.id)}</p>
+      <h1>{r.title.fr}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          Les disques rendent des données fausses sans signaler d’erreur. Un bit s’altère en silence ; une écriture atterrit au
+          mauvais endroit, ou n’atterrit jamais ; un bogue de micrologiciel répond avec des secteurs périmés. Une somme
+          de contrôle rangée à côté des données ne peut pas détecter une écriture perdue ou égarée, car le bloc périmé
+          porte une somme qui lui correspond. Et un système de fichiers qui écrase les blocs vivants sur place peut
+          rester, après une panne, à moitié ancien et à moitié nouveau.
+        </p>
+        <p>ZFS répond aux deux problèmes avec une règle et un emplacement.</p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="never">
+      <h2 id="never"><span class="n">1</span> Ne jamais écraser un bloc vivant</h2>
+      <div class="prose">
+        <p>
+          Quand un bloc change, ZFS écrit la nouvelle version ailleurs et laisse l’ancienne à sa place. Le pointeur
+          vers le bloc change, donc son parent change et s’écrit ailleurs lui aussi, et ainsi de suite jusqu’à la
+          racine. L’ancien arbre reste entier jusqu’à ce qu’une seule écriture, le nouvel uberblock, fasse passer le
+          pool d’un arbre à l’autre. Réécrivez un bloc pas à pas, et coupez le courant avant la validation.
+        </p>
+      </div>
+      <CowTree lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="parent">
+      <h2 id="parent"><span class="n">2</span> La somme de contrôle habite chez le parent</h2>
+      <div class="prose">
+        <p>
+          Chaque pointeur de bloc, le <a href={L.bp}><code>blkptr_t</code></a> <a href={L.bpSize}>de 128 octets</a>, porte la
+          <a href={L.cksum}>somme de contrôle de 256 bits</a> du bloc vers lequel il pointe. Un bloc ne se porte jamais
+          garant de lui-même : son parent s’en charge, et le parent du parent se porte garant du parent, jusqu’à
+          l’uberblock. Lire un bloc, c’est recalculer sa somme et la comparer à celle du pointeur qui y mène. Sur un
+          miroir, un écart envoie la lecture vers l’autre disque, et la bonne copie est réécrite sur la mauvaise.
+        </p>
+      </div>
+      <MirrorHeal lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">L’idée, à trois profondeurs</h2>
+
+      <div class="depth">
+        <h3>En une phrase</h3>
+        <p class="lead prose">
+          ZFS n’écrase jamais de données vivantes et range la somme de contrôle de chaque bloc dans le pointeur qui y
+          mène : une panne ne peut pas laisser le pool à moitié écrit, et un disque ne peut pas rendre de données
+          fausses sans être pris.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En un paragraphe</h3>
+        <p class="prose">
+          Chaque écriture va à un nouvel endroit : le bloc reçoit une nouvelle adresse, ce qui change le pointeur de
+          bloc de son parent, donc le parent, jusqu’à la racine. Rien de ce qu’atteint l’uberblock courant n’est jamais
+          modifié : à chaque instant, les disques contiennent un arbre complet et cohérent, et l’écriture d’un seul
+          nouvel uberblock valide le suivant. Chaque pointeur de bloc porte aussi la somme de contrôle de son enfant,
+          ce qui fait de l’arbre un arbre de Merkle : une racine de confiance se porte garante de chaque bloc en dessous d’elle. Un
+          écart à la lecture est une erreur détectée, jamais une corruption silencieuse, et avec une seconde copie (un
+          miroir, ou <a href={L.dvas}>jusqu’à trois adresses</a> dans un même pointeur de bloc) ZFS rend la bonne copie
+          et répare la mauvaise.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En détail</h3>
+        <div class="prose">
+          <p>
+            <strong>Où une écriture devient un nouveau bloc.</strong> Dans le pipeline d’écriture,
+            <code>zio_write_compress</code> choisit entre une réécriture sur place et une nouvelle allocation.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/zio.c"
+          from={2086}
+          to={2105}
+          symbol="zio_write_compress"
+          notes={[
+            {
+              from: 2094,
+              to: 2101,
+              text: `La réécriture sur place n’est permise que pour un bloc né dans le txg même en cours de synchronisation (<code>BP_GET_BIRTH(bp) == zio-&gt;io_txg</code>), de taille inchangée, à partir de la passe <a href="${L.passRewrite}"><code>zfs_sync_pass_rewrite</code></a> (2). Aucun uberblock validé ne référence encore un tel bloc : l’écraser ne touche aucune donnée vivante. C’est l’unique exception à la copie sur écriture pour les blocs de l’arbre.`,
+            },
+            {
+              from: 2102,
+              to: 2104,
+              text: `Toute autre écriture remet le pointeur de bloc à zéro et suit le pipeline d’écriture complet, dont l’<a href="${L.allocStage}">étape DVA_ALLOCATE</a> donne normalement au bloc une nouvelle adresse : <code>zio_dva_allocate</code> <a href="${L.hole}">vérifie que le pointeur est un trou</a> avant d’<a href="${L.metaslab}">appeler <code>metaslab_alloc</code></a>. Juste après, trois cas changent de pipeline : un bloc qui se compresse en rien <a href="${L.hole0}">devient un trou</a>, la déduplication <a href="${L.ddt}">prend le pipeline DDT</a>, et le nopwrite <a href="${L.nop}">ajoute son étape</a>.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Quand l’écriture se termine, <a href={L.writeDone}><code>dbuf_write_done</code></a> appelle
+            <code>dsl_dataset_block_kill</code> sur l’ancien pointeur et <code>dsl_dataset_block_born</code> sur le
+            nouveau. L’ancien bloc n’est <a href={L.kill}>libéré que s’il est né après le dernier instantané</a> ; sinon
+            il <a href={L.dead}>passe dans la deadlist du dataset</a>, et l’instantané le garde.
+          </p>
+          <p>
+            <strong>Où la somme est vérifiée.</strong> À l’écriture, <code>zio_checksum_compute</code>
+            <a href={L.compute}>range la valeur calculée dans <code>bp-&gt;blk_cksum</code></a>. À la lecture, le bloc est
+            comparé à ce champ.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/zio_checksum.c"
+          from={501}
+          to={538}
+          symbol="zio_checksum_error_impl"
+          notes={[
+            {
+              from: 502,
+              to: 505,
+              text: "La valeur attendue est <code>bp-&gt;blk_cksum</code>, prise dans le pointeur de bloc que le lecteur a suivi ; la valeur réelle est recalculée sur les octets qui viennent d’être lus.",
+            },
+            {
+              from: 515,
+              to: 526,
+              text: "Blocs chiffrés autres que les objsets : la moitié des 256 bits est le MAC du chiffrement, vérifié au déchiffrement ; seuls les 128 autres bits sont comparés ici.",
+            },
+            {
+              from: 535,
+              to: 536,
+              text: `Un écart renvoie <code>ECKSUM</code>. Sur un miroir, ce contrôle a lieu dans la lecture de chaque enfant, pas dans le parent : <code>zio_vdev_child_io</code> <a href="${L.childVerify}">descend l’étape CHECKSUM_VERIFY vers l’enfant</a>. Chaque erreur est <a href="${L.counter}">comptée sur le vdev feuille</a>.`,
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            La chaîne s’arrête à l’uberblock : <code>ub_rootbp</code> n’a pas de pointeur parent. Chaque case
+            d’uberblock est protégée à la place par une <a href={L.label}>somme SHA-256 « label » intégrée</a>, dont le
+            <a href={L.labelVerifier}>vérificateur est la position de la case sur le disque</a>. Les <a href={L.gang}>en-têtes gang</a> et les
+            blocs du ZIL (<a href={L.zilog}><code>zilog</code></a>, <a href={L.zilog2}><code>zilog2</code></a>)
+            <a href={L.embedded}>portent eux aussi une somme intégrée</a>, et
+            <a href={L.off}><code>checksum=off</code></a> existe. La valeur par défaut, <code>checksum=on</code>,
+            <a href={L.fletcherDefault}>signifie fletcher4</a> : quatre sommes cumulées de 64 bits sur le bloc
+            <a href={L.fletcher}>lu en mots de 32 bits</a>. Les figures ci-dessus la calculent pour de vrai.
+          </p>
+          <p>
+            <strong>Où le miroir se répare.</strong> Dans <code>vdev_mirror_io_done</code>, si aucun enfant n’a encore
+            rendu de bonnes données, <a href={L.childSelect}><code>vdev_mirror_child_select</code> choisit un autre
+            enfant</a> et une nouvelle lecture part. S’il n’en reste aucun, <a href={L.noGood}>la lecture échoue avec une
+            erreur</a>. La réparation exige au moins une bonne copie, un pool accessible en écriture, et soit une
+            erreur inattendue, soit un resilver, soit un scrub de resilver (<a href={L.repairCond}>L883–L886</a>). Alors :
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/vdev_mirror.c"
+          from={900}
+          to={934}
+          symbol="vdev_mirror_io_done"
+          notes={[
+            {
+              from: 900,
+              to: 904,
+              text: "Les enfants qui ont rendu de bonnes données ne sont jamais réécrits : le commentaire juste au-dessus avertit qu’une coupure de courant pendant la réécriture de la seule bonne copie pourrait la perdre.",
+            },
+            {
+              from: 905,
+              to: 924,
+              text: "Un enfant qui n’a pas été essayé n’est réparé que pendant un scrub, pour les vdevs indirects ou les spares dRAID, ou quand sa DTL indique que ce txg y manque.",
+            },
+            {
+              from: 927,
+              to: 933,
+              text: "Le bon tampon <code>zio-&gt;io_abd</code> est écrit sur chaque enfant abîmé par une écriture <code>ZIO_FLAG_IO_REPAIR</code>, marquée <code>ZIO_FLAG_SELF_HEAL</code> quand la cause était une erreur inattendue.",
+            },
+          ]}
+        />
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">Ce que les figures laissent de côté</h2>
+      <p class="prose muted">
+        Les figures montrent un seul fichier, d’où un arbre court : dans un pool, il descend de l’uberblock par le
+        MOS, le dataset et le dnode de l’objet. Elles laissent de côté les passes de synchronisation, les blocs gang,
+        la déduplication, le nopwrite, les MAC du chiffrement, et le choix, selon la charge, du côté du miroir lu en
+        premier (ici, toujours le disque A). L’anneau d’uberblocks a 32 cases, comme sur des disques à secteurs de
+        4 Kio. Les sommes sont de vraies valeurs fletcher4 calculées sur les blocs de démonstration ; les adresses et
+        les numéros de txg sont inventés.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="copy-on-write" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

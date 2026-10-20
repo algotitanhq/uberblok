@@ -1,0 +1,509 @@
+---
+import Base from "../../layouts/Base.astro";
+import VdevLab from "../../components/VdevLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomUrl, roomNumber } from "../../lib/rooms";
+
+const lang = "fr";
+const r = room("vdevs");
+const VI = "include/sys/vdev_impl.h";
+const VM = "module/zfs/vdev_mirror.c";
+const Z = "module/zfs/zio.c";
+const SM = "module/zfs/spa_misc.c";
+const SP = "module/zfs/spa.c";
+const V = "module/zfs/vdev.c";
+const DR = "module/zfs/vdev_draid.c";
+const L = {
+  rootVdev: gh("include/sys/spa_impl.h", 265),
+  aux: gh("include/sys/spa_impl.h", 284, 285),
+  rootOps: gh("module/zfs/vdev_root.c", 154, 155),
+  logical: gh(Z, 4692, 4697),
+  ioStart: gh(Z, 4831),
+  mirrorOps: gh(VM, 971, 995),
+  spareOps: gh(VM, 1023, 1047),
+  raidzOps: gh("module/zfs/vdev_raidz.c", 5481, 5505),
+  draidOps: gh(DR, 2336, 2360),
+  diskOps: gh("module/os/linux/zfs/vdev_disk.c", 1341, 1365),
+  types: gh("include/sys/fs/zfs.h", 914, 927),
+  bias: gh(VI, 158, 163),
+  classes: gh("include/sys/spa_impl.h", 248, 253),
+  zilOrder: gh(Z, 4561, 4595),
+  zilOneDva: gh(Z, 4562, 4564),
+  reserve: gh(SM, 443, 448),
+  smallblk: gh("module/zcommon/zfs_prop.c", 739, 742),
+  ddtSpecial: gh(SM, 2111, 2115),
+  hasSpecial: gh(SM, 2729, 2750),
+  redundant: gh("module/zcommon/zfs_prop.c", 412, 415),
+  copies: gh("module/zfs/dmu.c", 2400, 2404),
+  mosCopies: gh("module/zfs/dmu_objset.c", 651),
+  maxRepl: gh(SM, 2210, 2220),
+  rotor: gh("module/zfs/metaslab.c", 639, 698),
+  skipMissing: gh(VM, 554, 559),
+  preferDspare: gh(VM, 561, 565),
+  load: gh(VM, 567, 586),
+  dtl: gh(SP, 8499, 8500),
+  dtlMax: gh(SP, 8472),
+  txgConst: gh("include/sys/txg.h", 41, 44),
+  topTransfer: gh(V, 1299, 1330),
+  removeParent: gh(V, 1455, 1504),
+  unspare: gh(SP, 9462, 9480),
+  unspareOnline: gh(V, 4500, 4504),
+  detachSpare: gh(SP, 8733, 8740),
+  embedMin: gh(V, 1689, 1697),
+  embedMinMs: gh(V, 88),
+  copiesCap: gh("module/zfs/dmu.c", 2542),
+  shortSkip: gh(DR, 676, 683),
+  attachLast: gh(SP, 8449, 8454),
+  spareReplaced: gh(SP, 9520, 9536),
+  unspareClear: gh(V, 4753, 4756),
+  zedUnspare: gh("cmd/zed/agents/zfs_mod.c", 211),
+  dspareOwn: gh(SP, 8286, 8292),
+  dspareChild: gh(DR, 2424, 2454),
+  dspareIo: gh(DR, 2609, 2710),
+  dspareName: gh(DR, 1706, 1724),
+  maps: gh(DR, 171, 176),
+  rand: gh("module/zfs/vdev_draid_rand.c", 30, 41),
+  verify: gh(DR, 452, 460),
+  never: gh(DR, 166, 169),
+  layoutComment: gh(DR, 65, 87),
+  ngroups: gh("cmd/zpool/zpool_vdev.c", 1459, 1465),
+  getPerm: gh(DR, 560, 576),
+  fullStripe: gh(DR, 1099, 1102),
+  draidRead: gh(DR, 758, 764),
+  derived: gh(DR, 2291, 2294),
+  rowHeight: gh("include/sys/vdev_draid.h", 45, 48),
+  raidzMap: gh("module/zfs/vdev_raidz.c", 2443, 2462),
+  raidzRead: gh("module/zfs/vdev_raidz.c", 2573, 2588),
+  again: gh(Z, 4430, 4444),
+  metadataType: gh("module/zfs/dmu.c", 116),
+  fileType: gh("module/zfs/dmu.c", 125),
+};
+---
+<Base
+  lang={lang}
+  roomId="vdevs"
+  title="Les vdevs · Uberblok"
+  description="L’arbre des vdevs d’un pool ZFS, lu dans le code d’OpenZFS : une table d’opérations par nœud, les classes d’allocation où arrive un bloc, un remplacement de disque qui est un miroir pour un temps, et les permutations du dRAID. Interactif, en 2D et en 3D."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Salle {roomNumber(r.id)}</p>
+      <h1>{r.title.fr}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          Un pool n’est pas une liste de disques. Ce sont des miroirs, des groupes RAID-Z, du dRAID, un périphérique de log,
+          un périphérique special, des disques de secours et des disques en cours de remplacement, combinés comme
+          l’administrateur l’a choisi, et chacun peut changer pendant que le pool tourne.
+        </p>
+        <p>
+          Si le chemin des E/S avait une branche pour chacun, et pour chaque combinaison (un disque en remplacement dans un
+          raidz, un disque de secours dans un miroir), il ne serait jamais fini. Le code n’a pas de telle branche. Il
+          construit un seul arbre de nœuds, <code>vdev_t</code>, accroché à <a href={L.rootVdev}><code>spa_root_vdev</code></a>,
+          et donne à chaque nœud une table de fonctions, <code>vdev_ops_t</code>. Une écriture dans le pool descend l’arbre,
+          et chaque nœud décide, avec son propre <code>io_start</code>, comment l’E/S continue vers ses enfants.
+          L’allocateur, lui, ne voit que les vdevs de premier niveau, rangés en classes selon leur usage.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="tree">
+      <h2 id="tree"><span class="n">1</span> Un arbre, une table par nœud</h2>
+      <div class="prose">
+        <p>
+          Le pool de la figure a trois vdevs de premier niveau pour les données, un miroir, un raidz1 de trois disques et un
+          dRAID de cinq, et peut avoir un miroir pour le log, un miroir comme vdev special et un disque pour la dedup.
+          Sélectionnez un nœud pour voir la table vers laquelle il pointe : son type n’est rien d’autre que cette table.
+          « Log », « special » et « dedup » <a href={L.types}>ne sont pas des types</a> : ce sont des
+          <a href={L.bias}>biais d’allocation</a> d’un vdev de premier niveau. Les disques de secours et le périphérique de
+          cache ne sont pas du tout dans l’arbre : ce sont <a href={L.aux}>deux listes à côté</a>. Écrivez des blocs, et
+          suivez chaque E/S jusqu’aux disques.
+        </p>
+      </div>
+      <VdevLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="classes">
+      <h2 id="classes"><span class="n">2</span> Où arrive un bloc : les classes d’allocation</h2>
+      <div class="prose">
+        <p>
+          Chaque vdev de premier niveau entre dans une <a href={L.classes}>classe de metaslabs</a>, selon son biais :
+          normale, log, special ou dedup. Tout vdev qui n’est pas un log reçoit aussi un groupe dans une classe de
+          « log embarqué », de la place pour le ZIL sans périphérique de log, mais seul un vdev normal ou special de <a href={L.embedMin}>plus de 64 metaslabs</a> (<a href={L.embedMinMs}>un réglage</a>) y met un metaslab : le groupe d’un vdev de dedup reste vide, comme
+          celui d’un petit vdev. Pour chaque écriture,
+          <code>spa_preferred_class</code> choisit la classe. Un bloc de la DDT va en dedup, sinon en special, sinon en
+          normale. Les métadonnées et les blocs indirects des fichiers vont en special. Un bloc de données de fichier ne va
+          en special que s’il n’est pas plus grand que le <code>special_small_blocks</code> du dataset,
+          <a href={L.smallblk}>0 par défaut</a>, et seulement tant que la classe special a utilisé moins de 75 % de sa
+          place : les derniers 25 % sont <a href={L.reserve}>gardés pour les métadonnées</a>. Tout le reste va en normale.
+          Un bloc du ZIL a son propre ordre, <a href={L.zilOrder}>log, log embarqué du special, special, log embarqué,
+          normale</a>. Quand une classe est pleine, l’allocation redemande, et la classe qui a échoué est sautée.
+        </p>
+        <p>
+          Un bloc peut aussi avoir plusieurs copies, un DVA chacune, sur des vdevs <em>consécutifs</em> de sa classe : les
+          métadonnées ont une copie de plus que le <code>copies</code> du dataset (avec
+          <a href={L.redundant}><code>redundant_metadata=all</code></a>, la valeur par défaut), et la DDT, qui vit dans le
+          MOS du pool, <a href={L.mosCopies}>trois</a>, <a href={L.copiesCap}>le plafond</a>. Dans la figure, écrivez chaque sorte de bloc avec et sans vdev
+          special, passez <code>special_small_blocks</code> à 16 Kio, puis remplissez la classe special.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="replace">
+      <h2 id="replace"><span class="n">3</span> Un remplacement est un miroir, pour un temps</h2>
+      <div class="prose">
+        <p>
+          <code>zpool replace</code> n’échange pas un disque contre un autre. Il met un nouveau nœud à la place de l’ancien
+          disque, un nœud <code>replacing</code>, avec l’ancien disque comme premier enfant et le neuf comme dernier. Un
+          disque de secours fait de même avec un nœud <code>spare</code>. Les deux tables reprennent les fonctions du
+          miroir, si bien que le chemin des E/S n’a besoin d’aucun code nouveau : une écriture va aux deux disques, et une
+          lecture saute le disque neuf pour chaque bloc qu’il n’a pas encore. Quand le resilver est terminé, l’ancien disque
+          est détaché et le nœud <code>replacing</code> disparaît. Un nœud <code>spare</code> reste jusqu’à ce que zed remette le disque d’origine en ligne ou que son défaut soit effacé, que le disque d’origine soit lui-même remplacé, ou que l’administrateur détache l’un des deux ; dans les deux premiers cas, c’est la fin d’un resilver qui détache le secours. Sélectionnez un disque dans la figure, remplacez-le,
+          écrivez et relisez, puis terminez le resilver. Remplacez aussi le disque de dedup : c’est un vdev de premier
+          niveau, et le nœud <code>replacing</code> prend son rôle.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="draid">
+      <h2 id="draid"><span class="n">4</span> dRAID : des permutations au lieu de groupes fixes</h2>
+      <div class="prose">
+        <p>
+          Un groupe raidz utilise toujours les mêmes disques. Un dRAID répartit des groupes de largeur fixe sur tous ses
+          enfants, grâce à une table de permutations que le code <a href={L.maps}>génère à partir d’une graine fixe</a> et
+          vérifie contre une somme de contrôle qu’il conserve, parce que « existing pools depend on the same mapping always
+          being generated » (les pools existants dépendent d’une table toujours générée à l’identique). Le
+          draid1:2d:5c:1s de la figure a des groupes de trois (une parité, deux données) sur cinq enfants, et un secours
+          distribué : dans chaque ligne de la table, un enfant n’y porte aucune colonne, seulement la place du secours. La figure
+          calcule la même table que le code, et la même somme de contrôle. Écrivez plusieurs grands blocs et regardez chaque
+          groupe arriver sur un autre ensemble d’enfants ; puis remplacez un enfant du dRAID par le secours distribué.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">L’idée, à trois profondeurs</h2>
+
+      <div class="depth">
+        <h3>En une phrase</h3>
+        <p class="lead prose">
+          Chaque sorte de périphérique et chaque remplacement est un nœud d’un même arbre, avec sa propre table de
+          fonctions, si bien qu’une E/S descend l’arbre et que chaque nœud la répartit à sa façon, tandis que l’allocateur
+          choisit, selon la sorte du bloc, une classe de vdevs de premier niveau où le mettre.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En un paragraphe</h3>
+        <p class="prose">
+          Un <code>vdev_t</code> a un parent, des enfants, le vdev de premier niveau auquel il appartient, et un pointeur
+          vers un <code>vdev_ops_t</code> qui est son type. Le zio logique d’un bloc n’a pas de vdev :
+          <code>zio_vdev_io_start</code> le confie à l’<code>io_start</code> du miroir, avec les DVA du bloc comme enfants ;
+          chaque zio enfant atteint ensuite son vdev de premier niveau, dont l’<code>io_start</code> écrit chaque enfant
+          d’un miroir, les colonnes d’un raidz, ou un groupe de dRAID placé par une permutation fixe de ses enfants,
+          jusqu’aux feuilles qui émettent l’E/S disque. Seuls les vdevs de premier niveau possèdent des metaslabs, dans la
+          classe de leur biais ; <code>spa_preferred_class</code> envoie les blocs de la DDT en dedup, les métadonnées en
+          special, les petits blocs de données en special tant que la classe special est sous 75 %, et le reste en normale, et
+          <code>zio_dva_allocate</code> se replie sur une autre classe quand l’une est pleine. Un remplacement insère un
+          nœud <code>replacing</code> ou <code>spare</code> au-dessus de l’ancien disque, avec les fonctions du miroir,
+          jusqu’à la fin du resilver.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>En détail</h3>
+        <div class="prose">
+          <p><strong>Un nœud de l’arbre.</strong></p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VI}
+          from={239}
+          to={269}
+          symbol="struct vdev"
+          notes={[
+            { from: 241, text: "<code>vdev_ops</code> : le comportement du nœud, son type." },
+            { from: 243, text: "L’état propre au type : pour un raidz, sa parité ; pour un dRAID, ses permutations et la taille de ses groupes." },
+            { from: 244, to: 247, text: "L’arbre : le vdev de premier niveau auquel appartient ce nœud (un vdev de premier niveau pointe sur lui-même), le parent, les enfants." },
+            { from: 264, to: 269, text: "Seuls les vdevs de premier niveau possèdent des metaslabs et un groupe de metaslabs : eux seuls reçoivent des allocations. Les nœuds en dessous ne font qu’acheminer les E/S." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={VI}
+          from={101}
+          to={126}
+          symbol="vdev_ops_t"
+          notes={[
+            { from: 106, to: 107, text: "La conversion des tailles : un raidz transforme la taille d’un bloc en une taille allouée plus grande." },
+            { from: 110, to: 111, text: `Le chemin des E/S. La <a href="${L.rootOps}">racine n’a ni l’un ni l’autre</a> : une E/S ne commence jamais à la racine.` },
+            { from: 113, text: "Chaque type décide si un bloc touche un enfant endommagé." },
+            { from: 124, to: 125, text: "Le nom du type, et s’il s’agit d’une feuille." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Les types de la figure pointent vers <code>vdev_root_ops</code>, <a href={L.mirrorOps}><code>vdev_mirror_ops</code></a>,
+            <a href={L.raidzOps}><code>vdev_raidz_ops</code></a>, <a href={L.draidOps}><code>vdev_draid_ops</code></a>,
+            <a href={L.diskOps}><code>vdev_disk_ops</code></a> (sous Linux), et les tables du remplacement, du secours et
+            du secours distribué, plus bas. <strong>La descente.</strong> Le zio logique d’un bloc n’a pas de vdev, et
+            <a href={L.logical}><code>zio_vdev_io_start</code></a> le confie à la fonction du miroir, avec les DVA du bloc
+            comme enfants ; chaque zio enfant, qui a un vdev, va <a href={L.ioStart}>à l’<code>io_start</code> de ce
+            vdev</a>.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VM}
+          from={656}
+          to={693}
+          symbol="vdev_mirror_io_start"
+          notes={[
+            { from: 656, to: 660, text: `Une lecture normale choisit un seul enfant : pas un enfant dont la DTL dit <a href="${L.skipMissing}">qu’il lui manque le txg du bloc</a> ; un <a href="${L.preferDspare}">secours distribué d’abord</a> ; sinon <a href="${L.load}">le moins chargé</a>.` },
+            { from: 662, to: 669, text: "Les écritures vont à tous les enfants." },
+            { from: 671, to: 687, text: "Une exception : les écritures de réparation d’une reconstruction séquentielle, quand les données sont spéculatives, ne vont qu’à l’enfant en cours de reconstruction." },
+            { from: 689, to: 692, text: "Un zio enfant par enfant, au même décalage et de même taille." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            L’<code>io_start</code> d’un raidz construit sa carte et <a href={L.raidzMap}>émet une colonne par enfant</a>,
+            moins pour un petit bloc : la <a href={roomUrl(lang, "raidz")}>salle RAID-Z</a> montre comment ; une lecture
+            normale <a href={L.raidzRead}>ne lit que les colonnes de données</a>. Le dRAID est plus bas, avec la partie 4.
+          </p>
+          <p><strong>Les classes.</strong> Un vdev de premier niveau entre dans une classe quand son groupe de metaslabs est créé.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={V}
+          from={1546}
+          to={1579}
+          symbol="vdev_metaslab_group_create"
+          notes={[
+            { from: 1549, to: 1550, text: "Un périphérique de log sans biais explicite reçoit le biais log." },
+            { from: 1555, to: 1567, text: `Le biais choisit la classe : log, special, dedup, ou normale. <a href="${L.bias}">Quatre biais</a>, <a href="${L.classes}">six pointeurs de classe</a> dans le pool.` },
+            { from: 1571, to: 1578, text: `Tout vdev qui n’est pas un log reçoit un second groupe, dans la classe de log embarqué, ou dans celle du log embarqué du special pour un vdev special : de la place pour le ZIL sans périphérique de log. Un metaslab n’y est déplacé que <a href="${L.embedMin}">plus tard</a>, et seulement sur un vdev normal ou special de plus de 64 metaslabs.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={SM}
+          from={2121}
+          to={2156}
+          symbol="spa_preferred_class"
+          notes={[
+            { from: 2123, to: 2125, text: "La classe qu’une allocation a déjà essayée, s’il y en a une : au second appel, la fonction sait ce qui a échoué." },
+            { from: 2144, to: 2147, text: "Les blocs du ZIL ne passent jamais ici." },
+            { from: 2149, to: 2156, text: `Un bloc de la DDT : dedup si le pool en a une et qu’elle n’a pas été essayée ; sinon special, si le pool en a une (<a href="${L.ddtSpecial}"><code>spa_special_has_ddt</code></a>) et qu’elle n’a pas été essayée ; sinon normale. Un pool « a » une classe quand elle contient <a href="${L.hasSpecial}">au moins un groupe</a>.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={SM}
+          from={2158}
+          to={2179}
+          symbol="spa_preferred_class"
+          notes={[
+            { from: 2158, to: 2159, text: "Pas de vdev special, ou special a déjà échoué : normale." },
+            { from: 2161, to: 2163, text: `Les métadonnées (un type d’objet marqué comme tel, les <a href="${L.metadataType}">dnodes</a> par exemple, pas <a href="${L.fileType}">le contenu des fichiers</a>) et les blocs indirects des fichiers : special.` },
+            { from: 2169, to: 2176, text: `Un bloc de données pas plus grand que <code>special_small_blocks</code>, tant que special a alloué moins de 75 % de sa place. Au-delà, les <a href="${L.reserve}">derniers 25 %</a> sont réservés aux métadonnées.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={Z}
+          from={4368}
+          to={4407}
+          symbol="zio_dva_allocate"
+          notes={[
+            { from: 4368, to: 4378, text: "L’ordre : la classe habituelle, puis d’autres classes, puis un bloc gang. Pas la place du log embarqué, gardée pour le ZIL." },
+            { from: 4380, to: 4382, text: "Les copies du bloc, un DVA chacune, dans une seule classe." },
+            { from: 4391, to: 4402, text: "Quand dedup ou special déborde sur normale, le txg est noté, et les nouvelles entrées de la DDT reculent pendant quelques txg." },
+            { from: 4407, text: `<code>ENOSPC</code> : redemander à <code>spa_preferred_class</code> ; elle sait maintenant quelle classe a échoué, et <a href="${L.again}">l’allocation recommence</a> dans la suivante.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Un bloc du ZIL ne passe pas ici : <a href={L.zilOrder}><code>zio_alloc_zil</code></a> essaie la classe log, le
+            log embarqué du special, special, le log embarqué des vdevs normaux, puis normale, <a href={L.zilOneDva}>avec
+            un seul DVA</a> ; la <a href={roomUrl(lang, "zil")}>salle ZIL et SLOG</a> le suit. <strong>Les copies
+            ditto.</strong>
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path="module/zfs/metaslab.c"
+          from={5401}
+          to={5427}
+          symbol="metaslab_alloc_dva_range"
+          notes={[
+            { from: 5401, to: 5410, text: "Répartir les copies sur des vdevs consécutifs : seules deux pannes de vdevs de premier niveau voisins peuvent perdre un tel bloc." },
+            { from: 5420, to: 5423, text: "Le DVA d commence au groupe qui suit le vdev du DVA d − 1 : le vdev suivant de la classe, en faisant le tour. Une classe d’un seul vdev y met toutes les copies." },
+            { from: 5424, to: 5427, text: `Le premier DVA commence au rotor de la classe, qui <a href="${L.rotor}">avance</a> selon la taille des blocs, la profondeur des files et la place libre : la <a href="${roomUrl(lang, "metaslabs")}">salle des metaslabs</a>.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Combien de copies : pour les métadonnées, une de plus que <code>copies</code> <a href={L.copies}>avec
+            <code>redundant_metadata=all</code></a>, la <a href={L.redundant}>valeur par défaut</a> ; pour le MOS, qui
+            contient la DDT, <a href={L.mosCopies}><code>spa_max_replication</code></a>, <a href={L.maxRepl}>3</a>, et les copies d’un bloc sont <a href={L.copiesCap}>plafonnées</a> à ce même 3.
+          </p>
+          <p><strong>Un remplacement.</strong> Les tables du remplacement et du secours sont celles du miroir.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={VM}
+          from={997}
+          to={1021}
+          symbol="vdev_replacing_ops"
+          notes={[
+            { from: 1000, to: 1007, text: `L’ouverture, la fermeture, la taille, l’<code>io_start</code> et l’<code>io_done</code> du miroir, comme dans <a href="${L.mirrorOps}"><code>vdev_mirror_ops</code></a> et <a href="${L.spareOps}"><code>vdev_spare_ops</code></a>.` },
+            { from: 1019, text: "Seul le nom change." },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={SP}
+          from={8324}
+          to={8360}
+          symbol="spa_vdev_attach"
+          notes={[
+            { from: 8325, to: 8332, text: "Un disque de secours en service ne peut être remplacé que par un disque de secours libre." },
+            { from: 8356, to: 8359, text: `Un disque de secours reçoit un nœud <code>spare</code>, tout autre disque un nœud <code>replacing</code>. Un secours distribué ne peut <a href="${L.dspareOwn}">remplacer qu’un enfant de son propre dRAID</a>.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={V}
+          from={1418}
+          to={1449}
+          symbol="vdev_add_parent"
+          notes={[
+            { from: 1426, text: "Le nouveau nœud prend le <code>vdev_id</code> de l’ancien disque…" },
+            { from: 1439, to: 1440, text: "…et sa place parmi les enfants de son parent." },
+            { from: 1441, to: 1442, text: `L’ancien disque devient son enfant 0 ; <code>spa_vdev_attach</code> <a href="${L.attachLast}">ajoute ensuite le disque neuf</a> après lui, comme dernier enfant.` },
+            { from: 1445, to: 1446, text: `Si l’ancien disque était un vdev de premier niveau, le nouveau nœud devient le vdev de premier niveau et <a href="${L.topTransfer}">reprend</a> ses metaslabs, son groupe et son biais.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            La DTL du disque neuf est <a href={L.dtl}>marquée manquante</a> de <code>TXG_INITIAL</code> jusqu’au txg
+            courant plus <code>TXG_CONCURRENT_STATES</code> (<a href={L.dtlMax}>cette ligne</a>, <a href={L.txgConst}>3 et
+            4</a>) : une lecture d’un bloc plus ancien le saute, et c’est ce que le resilver corrige.
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={SP}
+          from={9438}
+          to={9456}
+          symbol="spa_vdev_resilver_done_hunt"
+          notes={[
+            { from: 9439, to: 9441, text: "Le premier enfant est le disque le plus ancien, le dernier le plus récent." },
+            { from: 9446, to: 9455, text: `Quand il ne manque plus rien au disque neuf et que l’ancien n’est plus nécessaire, l’ancien disque est détaché ; le nœud <code>replacing</code>, resté avec un seul enfant, <a href="${L.removeParent}">est retiré</a>.` },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Un nœud <code>spare</code> n’est pas défait par son propre resilver. Quand le disque d’origine est remis en ligne avec le <a href={L.unspareOnline}>drapeau unspare</a>, que <a href={L.zedUnspare}>zed</a> passe, ou que son défaut est <a href={L.unspareClear}>effacé</a>, il est marqué <code>vdev_unspare</code>, et la fin de son resilver <a href={L.unspare}>détache le secours</a>. Si le disque d’origine est lui-même remplacé, la fin de ce resilver
+            <a href={L.spareReplaced}>détache aussi le secours</a>. Sinon l’administrateur détache l’un des deux, et un nœud
+            <code>spare</code> resté avec un seul enfant <a href={L.detachSpare}>est retiré</a>.
+          </p>
+          <p><strong>Le dRAID.</strong> La table des permutations est générée, pas stockée.</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={DR}
+          from={506}
+          to={526}
+          symbol="vdev_draid_generate_perms"
+          notes={[
+            { from: 506, text: `Avec pour graine <code>VDEV_DRAID_SEED</code> et la graine de la table pour ce nombre d’enfants : <a href="${L.maps}">pour cinq, 256 permutations, graine <code>0xf46733b7f4d47dfd</code></a>.` },
+            { from: 514, to: 526, text: `Chaque ligne est un mélange de Fisher-Yates de la précédente, avec <a href="${L.rand}">xoroshiro128++</a>. Le résultat <a href="${L.verify}">est vérifié</a> contre la somme de contrôle conservée, <code>0x2a1648d74</code> pour cinq enfants ; la copie de la figure donne la même.` },
+          ]}
+        />
+        <Excerpt
+          lang={lang}
+          path={DR}
+          from={1042}
+          to={1064}
+          symbol="vdev_draid_map_alloc_row"
+          notes={[
+            { from: 1044, text: `La ligne de la table et sa rotation : <a href="${L.getPerm}">chaque ligne sert une fois par enfant</a>, décalée d’un cran à chaque fois.` },
+            { from: 1047, text: "La colonne i est la position (groupstart + i) modulo ndisks ; ndisks est le nombre d’enfants moins les secours distribués." },
+            { from: 1049, to: 1051, text: "Un groupe qui dépasse la fin d’une rangée continue sur la suivante." },
+            { from: 1053, text: "L’enfant : l’entrée de la ligne à cette position, plus la rotation, modulo le nombre d’enfants." },
+            { from: 1056, to: 1061, text: "La taille des colonnes comme en RAID-Z ; les premières colonnes sont la parité." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            Le groupe d’un bloc vient de son décalage, et <a href={L.ngroups}><code>zpool create</code> fixe
+            <code>ngroups</code></a> pour que les groupes remplissent des rangées entières : quatre pour draid1:2d:5c:1s, dont
+            les groupes ont <a href={L.derived}>trois de large, sur l’équivalent de quatre disques</a> parmi cinq enfants, en
+            rangées de <a href={L.rowHeight}>16 Mio</a>. Le commentaire de conception <a href={L.layoutComment}>dessine la
+            disposition</a>. Une écriture remplit toutes les colonnes de son groupe, une colonne vide ou courte complétée
+            par un <a href={L.shortSkip}>secteur de bourrage</a>, puisque « <a href={L.fullStripe}>dRAID always allocates a full stripe width</a> » (le dRAID alloue
+            toujours une bande complète) ; une lecture normale <a href={L.draidRead}>lit les colonnes de données qui
+            contiennent des données</a>. Les positions de <code>ndisks</code> à la dernière de chaque ligne ne reçoivent
+            aucune colonne : c’est la place des secours distribués. Un secours distribué est <a href={L.dspareName}>listé avec
+            les disques de secours</a>, et c’est une feuille dont l’<code>io_start</code> <a href={L.dspareIo}>envoie chaque
+            écriture</a> à l’enfant qui porte la place du secours <a href={L.dspareChild}>dans cette ligne</a>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">Ce que la figure laisse de côté</h2>
+      <p class="prose muted">
+        Quel vdev d’une classe reçoit la première copie d’un bloc, c’est le rotor de l’allocateur qui le décide, selon la
+        charge et la place libre : la figure avance le rotor d’un vdev par bloc, et place chaque copie sur un dRAID au début
+        du groupe suivant, chaque copie sur un raidz après la précédente. Les tailles des blocs sont des entrées : 4 Kio pour
+        le ZIL et les petits blocs de fichier, 16 Kio pour les métadonnées, 8 Kio pour la DDT, 128 Kio pour un grand bloc de
+        fichier, après compression. La lecture d’un miroir prend le premier enfant possible, là où le code prend le moins
+        chargé. Seule la classe special se remplit, et la place de son log embarqué reste libre. Les vdevs normaux et special
+        sont supposés assez grands pour porter un metaslab de log embarqué. Un remplacement par disque
+        à la fois ; le resilver lui-même, son ordre et la reconstruction séquentielle ne sont pas dessinés, seulement sa
+        fin. Les vdevs retirés (indirects), les trous, l’extension de RAID-Z, les blocs gang et les erreurs sont laissés de
+        côté. La vue 3D dessine le même état que la 2D ; aucune ne montre les décalages sur disque.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="vdevs" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

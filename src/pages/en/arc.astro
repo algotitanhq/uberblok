@@ -1,0 +1,467 @@
+---
+import Base from "../../layouts/Base.astro";
+import ArcLab from "../../components/ArcLab.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { gh } from "../../lib/openzfs";
+import { room, roomNumber } from "../../lib/rooms";
+
+const lang = "en";
+const r = room("arc");
+const A = "module/zfs/arc.c";
+const L = {
+  states: gh("include/sys/arc.h", 231, 238),
+  key: gh("include/sys/arc_impl.h", 472, 475),
+  counters: gh("include/sys/arc_impl.h", 162, 172),
+  fractions: gh("include/sys/arc_impl.h", 1032, 1035),
+  anon: gh(A, 5381, 5397),
+  mintime: gh(A, 1318),
+  hit: gh(A, 6025),
+  miss: gh(A, 6204, 6208),
+  hold: gh(A, 2334, 2338),
+  release: gh(A, 2369),
+  head: gh("module/zfs/multilist.c", 184),
+  tail: gh(A, 3922, 3924),
+  mfuHit: gh(A, 5450, 5459),
+  mfuGhost: gh(A, 5460, 5472),
+  hdrSize: gh(A, 1795, 1807),
+  evictedState: gh(A, 3828, 3830),
+  ghostDestroy: gh(A, 3820, 3823),
+  wt: gh(A, 4499, 4501),
+  evictImpl: gh(A, 4386, 4398),
+  statics: gh(A, 4464, 4465),
+  balance: gh(A, 459),
+  init: gh(A, 8038, 8040),
+  alloc: gh(A, 5251, 5252),
+  overflowing: gh(A, 5099, 5100),
+  recordsize: gh("module/zfs/dsl_dataset.c", 87, 91),
+  evictCb: gh(A, 4876, 4877),
+  evictLoop: gh(A, 4895, 4896),
+  adapt: gh(A, 5076, 5081),
+  cMax: gh(A, 5069, 5070),
+  reduce: gh(A, 4714),
+  blockSizes: gh("include/sys/fs/zfs.h", 1958, 1962),
+  l2arcWhat: gh(A, 8217, 8222),
+  feed: gh(A, 9771),
+  feedHz: gh(A, 9791),
+  feedTail: gh(A, 9530, 9538),
+  l2cOnly: gh(A, 3805, 3819),
+  l2cHit: gh(A, 5481, 5488),
+  sublists: gh(A, 7518, 7543),
+  randomSublist: gh(A, 4205, 4213),
+  prefetchLife: gh(A, 3832, 3839),
+  uncached: gh(A, 5473, 5480),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="arc"
+  title="The ARC · Uberblok"
+  description="How the ZFS ARC keeps a scan from wiping its cache, with MRU, MFU and ghost lists, and how ghost hits move its balance in OpenZFS 2.4.4: interactive, with the code."
+>
+  <article class="wrap">
+    <header class="room-head">
+      <p class="kicker">Room {roomNumber(r.id)}</p>
+      <h1>{r.title.en}</h1>
+      <div class="prose problem">
+        <p class="lead">
+          A cache in memory has to choose what to forget. Forget the least recently used block, as an LRU cache does, and
+          one large read, a backup or a scan of a big file, pushes out everything that was being reused: every scanned block
+          is more recent than the working set. Forget the least frequently used one, as an LFU cache does, and the blocks
+          that were hot yesterday stay, however cold they are today.
+        </p>
+        <p>
+          The ARC, the cache of ZFS, keeps the blocks seen once recently on one list, MRU, and the blocks seen at least
+          twice on another, MFU, so a scan only passes through the first. And it remembers what it has just evicted: a
+          <em>ghost</em> list keeps the header of each evicted block, without its data. A read that finds a ghost is a miss
+          that a bigger list would have turned into a hit, and the ARC shifts its balance towards that list.
+        </p>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="lab">
+      <h2 id="lab"><span class="n">1</span> Read, scan, read again</h2>
+      <div class="prose">
+        <p>
+          The cache below holds 16 blocks of 128 KiB: that is its target size, <code>arc_c</code>. It opens with a hot
+          set, H1 to H6, read twice a second apart, so all six are in MFU. Each list runs from its head, the most recent,
+          to its tail, which is evicted first. Read a new block, scan twelve new ones, read the hot set again, or select any
+          block to read it, cached, ghost or forgotten. A clock moves one second before each action, or 10 ms if you choose.
+        </p>
+        <p>
+          Try a scan first: it passes through MRU, and the hot set stays. Then read a block from the MRU ghost list and
+          watch <code>arc_pd</code> and the MRU target rise. Read a few scan blocks again to promote them, read new blocks
+          until MFU gives up a hot block, and read that one back from the MFU ghost list: the balance moves the other way.
+          Last, at 10 ms, read the same new block twice.
+        </p>
+      </div>
+      <ArcLab lang={lang} />
+    </section>
+
+    <section class="section" aria-labelledby="depths">
+      <h2 id="depths">The idea, at three depths</h2>
+
+      <div class="depth">
+        <h3>In one sentence</h3>
+        <p class="lead prose">
+          The ARC keeps blocks seen once apart from blocks seen twice, remembers the headers of what it evicted, and when
+          a read finds one of those ghosts it gives more room to the list that would have kept the block.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In one paragraph</h3>
+        <p class="prose">
+          A new block enters MRU. A second read more than <code>ARC_MINTIME</code>, about 62 ms, after the first promotes
+          it to MFU; re-reads within one burst count as one use. When the cache is over <code>arc_c</code>, an eviction
+          pass takes blocks from the tail of MRU if MRU is above its share, and from the tail of MFU otherwise. An evicted
+          block loses its data, but its header moves to the matching ghost list, which may hold half of what the other
+          lists hold. Reading a ghost is a miss: the block is read from disk again, goes to MFU, and its size is counted as
+          a ghost hit. There is no <code>arc_p</code> any more in OpenZFS 2.4.4. The shares are fixed-point fractions,
+          <code>arc_pd</code> for the MRU share of data, <code>arc_pm</code> for metadata and <code>arc_meta</code> between
+          the two, and the next eviction pass moves them with the ghost hits it finds: up for hits in the MRU ghost list,
+          down for hits in the MFU ghost list, by at most about 1/32 at a time.
+        </p>
+      </div>
+
+      <div class="depth">
+        <h3>In detail</h3>
+        <div class="prose">
+          <p>
+            <strong>States and headers.</strong> A block in the ARC has a header, <code>arc_buf_hdr_t</code>, keyed by
+            <a href={L.key}>the block’s DVA and birth txg</a>, and the header is in <a href={L.states}>one of seven states</a>:
+            anon, MRU, MRU ghost, MFU, MFU ghost, L2C only and uncached. The figure draws four of them, as lists. The header
+            records its state, <a href={L.counters}>the time of its last access, <code>b_arc_access</code>, and hit counters</a>.
+            A new block goes from anon <a href={L.anon}>to MRU</a>.
+          </p>
+          <p><strong>Seen once, seen twice.</strong> A hit on an MRU block:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={A}
+          from={5398}
+          to={5428}
+          symbol="arc_access"
+          notes={[
+            {
+              from: 5403,
+              to: 5406,
+              text: "A hit on a block whose read is still in flight only refreshes its time. In the figure every read completes at once.",
+            },
+            { from: 5407, to: 5408, text: "The hit is counted on the header." },
+            {
+              from: 5414,
+              to: 5417,
+              text: "A block first read by prefetch is not promoted by the demand read that follows. The figure has no prefetch.",
+            },
+            {
+              from: 5423,
+              to: 5428,
+              text: "More than <code>ARC_MINTIME</code> after <code>b_arc_access</code>: to MFU, and the time is refreshed. Otherwise nothing moves, not even <code>b_arc_access</code>, so a series of re-reads less than 62 ms apart is measured from the first one. The test is strict: exactly 62 ms does not promote.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <code>ARC_MINTIME</code> is <a href={L.mintime}><code>hz &gt;&gt; 4</code>, “62 ms”</a>. A hit on an MFU block
+            <a href={L.mfuHit}>stays in MFU</a> and refreshes <code>b_arc_access</code>.
+          </p>
+          <p>
+            <strong>Head and tail.</strong> <code>arc_read</code> calls <code>arc_access</code> <a href={L.hit}>on a hit</a>,
+            and on a miss <a href={L.miss}>before the data is allocated</a>. While a reader holds a block, its header is
+            <a href={L.hold}>off its list</a>; the last release <a href={L.release}>puts it back</a>, at
+            <a href={L.head}>the head</a>, and eviction <a href={L.tail}>takes from the tail</a>. So each list is in order
+            of last use. In the figure the reader lets go of each block at once.
+          </p>
+          <p><strong>Eviction keeps the header.</strong> When a block is evicted from MRU or MFU:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={A}
+          from={3876}
+          to={3891}
+          symbol="arc_evict_hdr"
+          notes={[
+            { from: 3876, to: 3880, text: "The data is freed." },
+            {
+              from: 3882,
+              text: `The header moves to the ghost state <a href="${L.evictedState}">chosen above</a>: MRU to MRU ghost, MFU to MFU ghost. In the figure it slides into the head of the ghost list, without data.`,
+            },
+            {
+              from: 3884,
+              to: 3889,
+              text: "Only an uncached buffer’s header is destroyed. A ghost header stays in the hash table, so a later read of the same block finds it.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p><strong>Which list gives up a block.</strong> The eviction pass, after its metadata steps:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={A}
+          from={4527}
+          to={4556}
+          symbol="arc_evict"
+          notes={[
+            {
+              from: 4527,
+              to: 4541,
+              text: "Metadata first: MRU metadata down to its target, then MFU metadata down to the metadata share. The figure holds data blocks only, so these steps evict nothing.",
+            },
+            {
+              from: 4543,
+              to: 4550,
+              text: "MRU data, down to its target <code>w = wt · arc_pd</code>, and no more than the cache is over <code>arc_c</code> (<code>asize - ac</code>). An MRU at or under its target gives up nothing.",
+            },
+            { from: 4552, to: 4556, text: "MFU data gives up whatever overshoot remains." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            <code>wt</code> is <a href={L.wt}>what can be evicted</a>, <code>arc_c</code> itself when every block in the cache
+            is evictable, as in the figure. Each step evicts <a href={L.evictImpl}>at most what the list holds, and nothing for
+            a negative amount</a>, from the tail, until it has evicted at least the amount asked. So MRU is not evicted down
+            to its target in one go: it gives up its tail only while the cache is over <code>arc_c</code>. The figure’s
+            first scan shows it: MRU keeps 10 blocks against a target of 8, because each new block puts the cache only one
+            block over.
+          </p>
+          <p><strong>How long the ghosts last.</strong> At the end of the same pass:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={A}
+          from={4558}
+          to={4587}
+          symbol="arc_evict"
+          notes={[
+            {
+              from: 4569,
+              to: 4572,
+              text: "The MRU-data ghost list may hold half of the three other live lists. The figure has no metadata lists, so that is half of MFU.",
+            },
+            {
+              from: 4579,
+              to: 4582,
+              text: "The MFU-data ghost list: half of MRU in the figure.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            A ghost list is not the size of the cache. In the figure, with an empty MFU, the MRU ghost list holds nothing. A header trimmed
+            from a ghost list <a href={L.ghostDestroy}>is destroyed</a>; the figure lists it as forgotten, and reading the
+            block again is a new block to the ARC.
+          </p>
+          <p><strong>A ghost hit.</strong> Reading a block whose header is in the MRU ghost list:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={A}
+          from={5429}
+          to={5449}
+          symbol="arc_access"
+          notes={[
+            {
+              from: 5432,
+              to: 5435,
+              text: "“Would we have bigger MRU, it would be an MRU hit”: a ghost hit is a miss that a bigger list would have avoided. The data is read from disk again.",
+            },
+            {
+              from: 5437,
+              to: 5441,
+              text: `Counted on the header, and the block’s size (<a href="${L.hdrSize}">its compressed size if compressed</a>) added to the MRU ghost list’s hit counter. The figure shows the counter under each ghost list.`,
+            },
+            {
+              from: 5442,
+              to: 5449,
+              text: "Back into the cache in MFU, since this is its second use; in MRU if the block was a prefetch.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            An MFU-ghost hit <a href={L.mfuGhost}>does the same with the MFU ghost list’s counter</a> and goes back to MFU.
+            <code>arc_access</code> changes no target: it only adds up bytes. The eviction pass reads them.
+          </p>
+          <p><strong>From ghost hits to a balance.</strong> At the start of each pass:</p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={A}
+          from={4479}
+          to={4497}
+          symbol="arc_evict"
+          notes={[
+            {
+              from: 4480,
+              to: 4491,
+              text: `The ghost-hit bytes since the previous pass, four ways: MRU ghost and MFU ghost, data and metadata. The previous values <a href="${L.statics}">are kept between passes</a>.`,
+            },
+            {
+              from: 4494,
+              to: 4495,
+              text: `<code>arc_meta</code>, the metadata share: up with metadata ghost hits, down with data ghost hits, the downward step divided by <code>zfs_arc_meta_balance / 100</code>, <a href="${L.balance}">5 by default</a>.`,
+            },
+            {
+              from: 4496,
+              text: "<code>arc_pd</code>, the MRU share of data: up with MRU-ghost data hits, down with MFU-ghost data hits. The figure’s gauge.",
+            },
+            { from: 4497, text: "<code>arc_pm</code>, the same for metadata." },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            These three replace <code>arc_p</code>. They are <a href={L.fractions}>fractions of 2<sup>32</sup></a>, and
+            start <a href={L.init}>at 1/4 for metadata and 1/2 for each MRU share</a>. The first argument after the
+            fraction is the ghost target size of the previous pass, so a hit moves a fraction by about its size against
+            the size of the ghost lists:
+          </p>
+        </div>
+        <Excerpt
+          lang={lang}
+          path={A}
+          from={4405}
+          to={4442}
+          symbol="arc_evict_adj"
+          notes={[
+            {
+              from: 4409,
+              to: 4410,
+              text: "No change before there is any ghost target (the figure’s first pass) or without hits.",
+            },
+            {
+              from: 4417,
+              to: 4421,
+              text: "Hits of 1/16 of the ghost total or more are scaled down to about 1/32 of it: one pass moves a fraction by at most about 1/32 of its range. In the figure, one ghost hit is enough to reach that limit.",
+            },
+            {
+              from: 4424,
+              to: 4426,
+              text: "A shift chosen so the division keeps as many bits as possible.",
+            },
+            {
+              from: 4428,
+              to: 4435,
+              text: "Near 0 or 1 (one side four times the other), the step towards that end is divided further: a fraction approaches its ends ever more slowly.",
+            },
+            {
+              from: 4436,
+              text: "The downward step divided by <code>balance / 100</code>: 1 for <code>arc_pd</code>.",
+            },
+          ]}
+        />
+        <div class="prose after">
+          <p>
+            The figure’s first ghost hit, worked through: <code>arc_pd</code> = 2<sup>31</sup>, one half; ghost targets of
+            8 blocks, <code>total</code> = 2<sup>20</sup> bytes; one hit of 128 KiB, 2<sup>17</sup>. That is over 1/16 of the
+            total, so it is scaled by 4 to 2<sup>15</sup>; the shift is 32; <code>up</code> = 2<sup>47</sup> / 2<sup>20</sup>
+            = 2<sup>27</sup>, and <code>arc_pd</code> becomes 2<sup>31</sup> + 2<sup>27</sup>, 53.125%. The MRU target goes
+            from 8 to 8.5 blocks. A hit in the MFU ghost list takes the same 2<sup>27</sup> away.
+          </p>
+          <p>
+            <strong>When a pass runs.</strong> Not on a hit: a hit allocates nothing. Allocating the data of a miss
+            <a href={L.alloc}>may wake the eviction thread</a>, once the cache is over <code>arc_c</code> by more than
+            <a href={L.overflowing}><code>zfs_max_recordsize</code></a>, <a href={L.recordsize}>16 MiB on 64-bit systems</a>.
+            The thread <a href={L.evictCb}>runs <code>arc_evict</code></a> and <a href={L.evictLoop}>goes on while it evicts
+            something and the cache is still over <code>arc_c</code></a>.
+          </p>
+          <p>
+            <strong><code>arc_c</code> itself</strong> is another control. It grows <a href={L.adapt}>by the size of each allocation, at least
+            128 KiB, while the cache is within 32 MiB of it</a> (<a href={L.blockSizes}>twice the largest block size</a>), up to <a href={L.cMax}><code>arc_c_max</code></a>, and shrinks
+            <a href={L.reduce}>under memory pressure</a>. Ghost hits move the shares of <code>arc_c</code>, never
+            <code>arc_c</code>. The figure keeps it at its maximum.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="l2arc">
+      <h2 id="l2arc">Coda: the L2ARC</h2>
+      <div class="prose">
+        <p>
+          A cache device can extend the ARC: in the words of its design comment, <a href={L.l2arcWhat}>“a cache layer
+          in-between main memory and disk”</a>, on solid-state disks for instance. The same comment says how it is fed:
+        </p>
+      </div>
+      <Excerpt
+        lang={lang}
+        path={A}
+        from={8261}
+        to={8274}
+        symbol="Level 2 ARC"
+        notes={[
+          {
+            from: 8261,
+            to: 8264,
+            text: "Eviction does not write to the cache device: it frees data and leaves headers on the ghost lists, as above.",
+          },
+          {
+            from: 8266,
+            to: 8270,
+            text: "A feed thread copies blocks from the eviction end of MRU and MFU before they are evicted.",
+          },
+        ]}
+      />
+      <div class="prose after">
+        <p>
+          That thread, <a href={L.feed}><code>l2arc_feed_thread</code></a>, wakes <a href={L.feedHz}>about once a
+          second</a> and reads the lists <a href={L.feedTail}>from their tails</a>. A ghost header whose block is on the
+          cache device is not destroyed when trimmed: it stays, <a href={L.l2cOnly}>as L2C only</a>, and a read of it
+          <a href={L.l2cHit}>goes back to MRU</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="section simplified" aria-labelledby="simplified">
+      <h2 id="simplified">What the figure leaves out</h2>
+      <p class="prose muted">
+        The figure runs the functions above over data blocks only, all of 128 KiB and uncompressed: the metadata lists are
+        empty, so the metadata terms of the pass are zero, and <code>arc_meta</code> and <code>arc_pm</code>, which then
+        change no data target, are not drawn. Each state is one list; the code spreads headers over
+        <a href={L.sublists}>sublists by hash</a> and evicts them <a href={L.randomSublist}>in turn</a>, so its order is
+        close to, not exactly, the order of last use. A pass runs right after each miss that puts the cache over
+        <code>arc_c</code>, rather than in a thread woken 16 MiB later, which at the figure’s scale would be eight caches.
+        <code>arc_c</code> is fixed, the clock is logical, and each block is released as soon as it is read. No prefetch
+        (prefetched blocks also have <a href={L.prefetchLife}>a minimum lifetime</a>), no <a href={L.uncached}>uncached</a>
+        or dirty buffers, no compressed or encrypted copies, no L2ARC.
+      </p>
+    </section>
+  </article>
+  <RoomNav lang={lang} roomId="arc" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+    max-width: 18ch;
+  }
+  .problem {
+    margin-top: var(--space-6);
+  }
+  h2 .n {
+    font-family: var(--font-caption);
+    font-style: italic;
+    color: var(--accent);
+    margin-right: 0.3em;
+  }
+  .depth {
+    margin-top: var(--space-6);
+  }
+  .depth h3 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+  .after {
+    margin-top: var(--space-5);
+  }
+</style>

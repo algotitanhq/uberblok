@@ -1,0 +1,170 @@
+---
+import Base from "../../layouts/Base.astro";
+import UberblockRing from "../../components/UberblockRing.astro";
+import VisitMap from "../../components/VisitMap.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import HallExhibit from "../../components/HallExhibit.astro";
+import Dedication from "../../components/Dedication.astro";
+import { gh, OPENZFS_SHA, OPENZFS_TAG } from "../../lib/openzfs";
+
+const lang = "en";
+const L = {
+  ub: gh("include/sys/uberblock_impl.h", 122, 128),
+  magic: gh("include/sys/uberblock_impl.h", 46),
+  labels: gh("include/sys/vdev_impl.h", 560, 562),
+  ring: gh("include/sys/vdev_impl.h", 482),
+  slot: gh("include/sys/vdev_impl.h", 491, 496),
+  sync: gh("module/zfs/vdev_label.c", 1782, 1784),
+  mmp: gh("include/sys/vdev_impl.h", 488),
+  load: gh("module/zfs/vdev_label.c", 1547, 1562),
+  compare: gh("module/zfs/vdev_label.c", 1495, 1528),
+};
+---
+
+<Base
+  lang={lang}
+  roomId="hall"
+  title="Uberblok, an interactive museum of ZFS"
+  description="An interactive museum of ZFS, room by room: each idea of the OpenZFS source made visible, with the real code."
+>
+  <div class="wrap">
+    <header class="hero">
+      <div class="hero-text">
+        <p class="kicker">A museum of ZFS, read in its source</p>
+        <h1>Uberblok</h1>
+        <div class="prose manifesto">
+          <p class="lead">
+            Storage has always had the same enemies: disks that lie, writes cut short, a crash in the middle of an
+            update. ZFS answers them with a handful of ideas. This museum shows them one room at a time, from the code
+            that implements them.
+          </p>
+          <p class="muted">
+            Every animation maps to lines of OpenZFS <code>{OPENZFS_TAG}</code>, frozen at commit
+            <a href={`https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`}><code>{OPENZFS_SHA.slice(0, 12)}</code></a>,
+            and every excerpt links to them. Nothing here is drawn from memory.
+          </p>
+          <p class="why"><a href="#why">Why this museum? <span aria-hidden="true">↓</span></a></p>
+        </div>
+      </div>
+      <div class="hero-art">
+        <HallExhibit lang={lang} />
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="object">
+      <h2 id="object">The object in the Hall: the uberblock</h2>
+      <div class="prose">
+        <p>
+          A pool is millions of blocks spread over several disks. After a crash, the system must find its current,
+          consistent state without scanning any of them. So one small record names the root of everything: the
+          <a href={L.ub}>uberblock</a>. It holds a transaction group number, <code>ub_txg</code>, and one block pointer,
+          <code>ub_rootbp</code>; every other block of the pool is reachable from that pointer.
+        </p>
+        <p>
+          Each disk carries <a href={L.labels}>four labels</a>, two at its start and two at its end, and each label keeps
+          a <a href={L.ring}>128 KiB ring</a> of uberblocks. A new uberblock never overwrites the previous one: the
+          uberblock of txg <var>N</var> goes to <a href={L.sync}>slot <var>N</var> mod the number of slots</a> (with <code>multihost=on</code>,
+          <a href={L.mmp}>the last slot is kept for MMP</a> and the ring turns on one slot fewer). On import,
+          ZFS reads every slot of every label and <a href={L.load}>keeps the valid uberblock</a> with
+          <a href={L.compare}>the highest txg</a>.
+        </p>
+        <p>
+          The ring is often said to hold 128 uberblocks. It holds 128 KiB: <a href={L.slot}>a slot takes one sector</a>,
+          rounded up to 1 KiB and capped at 8 KiB, so 128 slots on 512-byte sectors, 64 at ashift 11, 32 on the 4K-sector
+          disks of today, 16 beyond. Change the sector size and watch the next txgs
+          take their slots in turn.
+        </p>
+      </div>
+      <div class="figure">
+        <UberblockRing lang={lang} />
+      </div>
+      <p class="caption aside">
+        Every uberblock starts with the same magic number, <a href={L.magic}><code>0x00bab10c</code></a>: “oo-ba-bloc”.
+      </p>
+    </section>
+
+    <section class="section" aria-labelledby="map">
+      <h2 id="map">Map of the visit</h2>
+      <p class="prose muted">
+        The rooms follow the data: the root and the tree, how the tree changes, where blocks land, what the tree makes
+        possible, then the features built on top, and the engine room, where the museum says how it was made.
+      </p>
+      <div class="map">
+        <VisitMap lang={lang} />
+      </div>
+    </section>
+
+    <Dedication lang={lang} />
+  </div>
+  <RoomNav lang={lang} roomId="hall" />
+</Base>
+
+<style>
+  .hero {
+    padding-top: var(--space-8);
+  }
+  /* The release tag and the commit stay whole (zfs-2.4.4 would break at its hyphen). */
+  .manifesto code {
+    white-space: nowrap;
+  }
+  /* Fig. 1 under the text on a narrow screen, beside it on a wide one (DECISIONS.md D15.2). */
+  .hero-art {
+    margin-top: var(--space-6);
+    max-width: 34rem;
+  }
+  @media (min-width: 60rem) {
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(26rem, 1fr) minmax(24rem, 34rem);
+      grid-template-areas: "kicker art" "title art" "text art";
+      grid-template-rows: auto auto 1fr;
+      column-gap: var(--space-7);
+      align-items: start;
+    }
+    .hero-text {
+      display: contents;
+    }
+    .kicker {
+      grid-area: kicker;
+    }
+    .hero h1 {
+      grid-area: title;
+    }
+    .manifesto {
+      grid-area: text;
+    }
+    /* The exhibit bleeds into the right margin, up to 6 rem, when there is one. */
+    .hero-art {
+      grid-area: art;
+      margin-top: 0;
+      max-width: none;
+      margin-inline-end: calc(-1 * min(6rem, max(0px, (100vw - 72rem) / 2)));
+    }
+  }
+  .hero h1 {
+    margin-top: var(--space-3);
+    font-size: clamp(3.2rem, 2rem + 7vw, 7.5rem);
+    font-weight: 250;
+    letter-spacing: -0.035em;
+  }
+  .manifesto {
+    margin-top: var(--space-6);
+  }
+  .why {
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-1);
+  }
+  .why a {
+    color: var(--accent);
+  }
+  .figure {
+    margin-top: var(--space-6);
+  }
+  .aside {
+    margin-top: var(--space-5);
+  }
+  .map {
+    margin-top: var(--space-5);
+  }
+</style>

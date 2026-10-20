@@ -1,0 +1,58 @@
+---
+import Base from "../../layouts/Base.astro";
+import Timeline from "../../components/Timeline.astro";
+import RoomNav from "../../components/RoomNav.astro";
+import { room, roomNumber } from "../../lib/rooms";
+import { SOURCES_URL } from "../../lib/sources";
+
+const lang = "en";
+const r = room("history");
+---
+
+<Base
+  lang={lang}
+  roomId="history"
+  title="History wing · Uberblok"
+  description="The history of ZFS from Sun Microsystems to OpenZFS, as a timeline in which every fact, date and name links to its source."
+>
+  <article class="wrap" data-sourced-page="history">
+    <header class="room-head">
+      <p class="kicker">Wing {roomNumber(r.id)}</p>
+      <h1>{r.title.en}</h1>
+      <div class="prose">
+        <p class="lead">
+          The code quoted in the rooms of this museum has a history: a team, a company, a licence, forks and a
+          reunion. This wing tells it in dated milestones, and says nothing that a source does not say.
+        </p>
+        <p class="muted">
+          Every fact, date, name and quote below carries a numbered note that leads to its source, and every source is
+          listed with the claim it supports in <a href={SOURCES_URL}><code>SOURCES.md</code></a>. Where no source
+          could be found, the fact was left out.
+        </p>
+      </div>
+    </header>
+    <Timeline lang={lang}>
+      <p>
+        Original posts, release notes, commits and press releases where they exist; an archived copy (Wayback Machine)
+        where the original page has moved. The claim each source supports is in
+        <a href={SOURCES_URL}><code>SOURCES.md</code></a>.
+      </p>
+    </Timeline>
+  </article>
+  <RoomNav lang={lang} roomId="history" />
+</Base>
+
+<style>
+  .room-head {
+    padding-top: var(--space-7);
+  }
+  .room-head h1 {
+    margin-top: var(--space-3);
+  }
+  .room-head .prose {
+    margin-top: var(--space-6);
+  }
+  .room-head + :global(.eras) {
+    margin-top: var(--space-6);
+  }
+</style>

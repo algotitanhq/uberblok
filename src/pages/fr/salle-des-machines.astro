@@ -4,6 +4,7 @@ import RoomNav from "../../components/RoomNav.astro";
 import { room, roomNumber, roomUrl } from "../../lib/rooms";
 import { OPENZFS_SHA, OPENZFS_TAG } from "../../lib/openzfs";
 import { COUNTS, REPO_URL, repoFile, VERSIONS } from "../../lib/stack";
+import { ANALYTICS_ON } from "../../lib/analytics";
 
 const lang = "fr";
 const r = room("engine-room");
@@ -87,8 +88,11 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
         <div>
           <dt>Hébergement</dt>
           <dd>
-            Des fichiers statiques sur Cloudflare Workers. Ni code serveur, ni cookie, ni mesure d’audience : le
-            navigateur garde deux choix dans son stockage local, le thème et la langue.
+            {
+              ANALYTICS_ON
+                ? "Des fichiers statiques sur Cloudflare Workers. Ni code serveur, ni cookie. Cloudflare Web Analytics compte les visites sans cookie ni empreinte numérique ; pour cela, votre navigateur envoie à Cloudflare l’adresse de la page, la page d’origine, le type de navigateur et les temps de chargement, avec votre adresse IP comme pour toute requête web. Le navigateur garde deux choix dans son stockage local, le thème et la langue."
+                : "Des fichiers statiques sur Cloudflare Workers. Ni code serveur, ni cookie, ni mesure d’audience : le navigateur garde deux choix dans son stockage local, le thème et la langue."
+            }
           </dd>
         </div>
       </dl>

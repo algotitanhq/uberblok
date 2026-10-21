@@ -3,8 +3,10 @@
 // (DECISIONS.md D19.2):
 //   - the `/*` rule carries the only Content-Security-Policy, with a script-src
 //     and no script-src-elem or script-src-attr (which would override it), and
-//     script-src holds only 'self', 'none' and sha256 hashes (no 'unsafe-inline',
-//     'unsafe-eval', host, scheme or wildcard);
+//     script-src holds only 'self', 'none', sha256 hashes and the one host of the
+//     Cloudflare Web Analytics beacon (no 'unsafe-inline', 'unsafe-eval', other host,
+//     scheme or wildcard), connect-src is present and holds only 'self' and the
+//     beacon's report host, and default-src only 'self' or 'none' (D19.3);
 //   - every inline <script> of a built page has its sha256 in script-src, and
 //     every hash in script-src belongs to an inline script (none stale);
 //   - no page carries an inline event handler (on...=) or a javascript: URL,
@@ -39,7 +41,10 @@ const directive = (csp, name) =>
 export const scriptSources = (csp) => directive(csp, "script-src");
 
 // The only sources script-src may hold: anything else (a keyword, a host, a scheme) widens it.
-const STRICT = /^('self'|'none'|'sha256-[A-Za-z0-9+/]+=*')$/;
+// The one host is the Cloudflare Web Analytics beacon's script (D19.3).
+const STRICT = /^('self'|'none'|'sha256-[A-Za-z0-9+/]+=*'|https:\/\/static\.cloudflareinsights\.com)$/;
+// And the only sources connect-src may hold: the beacon reports to this host.
+const CONNECT = /^('self'|'none'|https:\/\/cloudflareinsights\.com)$/;
 
 const decode = (s) =>
   s.replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
@@ -62,6 +67,10 @@ export function check(headers, pages) {
   if (!sources) return [...problems, "no script-src in the Content-Security-Policy"];
   for (const d of ["script-src-elem", "script-src-attr"]) if (directive(csp, d)) problems.push(`${d} overrides script-src`);
   for (const s of sources) if (!STRICT.test(s)) problems.push(`script-src allows ${s}`);
+  const connect = directive(csp, "connect-src");
+  if (!connect) problems.push("no connect-src in the Content-Security-Policy");
+  for (const s of connect ?? []) if (!CONNECT.test(s)) problems.push(`connect-src allows ${s}`);
+  for (const s of directive(csp, "default-src") ?? []) if (!/^('self'|'none')$/.test(s)) problems.push(`default-src allows ${s}`);
   const allowed = new Set(sources.filter((s) => s.startsWith("'sha256-")));
   const used = new Set();
   for (const [file, html] of pages) {

@@ -4,6 +4,7 @@ import RoomNav from "../../components/RoomNav.astro";
 import { room, roomNumber, roomUrl } from "../../lib/rooms";
 import { OPENZFS_SHA, OPENZFS_TAG } from "../../lib/openzfs";
 import { COUNTS, REPO_URL, repoFile, VERSIONS } from "../../lib/stack";
+import { ANALYTICS_ON } from "../../lib/analytics";
 
 const lang = "es";
 const r = room("engine-room");
@@ -88,8 +89,11 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
         <div>
           <dt>Alojamiento</dt>
           <dd>
-            Archivos estáticos en Cloudflare Workers. Sin código de servidor, sin cookies, sin analítica: el navegador
-            guarda dos preferencias en su almacenamiento local, el tema y el idioma.
+            {
+              ANALYTICS_ON
+                ? "Archivos estáticos en Cloudflare Workers. Sin código de servidor, sin cookies. Cloudflare Web Analytics cuenta las visitas sin cookies ni huella digital; para ello, su navegador envía a Cloudflare la dirección de la página, la página de origen, el tipo de navegador y los tiempos de carga, con su dirección IP como en cualquier petición web. El navegador guarda dos preferencias en su almacenamiento local, el tema y el idioma."
+                : "Archivos estáticos en Cloudflare Workers. Sin código de servidor, sin cookies, sin analítica: el navegador guarda dos preferencias en su almacenamiento local, el tema y el idioma."
+            }
           </dd>
         </div>
       </dl>

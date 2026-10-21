@@ -80,13 +80,14 @@ CHROME_PATH=<chromium> node scripts/lighthouse.mjs http://127.0.0.1:4321 shots/l
 
 ## Deploy
 
-The site itself has no settings. Deployment is configured in GitHub and Cloudflare:
+The site itself has one value in the code, the analytics token. Deployment is configured in GitHub and Cloudflare:
 
 | Key | Kind | Where | Role |
 |---|---|---|---|
 | `PUBLIC_RELEASE` | repository variable | GitHub Actions | The deploy step runs only when it is `true`. |
 | `CLOUDFLARE_API_TOKEN` | organization secret (`algotitanhq`) | GitHub Actions | API token with "Workers Scripts: Edit" on the one account that hosts the Worker; the deploy step asks Cloudflare for that account and masks its ID in the logs. |
 | `CLOUDFLARE_ACCOUNT_ID` | organization variable (`algotitanhq`) | GitHub Actions | Not read by this workflow: a value from `vars` would show in clear in the logs. |
+| `CF_WEB_ANALYTICS_TOKEN` | constant | `src/lib/analytics.ts` | Cloudflare Web Analytics site token (public). The beacon is built in only with `PUBLIC_RELEASE` on and a non-empty token (DECISIONS.md D18.2). |
 | `wrangler.jsonc` | file | repository | Cloudflare Workers with static assets serving `dist/`; `preview_urls` is off. |
 
 Everything goes through GitHub Actions (`.github/workflows/ci.yml`): tests, excerpt check,

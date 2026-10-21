@@ -3,6 +3,7 @@
 // when the browser lists it, else English. Static hosting has no Accept-Language, so
 // this is a few lines of inline script, with every link visible for no-JS visitors.
 import "../styles/global.css";
+import Analytics from "../components/Analytics.astro";
 ---
 
 <!doctype html>
@@ -28,6 +29,7 @@ import "../styles/global.css";
         location.replace("/" + lang + "/");
       })();
     </script>
+    <Analytics />
   </head>
   <body>
     <main class="wrap pick">

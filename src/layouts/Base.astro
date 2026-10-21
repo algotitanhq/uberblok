@@ -9,6 +9,7 @@ import { LANG_NAME, LANGS, ROOMS, roomUrl, type Lang } from "../lib/rooms";
 import { REPO_URL, repoFile } from "../lib/stack";
 import { UI } from "../lib/ui";
 import { OPENZFS_SHA, OPENZFS_TAG } from "../lib/openzfs";
+import Analytics from "../components/Analytics.astro";
 
 interface Props {
   lang: Lang;
@@ -55,6 +56,7 @@ const canonical = new URL(roomUrl(lang, roomId), Astro.site).href;
         if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light";
       } catch {}
     </script>
+    <Analytics />
   </head>
   <body>
     <a class="skip-link" href="#content">{t.skip}</a>

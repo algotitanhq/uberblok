@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { check, policy, sha256 } from "../check-csp.mjs";
 
 const A = "console.log(1);";
-const headers = (srcs) => `# comment\n/*\n  X-Frame-Options: DENY\n  Content-Security-Policy: default-src 'self'; script-src 'self' ${srcs}; object-src 'none'\n`;
+const headers = (srcs) => `# comment\n/*\n  X-Frame-Options: DENY\n  Content-Security-Policy: default-src 'self'; script-src 'self' ${srcs}; connect-src 'self'; object-src 'none'\n`;
 
 test("reads the policy of the /* rule only", () => {
   assert.match(policy(headers("x")), /^default-src 'self'; script-src 'self' x;/);
@@ -63,4 +63,14 @@ test("flags a second policy, an overriding directive and weakening sources", () 
 
 test("reads a _headers file with CRLF line endings", () => {
   assert.match(policy("/*\r\n  Content-Security-Policy: script-src 'self'\r\n"), /^script-src 'self'$/);
+});
+
+test("allows exactly the two Cloudflare Web Analytics hosts, nowhere else", () => {
+  const ok = `/*\n  Content-Security-Policy: script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com\n`;
+  assert.deepEqual(check(ok, [["a.html", '<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon=\'{"token":"x"}\'></script>']]), []);
+  const bad = `/*\n  Content-Security-Policy: default-src 'self' https:; script-src 'self' https://cloudflareinsights.com https://static.cloudflareinsights.com/ http://static.cloudflareinsights.com https://*.cloudflareinsights.com HTTPS://STATIC.CLOUDFLAREINSIGHTS.COM https:; connect-src 'self' https://static.cloudflareinsights.com https://example.com * https://cloudflareinsights.com/cdn-cgi/rum https:\n`;
+  const p = check(bad, []);
+  assert.equal(p.length, 12, p.join("\n"));
+  for (const s of ["default-src allows https:", "script-src allows https://cloudflareinsights.com", "script-src allows https://static.cloudflareinsights.com/", "http://static", "https://*.", "HTTPS://STATIC", "script-src allows https:", "connect-src allows https://static.cloudflareinsights.com", "connect-src allows https://example.com", "connect-src allows *", "connect-src allows https://cloudflareinsights.com/cdn-cgi/rum", "connect-src allows https:"]) assert.ok(p.some((x) => x.includes(s)), s);
+  assert.ok(check(`/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'\n`, []).includes("no connect-src in the Content-Security-Policy"));
 });

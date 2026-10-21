@@ -2267,8 +2267,8 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   covers. The same switch as the deploy (D-R1): the Build step in `ci.yml` sets it with the
   Deploy step's own condition, copied word for word (push or manual run on `main`; keep them
   identical), so only the build that ships has it; branches, PRs and `preview` never set it, nor
-  local builds unless the developer exports it or puts it in a `.env` file. The Build step then fails both ways: a build without the switch that contains
-  the beacon, and a release build with a page whose beacon is missing or has no token. The Deploy condition is unchanged.
+  local builds unless the developer exports it or puts it in a `.env` file. The Build step
+  then fails both ways: a build without the switch that contains the beacon, and a release build with a page whose beacon is missing or has no token. The Deploy condition is unchanged.
 - **Where.** `src/components/Analytics.astro` (Cloudflare's tag, `defer`) in the three HTML
   shells: `Base.astro`, the root `index.astro` and `404.astro`. The Content-Security-Policy
   of D19.2, which came after, allows the beacon's two hosts (D19.3).
@@ -2343,9 +2343,12 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   in `script-src` (the beacon's file, an external script, so no hash) and
   `https://cloudflareinsights.com` in `connect-src` (where the beacon posts its report).
   `scripts/check-csp.mjs` now allows those two and nothing else: `script-src` may hold
-  `'self'`, `'none'`, hashes and that one host; `connect-src` only `'self'`, `'none'` and the
-  report host. Any other host, a wildcard, a scheme, a path or `http://` fails CI, and a test covers
-  each. Off (every build but the deployed one) the pages carry no beacon, so the two sources
+  `'self'`, `'none'`, hashes and that one host; `connect-src` must be present and hold only
+  `'self'`, `'none'` and the report host; `default-src` (the fallback of a missing directive)
+  only `'self'` or `'none'`. Any other host, a wildcard, a bare scheme, a path, `http://` or
+  upper case fails CI, and the test covers each. The Build step's guard against a beacon in a
+  build that is not deployed reads only the HTML pages (`dist/_headers` names the hosts too),
+  and its release check matches the whole beacon tag with its 32-hex token. Off (every build but the deployed one) the pages carry no beacon, so the two sources
   allow nothing that is there.
 - **Rejected.** `https://*.cloudflareinsights.com` or the bare scheme `https:`: wider than the
   two hosts the beacon uses. Serving `beacon.min.js` from the site: Cloudflare updates it,

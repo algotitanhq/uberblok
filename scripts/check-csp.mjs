@@ -5,8 +5,8 @@
 //     and no script-src-elem or script-src-attr (which would override it), and
 //     script-src holds only 'self', 'none', sha256 hashes and the one host of the
 //     Cloudflare Web Analytics beacon (no 'unsafe-inline', 'unsafe-eval', other host,
-//     scheme or wildcard), and connect-src only 'self' and the beacon's report host
-//     (D19.3);
+//     scheme or wildcard), connect-src is present and holds only 'self' and the
+//     beacon's report host, and default-src only 'self' or 'none' (D19.3);
 //   - every inline <script> of a built page has its sha256 in script-src, and
 //     every hash in script-src belongs to an inline script (none stale);
 //   - no page carries an inline event handler (on...=) or a javascript: URL,
@@ -67,7 +67,10 @@ export function check(headers, pages) {
   if (!sources) return [...problems, "no script-src in the Content-Security-Policy"];
   for (const d of ["script-src-elem", "script-src-attr"]) if (directive(csp, d)) problems.push(`${d} overrides script-src`);
   for (const s of sources) if (!STRICT.test(s)) problems.push(`script-src allows ${s}`);
-  for (const s of directive(csp, "connect-src") ?? []) if (!CONNECT.test(s)) problems.push(`connect-src allows ${s}`);
+  const connect = directive(csp, "connect-src");
+  if (!connect) problems.push("no connect-src in the Content-Security-Policy");
+  for (const s of connect ?? []) if (!CONNECT.test(s)) problems.push(`connect-src allows ${s}`);
+  for (const s of directive(csp, "default-src") ?? []) if (!/^('self'|'none')$/.test(s)) problems.push(`default-src allows ${s}`);
   const allowed = new Set(sources.filter((s) => s.startsWith("'sha256-")));
   const used = new Set();
   for (const [file, html] of pages) {

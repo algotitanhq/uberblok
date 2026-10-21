@@ -1878,10 +1878,13 @@ Analytics in EN, FR and ES (the FR typography check passes). `npm test`: 225 pas
 **Rebased on ALG-134 (ALG-140, 2026-10-21).** The CSP landed first, so the beacon would have
 been blocked: `public/_headers` now allows `https://static.cloudflareinsights.com` in
 `script-src` and `https://cloudflareinsights.com` in `connect-src`, and `scripts/check-csp.mjs`
-allows exactly those two (D19.3; 1 new test, `npm test`: 235 pass). The Build step's
-`PUBLIC_RELEASE` condition again equals Deploy's word for word (ALG-134 removed
-`vars.CLOUDFLARE_ACCOUNT_ID != ''` from Deploy). Builds: release 44/44 pages with the beacon,
-otherwise 0/44; `check-csp` passes on both. Release build served by `wrangler dev` 4.142.0 with
+allows exactly those two, requires `connect-src` and keeps `default-src` to `'self'` (D19.3;
+1 new test, `npm test`: 235 pass). The Build step's `PUBLIC_RELEASE` condition again equals
+Deploy's word for word (ALG-134 removed `vars.CLOUDFLARE_ACCOUNT_ID != ''` from Deploy). The
+step's guard against a beacon in an undeployed build now reads only `*.html`: `dist/_headers`
+names the hosts too and would have failed every branch build (`code-reviewer`); its release check
+matches the whole beacon tag. The Build step's script, run as is: release 44/44 pages with the
+beacon, otherwise 0/44, both exit 0; `check-csp` passes on both. Release build served by `wrangler dev` 4.142.0 with
 `_headers`, 44 pages in Chromium: the CSP header on all 44, 0 `securitypolicyviolation`, the
 beacon loaded on 44 and its report sent on 44; the only console errors (88) are Cloudflare
 refusing the report's CORS for `localhost`, expected off the site's own host.

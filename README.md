@@ -1,6 +1,6 @@
 # Uberblok
 
-An interactive museum of ZFS, on the web, in French, English and Spanish.
+An interactive museum of ZFS, on the web.
 
 **Visit it: <https://uberblok.storagebits.workers.dev>**
 
@@ -20,7 +20,7 @@ The code analysed is OpenZFS `zfs-2.4.4`, commit
 
 ## Status
 
-Version 1. The visit has fourteen stops in French, English and Spanish:
+Version 1. The visit has fourteen stops:
 the Hall (the uberblock and its ring, in 2D and 3D, and the map of the visit), the History wing
 (a timeline from 2001 to today, every fact linked to its entry in `SOURCES.md`), eleven
 technical rooms and the Engine room (the colophon: the commit, the stack, how the site was

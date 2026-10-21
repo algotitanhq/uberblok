@@ -5,9 +5,16 @@ name: ci
 # and test only: previews are private, on the build machine (`preview`, see docs/dev.md).
 # Deploy: `wrangler deploy` on a push to main (or a manual run on main, for the
 # first deploy, RELEASE.md step 4), and only once the repository
-# variable PUBLIC_RELEASE is "true" (set after the owner's Go on the first public
-# release, with the Cloudflare keys). Until then it is skipped, even if
-# CLOUDFLARE_ACCOUNT_ID is set. No workflow uploads preview versions.
+# variable PUBLIC_RELEASE is "true" (the owner's only step: the Go on the first public
+# release sets it on the public repository). Until then it is skipped. The Cloudflare keys,
+# the secret CLOUDFLARE_API_TOKEN and the variable CLOUDFLARE_ACCOUNT_ID (not read here),
+# come from the algotitanhq organization; never
+# add repository-level copies (they would override the organization's). The site is
+# <name>.storagebits.workers.dev (name in wrangler.jsonc). No workflow uploads preview versions.
+# No step reads the variable CLOUDFLARE_ACCOUNT_ID: a run step's log header prints its env
+# and its script with every expression filled in, so a value from `vars` would show in clear
+# (an `::add-mask::` step fed from `vars` too, in its own header). The Deploy step asks
+# Cloudflare for the token's single account, masks its ID, then runs wrangler (DECISIONS.md D19.1).
 on:
   push:
   pull_request:
@@ -53,11 +60,27 @@ jobs:
         run: node scripts/check-permalinks.mjs "$RUNNER_TEMP/openzfs" "$OPENZFS_SHA" $(find dist -name '*.html')
       - name: Check every source reference in the built site against SOURCES.md
         run: node scripts/check-sources.mjs SOURCES.md $(find dist -name '*.html')
+      - name: Check the Content-Security-Policy against every inline script of the built site
+        run: node scripts/check-csp.mjs public/_headers $(find dist -name '*.html')
       - name: Deploy
-        if: vars.PUBLIC_RELEASE == 'true' && vars.CLOUDFLARE_ACCOUNT_ID != '' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: vars.PUBLIC_RELEASE == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::The secret CLOUDFLARE_API_TOKEN is not visible to this repository"
+            exit 1
+          fi
+          if ! accounts="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/accounts)"; then
+            echo "::error::Cloudflare did not answer the account lookup"
+            exit 1
+          fi
+          account="$(echo "$accounts" | jq -r 'if .success and (.result | length) == 1 and (.result[0].id | type) == "string" then .result[0].id else empty end')"
+          if [ -z "$account" ]; then
+            echo "::error::The token does not see exactly one Cloudflare account"
+            exit 1
+          fi
+          echo "::add-mask::$account"
+          export CLOUDFLARE_ACCOUNT_ID="$account"
           message="$(git log -1 --format=%s | head -c 100)"
           npx --yes "wrangler@${WRANGLER_VERSION}" deploy --message "$message"

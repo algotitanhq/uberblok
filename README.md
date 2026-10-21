@@ -2,6 +2,8 @@
 
 An interactive museum of ZFS, on the web, in French, English and Spanish.
 
+**Visit it: <https://uberblok.storagebits.workers.dev>**
+
 ![The copy-on-write room: a pool's block tree from the uberblock down to four data blocks, with the controls to rewrite one block step by step, cut the power or take a snapshot](docs/screens/uberblok-copy-on-write.png)
 
 ## What it does
@@ -83,14 +85,18 @@ The site itself has no settings. Deployment is configured in GitHub and Cloudfla
 | Key | Kind | Where | Role |
 |---|---|---|---|
 | `PUBLIC_RELEASE` | repository variable | GitHub Actions | The deploy step runs only when it is `true`. |
-| `CLOUDFLARE_ACCOUNT_ID` | repository variable | GitHub Actions | The Cloudflare account that hosts the Worker. |
-| `CLOUDFLARE_API_TOKEN` | repository secret | GitHub Actions | API token with "Workers Scripts: Edit", dedicated to Uberblok. |
+| `CLOUDFLARE_API_TOKEN` | organization secret (`algotitanhq`) | GitHub Actions | API token with "Workers Scripts: Edit" on the one account that hosts the Worker; the deploy step asks Cloudflare for that account and masks its ID in the logs. |
+| `CLOUDFLARE_ACCOUNT_ID` | organization variable (`algotitanhq`) | GitHub Actions | Not read by this workflow: a value from `vars` would show in clear in the logs. |
 | `wrangler.jsonc` | file | repository | Cloudflare Workers with static assets serving `dist/`; `preview_urls` is off. |
 
 Everything goes through GitHub Actions (`.github/workflows/ci.yml`): tests, excerpt check,
 build, permalink and source checks on the built site; branches stop there. The deploy step
-(`wrangler deploy`) runs only on `main`, on a push or a manual run of the workflow, with the
-three keys above set. The site is deployed to Cloudflare Workers from `main`.
+(`wrangler deploy`) runs only on `main`, on a push or a manual run of the workflow, once
+`PUBLIC_RELEASE` is `true`. Never add repository-level copies of the organization's keys: they
+would override them. The site is deployed to Cloudflare Workers from `main`, at
+<https://uberblok.storagebits.workers.dev>. `public/_headers` sets its security headers
+(HSTS, a Content-Security-Policy, no framing); CI checks the policy against every inline script
+of the build.
 
 Notes on the team's own build machine: [`docs/dev.md`](docs/dev.md).
 

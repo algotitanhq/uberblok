@@ -4,8 +4,8 @@ The public repository is a new repository holding a single commit: the tree of t
 `main`, without the private repository's history (owner's decision at v1, `BUILDLOG.md`, "Three
 decisions for the owner"). After the owner's Go on the first public release, the team runs
 steps 1 to 3: it checks the tree, builds the one-commit repository, renames the private
-repository and creates the public one. The owner then sets only the Cloudflare secret and
-variables (step 4).
+repository and creates the public one. That Go is the owner's only step: once the public
+repository exists, it sets the repository variable `PUBLIC_RELEASE=true` there (step 4).
 
 ## 1. Check the tree
 
@@ -86,12 +86,16 @@ gh repo view algotitanhq/uberblok --json visibility,defaultBranchRef   # PUBLIC,
 GitHub redirects the old name to the renamed repository only until a repository takes that
 name again, which is why the remotes change first. The private repository stays private; its
 CI never deploys (`PUBLIC_RELEASE` is not set there). The first push of the public repository
-runs CI without deploying: the Cloudflare keys are not set yet.
+runs CI without deploying: `PUBLIC_RELEASE` is not set there yet.
 
 ## 4. Switch the deploy on (the owner)
 
-In the public repository only: the secret `CLOUDFLARE_API_TOKEN` and the variables
-`CLOUDFLARE_ACCOUNT_ID` and `PUBLIC_RELEASE=true`, as in `docs/dev.md` ("Switching the deploy
-on"). Then the team starts the first deploy, a manual run of CI on `main`
+The Cloudflare keys come from the `algotitanhq` organization: the secret
+`CLOUDFLARE_API_TOKEN` and the variable `CLOUDFLARE_ACCOUNT_ID`, visible to every repository.
+The deploy reads only the token: it gets the account ID from Cloudflare and masks it (D19.1).
+After step 3, the owner's Go sets the repository variable `PUBLIC_RELEASE=true`, in the public
+repository only (the new copy), as in `docs/dev.md` ("Switching the deploy on"). Never
+add repository-level copies of the keys: they would override the organization's. Then the
+team starts the first deploy, a manual run of CI on `main`
 (`gh workflow run ci.yml -R algotitanhq/uberblok --ref main`); after it, every push to `main`
-deploys.
+deploys the site to `<name>.storagebits.workers.dev` (`name` in `wrangler.jsonc`: `uberblok`).

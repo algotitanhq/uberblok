@@ -2250,3 +2250,56 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   font licence (SIL OFL 1.1, Fraunces, Inter, Instrument Serif) goes in the README credits.
 - **Rejected.** The credit in the Engine room: it would change three pages and their captures
   the night before publication, for a fact the licence file of each package already carries.
+
+## v1.3.3 (ALG-134): hardening after the launch
+
+### D19.1 The account ID asked from Cloudflare and masked, never read from `vars`
+
+- **Context.** The Deploy step's log showed `CLOUDFLARE_ACCOUNT_ID` in clear: it came from
+  `vars`, and the runner prints each run step's `env` and script, expressions filled in, in the
+  step's header. The brief proposed a first step `echo "::add-mask::${{ vars.CLOUDFLARE_ACCOUNT_ID }}"`.
+  Since ALG-136 the keys live in the `algotitanhq` organization: the secret
+  `CLOUDFLARE_API_TOKEN` and the *variable* `CLOUDFLARE_ACCOUNT_ID`, with no repository-level
+  copies (ALG-137).
+- **Choice.** No step reads the variable. The Deploy step gets only the token; it calls
+  `GET /client/v4/accounts` with it, keeps the ID if the token sees exactly one account (else it
+  stops with an error), registers it with `::add-mask::$account` (the header shows the shell
+  variable's name, not its value) and exports it as `CLOUDFLARE_ACCOUNT_ID` for `wrangler`. The
+  deploy condition no longer reads `CLOUDFLARE_ACCOUNT_ID` (`PUBLIC_RELEASE`, `main`, a push or
+  a manual run), so not even a debug re-run prints the ID. Nothing
+  new is needed from the owner. Proved on the branch with a temporary probe step (commit
+  `94ce144`, run 39503479503, then removed): "token visible", "accounts seen: 1, success: true",
+  the ID printed as `***`, and no 32-hex string in the whole log.
+- **Rejected.** The `::add-mask::` step fed from `vars`: its own header prints the expanded
+  command, so the ID would show once more, unmasked. Passing the value through the step's `env`:
+  the header prints `env` too. An organization secret `CLOUDFLARE_ACCOUNT_ID` (the first
+  version of this PR asked for a repository one, which ALG-137 forbids): one more key for the
+  owner to set and keep in step with the variable, for a value the token already gives. Letting
+  `wrangler` find the account by itself: same lookup, but the ID would not be masked before
+  `wrangler` prints anything. The ID in `wrangler.jsonc`: it would be in the public tree.
+
+### D19.2 Security headers in `public/_headers`, a CSP with script hashes
+
+- **Context.** The public site had no security header (ALG-125, `static-check`). It is static
+  assets only, no Worker code, and stays so.
+- **Choice.** `public/_headers`, copied to `dist/` and applied by Workers static assets to every
+  path: HSTS (one year, subdomains, no preload), `nosniff`, `strict-origin-when-cross-origin`,
+  `X-Frame-Options: DENY` with `frame-ancestors 'none'`, a `Permissions-Policy` that turns off
+  camera, microphone, geolocation, payment and USB, and a CSP. The CSP allows only the site's
+  own origin for everything; `script-src` adds the sha256 of each of the three inline scripts
+  (`Base.astro`: the theme before first paint and the theme button; `index.astro`: the
+  language redirect), so no `'unsafe-inline'` for scripts. `style-src` keeps `'unsafe-inline'`:
+  Astro's `<style>` blocks and some 28 000 `style` attributes in the SVG figures cannot be
+  hashed. The 3D chunks, fonts and images are files under `/_astro/`, so `'self'` covers them;
+  no `eval`, no worker, no `data:` or `blob:` URL in the build. `scripts/check-csp.mjs`, a CI
+  step after the build, fails if an inline script has no hash in the policy, a hash matches no
+  inline script, an inline event handler or a `javascript:` URL appears, a second policy, a
+  `script-src-elem` or a `script-src-attr`
+  appears, or `script-src` holds anything but `'self'`, `'none'` and hashes (a keyword such as
+  `'unsafe-inline'` or `'strict-dynamic'`, a host, a scheme, a wildcard): an
+  edit to an inline script then fails CI instead of breaking the theme on the live site.
+- **Rejected.** `'unsafe-inline'` for scripts: it gives up most of what a CSP is for, for three
+  stable scripts. Moving the three scripts to files: the theme script must run before first
+  paint, inline. Astro's experimental CSP: it puts the policy in a `<meta>`, which cannot carry
+  `frame-ancestors`, and adds a feature flag for three hashes. `upgrade-insecure-requests`: every
+  URL is already same-origin and HSTS covers HTTPS; it would break `wrangler dev` over HTTP.

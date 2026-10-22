@@ -57,24 +57,25 @@ const L = {
       <h1>When does my write reach the disk?</h1>
       <div class="prose answer">
         <p class="lead">
-          Usually a few seconds after the program that made it has moved on. ZFS never changes a block in place: each
-          change is written to a new block, the block that points to it is rewritten too, and so on up to the uberblock,
-          the root record from which ZFS finds everything else in the pool. Doing all that for every single write, with
-          a flush of each disk's cache every time, would be very slow.
+          A write usually reaches the disk a few seconds after the program that made it has moved on. ZFS never
+          overwrites a block that the pool still uses. Each change is written to a new block, the block that points to
+          it is rewritten too, and so on up to the uberblock, the root record from which ZFS finds everything else in
+          the pool. Doing all that for every single write, with a flush of each disk's cache every time, would be very
+          slow.
         </p>
         <p>
           So ZFS gathers changes in memory into a numbered batch called a transaction group, or txg. Every change joins
           the txg that is open at that moment. Every five seconds, or sooner when a lot of changed data is waiting or a
           sync is asked for, ZFS closes the open txg and opens the next one at once, so programs keep writing. It waits
-          for the changes already under way in the closed txg to finish, writes the whole txg to the disks, and ends
-          with a single write of a new uberblock. That write is the commit. Before it, the pool starts from the previous
-          txg. After it, the pool starts from the new one.
+          for the changes already under way in the closed txg to finish, writes the whole txg to the disks, and ends by
+          writing a new uberblock. Writing the uberblock commits the txg, and from then on the pool starts from it.
         </p>
         <p>
-          After a power cut, the pool comes back at the last committed txg, whole. The changes of the txgs that were
-          not committed yet are lost, usually a few seconds' worth. A program that cannot lose them, such as a
-          database, asks for its data to be on disk with fsync. ZFS then writes the change to its intent log, the ZIL,
-          without waiting for the txg.
+          After a power cut, the pool comes back at the last committed txg, in a consistent state. Changes in txgs that
+          were not committed yet are lost, usually a few seconds' worth, unless they were also written to the ZIL. A
+          program that cannot lose its changes, such as a database, asks for them to be on disk with fsync. ZFS then
+          writes them to its intent log, the ZIL, a log on disk that it replays when the pool is next imported, without
+          waiting for the txg.
         </p>
       </div>
     </header>
@@ -85,15 +86,17 @@ const L = {
         <p>
           Each card is a txg. Two writes are under way in txg 41, drawn as dots on the CPUs they run on. Press Next
           event to move one step at a time. The outlined part of the figure is what that step changed. Left alone, the
-          writes end, and five seconds after the last sync began the sync thread asks for the open txg. Txg 41 moves to
-          the middle, and txg 42 opens behind it to take the new writes. Then txg 41 moves right and is written in
-          passes, and the line On disk changes when its uberblock is written.
+          writes end, and at t = 5 s the five-second timeout runs out and the sync thread asks for the open txg. Txg 41
+          moves to the middle while txg 42 opens behind it to take the new writes. Its writes have already ended, so it
+          goes straight on to the right, where it is written in three passes. The line On disk changes when its
+          uberblock is written.
         </p>
         <p>
-          Press Reset, then <code>zpool sync</code> at once. The sync thread does not wait for the five seconds, and txg
-          41 stays in the middle until its two writes are done. Writes you add join whichever txg is open. Free a large
-          file while a txg is being written: ZFS asks for a new txg at once, so that one txg does not fill up with
-          frees, and all three stages are busy. That is the most there can be. Play runs it all in slow time.
+          Press Reset, then press <code>zpool sync</code> right away. The sync thread does not wait for the five seconds,
+          and txg 41 stays in the middle until its second write ends, at 1.2 s. <code>zpool sync</code> waits for txg 43, so
+          the empty txgs 42 and 43 are synced after it, and they write no uberblock. Writes you add join whichever txg is
+          open. Free a large file while a txg is being written: ZFS asks for the open txg to be closed right away, so that a txg is not filled with frees alone. All three stages are then busy, which is the most the code allows.
+          Play runs the events one after another, in slowed simulated time.
         </p>
       </div>
       <TxgPipeline lang={lang} />
@@ -110,8 +113,8 @@ const L = {
         <h3>Joining the open txg</h3>
         <p class="prose">
           A write first joins a txg with <code>txg_hold_open</code>. It reads the number of the open txg and raises a
-          count of writes in that txg. There is one count per CPU, so writers on different CPUs never wait for each
-          other. When the write is done, the count goes down again.
+          count of writes in that txg. There is one count per CPU, so writers on different CPUs do not compete for one
+          lock. When the transaction has made its change in memory, the count goes down again.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>txg_hold_open</code>, txg.c</Fragment>
@@ -125,7 +128,7 @@ const L = {
               {
                 from: 333,
                 to: 334,
-                text: `The lock of this CPU, then the open txg's number. <code>dmu_tx_assign</code> <a href="${L.assign}">calls this</a> for every transaction. To close a txg, the quiesce thread <a href="${L.quiesceAll}">takes the lock of every CPU</a>.`,
+                text: `The lock of this CPU, then the open txg's number. <code>dmu_tx_try_assign</code>, under <code>dmu_tx_assign</code>, <a href="${L.assign}">calls this</a> for every transaction. To close a txg, the quiesce thread <a href="${L.quiesceAll}">takes the lock of every CPU</a>.`,
               },
               {
                 from: 337,
@@ -140,8 +143,8 @@ const L = {
         <h3>When the sync thread wakes up</h3>
         <p class="prose">
           The sync thread sleeps in a loop. It wakes when five seconds have passed since the last sync began, when
-          someone waits for a sync, or when a closed txg is ready for it. A scrub or resilver in progress keeps it from
-          sleeping at all.
+          someone asks for a txg to be synced (<code>zpool sync</code>, or a txg past the dirty-data threshold), or when
+          a closed txg is ready for it. A running scrub, resilver or background free keeps it from sleeping at all.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>txg_sync_thread</code>, txg.c</Fragment>
@@ -154,7 +157,7 @@ const L = {
             notes={[
               {
                 from: 542,
-                text: `<code>timer</code> counts from <code>start</code>, set when <a href="${L.startSync}">the last <code>spa_sync</code> began</a>. The timeout is <code>zfs_txg_timeout</code>, <a href="${L.timeout}">5 seconds</a>.`,
+                text: `<code>timer</code> is the time left until five seconds after <code>start</code>, which is set when <a href="${L.startSync}">the last <code>spa_sync</code> began</a>. The timeout is <code>zfs_txg_timeout</code>, <a href="${L.timeout}">5 seconds</a>.`,
               },
               {
                 from: 543,
@@ -163,7 +166,7 @@ const L = {
               },
               {
                 from: 545,
-                text: `<code>zpool sync</code> <a href="${L.ioctl}">calls <code>txg_wait_synced(dp, 0)</code></a>, which <a href="${L.waitSynced}">raises <code>tx_sync_txg_waiting</code></a> to the open txg plus 2. So does <a href="${L.kick}"><code>txg_kick</code></a>, which <a href="${L.dirtySpace}"><code>dsl_pool_dirty_space</code> calls</a> once a txg's dirty data passes <a href="${L.syncPct}">20%</a> of <a href="${L.dirtyMax}"><code>zfs_dirty_data_max</code></a>.`,
+                text: `<code>zpool sync</code> <a href="${L.ioctl}">calls <code>txg_wait_synced(dp, 0)</code></a>, which <a href="${L.waitSynced}">raises <code>tx_sync_txg_waiting</code></a> to the open txg plus 2. <a href="${L.kick}"><code>txg_kick</code></a> raises it to the number of a txg whose dirty data has passed <a href="${L.syncPct}">20%</a> of <a href="${L.dirtyMax}"><code>zfs_dirty_data_max</code></a>; <a href="${L.dirtySpace}"><code>dsl_pool_dirty_space</code> calls it</a>.`,
               },
             ]}
           />
@@ -188,7 +191,7 @@ const L = {
               {
                 from: 398,
                 to: 399,
-                text: `Every CPU's <code>tc_open_lock</code>, the lock <a href="${L.holdOpen}"><code>txg_hold_open</code> takes</a> before it reads the open txg. No writer can be halfway into the old txg.`,
+                text: `Every CPU's <code>tc_open_lock</code>, the lock <a href="${L.holdOpen}"><code>txg_hold_open</code> takes</a> before it reads the open txg, and keeps until <code>txg_rele_to_quiesce</code>. No writer can be in the middle of joining the open txg.`,
               },
               {
                 from: 402,
@@ -247,7 +250,7 @@ const L = {
             notes={[
               {
                 from: 639,
-                text: `Nobody has asked for a txg past the open one. The sync thread <a href="${L.askQuiesce}">asks when it needs a txg</a>. The other caller is <a href="${L.waitOpen}"><code>txg_wait_open</code></a>, which at this release <a href="${L.longFree}"><code>dmu_free_long_range</code> calls</a> “to avoid filling up a TXG with just frees”.`,
+                text: `Nobody has asked for a txg past the open one. The sync thread <a href="${L.askQuiesce}">asks when it needs a txg</a>. The other caller is <a href="${L.waitOpen}"><code>txg_wait_open</code></a>, which at this release <a href="${L.longFree}"><code>dmu_free_long_range_impl</code> calls</a>, once the frees in the open txg reach a threshold, “to avoid filling up a TXG with just frees”.`,
               },
               {
                 from: 640,
@@ -313,7 +316,7 @@ const L = {
               {
                 from: 2075,
                 to: 2077,
-                text: `Nothing changed, no vdev configuration is dirty, multihost protection is off: return before <a href="${L.flush}">the flush</a> and <a href="${L.labels}">the label and uberblock writes</a>. <code>spa_sync</code> <a href="${L.rewriteConfig}">calls this</a> after the passes.`,
+                text: `Nothing changed, no vdev configuration is dirty, multihost protection is off: return before <a href="${L.flush}">the flush</a> and <a href="${L.labels}">the label and uberblock writes</a>. <code>spa_sync</code> <a href="${L.rewriteConfig}">calls it through <code>spa_sync_rewrite_vdev_config</code></a> after the passes.`,
               },
             ]}
           />
@@ -329,8 +332,9 @@ const L = {
         CPUs. Each write is one block, and the threshold that starts a sync early is scaled to 4 blocks (20% of a
         20-block <code>zfs_dirty_data_max</code>). Time is slowed, and the length of a write or a pass is made up. It
         leaves out the write throttle (writers delayed as dirty data grows), the short wait of a writer while a txg
-        closes, scrubs and resilvers, administrative tasks that run inside a sync, the ZIL, and pool suspension. Pass
-        sizes are illustrative: a txg with data always takes three passes here.
+        closes, scrubs and resilvers, administrative tasks that run inside a sync, the ZIL, and pool suspension. A real
+        large free asks for a new txg only once its frees reach a threshold, and the uberblock is written to several
+        labels on several disks. Pass sizes are illustrative: a txg with data always takes three passes here.
       </p>
     </section>
   </article>

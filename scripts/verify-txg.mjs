@@ -54,6 +54,14 @@ for (const lang of ["en", "fr", "es"]) {
     if (vp === "desktop") {
       await page.screenshot({ path: join(out, `txg-${tag}-page.png`), fullPage: true });
       report.captures.push(`txg-${tag}-page.png`);
+      // The second Source note, opened: at 1280 px it goes to the side panel.
+      await page.locator("[data-source-note] summary").nth(1).click();
+      await page.waitForTimeout(400);
+      const panel = await page.evaluate(() => !!document.querySelector('[role="dialog"] .source-body, [role="dialog"] [data-source-body]'));
+      if (!panel) problem(`${tag}: the Source note did not open in the panel`);
+      await page.screenshot({ path: join(out, `txg-${tag}-panel.png`) });
+      report.captures.push(`txg-${tag}-panel.png`);
+      await page.keyboard.press("Escape");
     }
     await fig.scrollIntoViewIfNeeded();
     await shot(`txg-${tag}-0-start.png`);

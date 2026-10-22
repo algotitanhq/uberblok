@@ -1969,6 +1969,4 @@ disables itself, labels hidden as soon as older blocks made the map tall, the wr
 region read only the step number, Clear kept a start sector moved by scrolling, new steps
 below the fold: all fixed.
 
-**Debts.** `scripts/verify.mjs` drives the old RAID-Z controls ("Write the block", a timed
-read); it is updated in this branch for the new ones, but its full run (about 450 captures)
-is left to the final pass before merge.
+**Debts.** `scripts/verify.mjs` now drives the new RAID-Z controls (size buttons, Clear, the read step by step or skipped to the result). Its run on this branch went through the RAID-Z room (35 captures in EN, FR and ES, reduced motion, no script, the keyboard drive to the result) and stopped at 317 captures, at the end of the working session; the full run is left to the final pass before merge.

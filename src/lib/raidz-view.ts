@@ -66,7 +66,7 @@ export function summary(L: Layout, S: RzStrings, lang: string, name = "A"): stri
     psize: bytes(L.psize, lang),
     s: count(S, lang, L.s, "secData1", "secDataN"),
     p: count(S, lang, parity, "secParity1", "secParityN"),
-    k: count(S, lang, L.nskip, "secSkip1", "secSkipN"),
+    k: L.nskip ? count(S, lang, L.nskip, "secSkip1", "secSkipN") : "",
     asize: bytes(L.asize, lang),
     ratio: decimal(lang, ratio),
     used: L.acols,
@@ -138,9 +138,6 @@ export function grid(L: Layout, S: RzStrings, older: Layout[] = []): string {
   );
 }
 
-/** How many children a block touches, skip sectors included: its stripe width. */
-export const width = (L: Layout) => new Set(L.cols.filter((c) => c.size > 0 || c.skip).map((c) => c.dev)).size;
-
 /** Text version of the map, column by column, in the order of rr_col[]; older blocks in one line each. */
 export function describe(L: Layout, S: RzStrings, lang: string, older: Layout[] = []): string {
   const items = L.cols.map((col) => {
@@ -151,7 +148,7 @@ export function describe(L: Layout, S: RzStrings, lang: string, older: Layout[] 
   });
   const swap = L.swapped ? `<p>${S.swapped}</p>` : "";
   const before = older.length
-    ? `<p>${S.dBefore}</p><ul>${older.map((B, i) => `<li>${fill(S.dOlder, { name: blockName(i), psize: bytes(B.psize, lang), w: width(B), b: B.b, asize: bytes(B.asize, lang) })}</li>`).join("")}</ul>`
+    ? `<p>${S.dBefore}</p><ul>${older.map((B, i) => `<li>${fill(S.dOlder, { name: blockName(i), psize: bytes(B.psize, lang), w: B.acols, b: B.b, asize: bytes(B.asize, lang) })}</li>`).join("")}</ul>`
     : "";
   return `${before}<p>${summary(L, S, lang, blockName(older.length))}</p>${swap}<ol>${items.join("")}</ol>`;
 }

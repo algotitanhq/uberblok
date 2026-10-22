@@ -2302,6 +2302,123 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 
 Called for each block a resilver visits (below). L4018-L4019: if the raidz vdev's DTL (the txgs some child missed) does not contain the block's birth txg, nothing to do. L4021-L4022: a block that spans at least as many columns as there are children touches every child: resilver it. L4024-L4035: otherwise, only if one of the `s + nparity` children from `f` on has a dirty DTL. The comment at L4030-L4032 calls the per-child test "a good approximation".
 
+**Short excerpts for the question-first room (v1.4, ALG-187).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 6. `vdev_raidz_map_alloc`, the counts — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L634-L649
+
+```c
+	uint64_t q = s / (dcols - nparity);
+
+	/*
+	 * "Remainder": The number of partial stripe data sectors in this I/O.
+	 * This will add a sector to some, but not all, child vdevs.
+	 */
+	uint64_t r = s - q * (dcols - nparity);
+
+	/* The number of "big columns" - those which contain remainder data. */
+	uint64_t bc = (r == 0 ? 0 : r + nparity);
+
+	/*
+	 * The total number of data and parity sectors associated with
+	 * this I/O.
+	 */
+	uint64_t tot = s + nparity * (q + (r == 0 ? 0 : 1));
+```
+
+Excerpt 1 from its quotient on. L634: `q`, the full rows of data. L640: `r`, the data sectors left over. L643: `bc`, the "big columns" that get one sector more: the `r` columns of remainder data and the `nparity` parity columns, which must be as long as the longest data column. L649: `tot`, data plus parity, the sectors written for this block. Nothing here depends on any other block: the stripe is made for this one.
+
+### 7. `vdev_raidz_psize_to_asize`, the rounding — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2315-L2317
+
+```c
+	asize = ((psize - 1) >> ashift) + 1;
+	asize += nparity * ((asize + cols - nparity - 1) / (cols - nparity));
+	asize = roundup(asize, nparity + 1) << ashift;
+```
+
+Excerpt 2, the arithmetic alone. L2315: data sectors. L2316: `nparity` parity sectors for each started row of `cols - nparity` data sectors. L2317: rounded up to a multiple of `nparity + 1`; the extra sectors are the skip sectors of the map (`rm_nskip`, [L699](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L699)). A one-sector block costs `nparity + 1` sectors whatever the width ([L2302-L2303](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2302-L2303)).
+
+### 8. `vdev_raidz_io_start_read_row`, the columns a read asks for — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2573-L2588
+
+```c
+	for (int c = rr->rr_cols - 1; c >= 0; c--) {
+		raidz_col_t *rc = &rr->rr_col[c];
+		vdev_t *cvd = vd->vdev_child[rc->rc_devidx];
+
+		if (rc->rc_error || rc->rc_size == 0)
+			continue;
+
+		if (forceparity ||
+		    c >= rr->rr_firstdatacol || rr->rr_missingdata > 0 ||
+		    (zio->io_flags & (ZIO_FLAG_SCRUB | ZIO_FLAG_RESILVER))) {
+			zio_nowait(zio_vdev_child_io(zio, NULL, cvd,
+			    rc->rc_offset, rc->rc_abd, rc->rc_size,
+			    zio->io_type, zio->io_priority, 0,
+			    vdev_raidz_child_done, rc));
+		}
+	}
+```
+
+L2577-L2578: a column whose child is gone (`rc_error` set just above, [L2522-L2531](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2522-L2531)) or that holds no data is not read. L2580-L2582: parity columns (`c < rr_firstdatacol`) are read only when a data column is missing (`rr_missingdata`), for a scrub or a resilver, or when parity is forced. A normal read of a healthy block reads its data columns and nothing else.
+
+### 9. `vdev_raidz_combrec`, the combinations — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3542-L3558
+
+```c
+		ltgts[-1] = -1;
+		for (int i = 0; i < num_failures; i++) {
+			ltgts[i] = i;
+		}
+		ltgts[num_failures] = n;
+
+		for (;;) {
+			int err = raidz_reconstruct(zio, ltgts, num_failures,
+			    nparity);
+			if (err == EINVAL) {
+				/*
+				 * Reconstruction not possible with this #
+				 * failures; try more failures.
+				 */
+				break;
+			} else if (err == 0)
+				return (0);
+```
+
+Inside the loop over `num_failures`, from 1 to `nparity` ([L3523](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3523)). L3542-L3546: the first combination is children 0 to `num_failures - 1`, with sentinels at both ends. L3549: `raidz_reconstruct` treats those children as wrong, rebuilds their data columns from parity and checks the parent's checksum again ([L3399](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3399)). L3551-L3556: `EINVAL`, more columns dead than parity can rebuild ([L3385-L3392](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3385-L3392)): try more failures. L3557-L3558: 0, the checksum verifies; the columns found wrong are then marked `ECKSUM` ([L3403-L3428](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3403-L3428)) and rewritten with the good data ([L3166-L3210](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3166-L3210)). The next combination is computed below ([L3560-L3598](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3560-L3598)), in the order the comment above the function lists ([L3467-L3490](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3467-L3490)).
+
+### 10. `vdev_raidz_need_resilver`, the test — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L4018-L4035
+
+```c
+	if (!vdev_dtl_contains(vd, DTL_PARTIAL, phys_birth, 1))
+		return (B_FALSE);
+
+	if (s + nparity >= dcols)
+		return (B_TRUE);
+
+	for (uint64_t c = 0; c < s + nparity; c++) {
+		uint64_t devidx = (f + c) % dcols;
+		vdev_t *cvd = vd->vdev_child[devidx];
+
+		/*
+		 * dsl_scan_need_resilver() already checked vd with
+		 * vdev_dtl_contains(). So here just check cvd with
+		 * vdev_dtl_empty(), cheaper and a good approximation.
+		 */
+		if (!vdev_dtl_empty(cvd, DTL_PARTIAL))
+			return (B_TRUE);
+	}
+```
+
+Excerpt 5 without its first lines (the sizes) and its last. L4018-L4019: the block was born outside the txgs some child missed: nothing to do. L4021-L4022: a block as wide as the vdev touches every child. L4024-L4035: otherwise, only if one of its `s + nparity` children from `f` on missed writes.
+
 **Resilver, as far as this room goes.** A healing resilver is a scan of the block tree, not of the disk. `dsl_scan_recurse` reads an indirect block and calls `dsl_scan_visitbp` on each block pointer in it ([module/zfs/dsl_scan.c#L2248-L2255](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L2248-L2255)); `dsl_scan_visitbp` ends by calling the scan function on the block ([module/zfs/dsl_scan.c#L2440](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L2440)), `dsl_scan_scrub_cb`, which skips a block born outside the scan's txg window ([module/zfs/dsl_scan.c#L4844-L4848](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L4844-L4848)) and, for a resilver, asks whether the block needs I/O ([module/zfs/dsl_scan.c#L4878-L4880](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L4878-L4880)): `dsl_scan_need_resilver` → `vdev_dtl_need_resilver` ([module/zfs/dsl_scan.c#L3805](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L3805), [module/zfs/vdev.c#L3184-L3194](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev.c#L3184-L3194)) → excerpt 5. For a healing resilver the window is the txg range of the DTLs: `vdev_resilver_needed(spa->spa_root_vdev, &scn_min_txg, &scn_max_txg)` ([module/zfs/dsl_scan.c#L914-L915](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L914-L915)). So the free space of a disk is never read or written by a resilver, and a block written while a child was healthy is skipped. The room says no more than this about resilver; the scan's queues, sorting and pacing are left to a later room.
 
 **The read path, as the figure runs it.** All in module/zfs/vdev_raidz.c.

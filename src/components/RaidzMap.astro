@@ -52,13 +52,13 @@ const S0 = {
     legendSkip: "skip sector (padding)",
     legendFree: "another block, or free",
     summary:
-      "Block {name}, {psize}: {s}, {p}, {k}, across {used} of the {dcols} children. asize = {asize}, {ratio} times psize.",
+      "Block {name}, {psize}: {s} and {p} on {used} of the {dcols} children{k}. asize = {asize}, {ratio} times psize.",
     secData1: "{n} data sector",
     secDataN: "{n} data sectors",
     secParity1: "{n} parity sector",
     secParityN: "{n} parity sectors",
-    secSkip1: "{n} skip sector",
-    secSkipN: "{n} skip sectors",
+    secSkip1: ", plus {n} skip sector",
+    secSkipN: ", plus {n} skip sectors",
     swapped: "Single parity in an odd megabyte: columns 0 and 1 have swapped children.",
     dParity: "Column {c}, {name}, on child {dev} from sector {off}: {n}.",
     dData: "Column {c}, {name}, on child {dev} from sector {off}: sectors {from} to {to} of the block.",
@@ -138,13 +138,13 @@ const S0 = {
     legendSkip: "secteur de saut (bourrage)",
     legendFree: "un autre bloc, ou libre",
     summary:
-      "Bloc {name}, {psize} : {s}, {p}, {k}, sur {used} des {dcols} enfants. asize = {asize}, {ratio} fois psize.",
+      "Bloc {name}, {psize} : {s} et {p} sur {used} des {dcols} enfants{k}. asize = {asize}, {ratio} fois psize.",
     secData1: "{n} secteur de données",
     secDataN: "{n} secteurs de données",
     secParity1: "{n} secteur de parité",
     secParityN: "{n} secteurs de parité",
-    secSkip1: "{n} secteur de saut",
-    secSkipN: "{n} secteurs de saut",
+    secSkip1: ", plus {n} secteur de saut",
+    secSkipN: ", plus {n} secteurs de saut",
     swapped: "Parité simple dans un mégaoctet impair : les colonnes 0 et 1 ont échangé leurs enfants.",
     dParity: "Colonne {c}, {name}, sur l’enfant {dev} à partir du secteur {off} : {n}.",
     dData: "Colonne {c}, {name}, sur l’enfant {dev} à partir du secteur {off} : secteurs {from} à {to} du bloc.",
@@ -224,13 +224,13 @@ const S0 = {
     legendSkip: "sector de relleno (redondeo)",
     legendFree: "otro bloque, o libre",
     summary:
-      "Bloque {name}, {psize}: {s}, {p}, {k}, en {used} de los {dcols} hijos. asize = {asize}, {ratio} veces psize.",
+      "Bloque {name}, {psize}: {s} y {p} en {used} de los {dcols} hijos{k}. asize = {asize}, {ratio} veces psize.",
     secData1: "{n} sector de datos",
     secDataN: "{n} sectores de datos",
     secParity1: "{n} sector de paridad",
     secParityN: "{n} sectores de paridad",
-    secSkip1: "{n} sector de relleno",
-    secSkipN: "{n} sectores de relleno",
+    secSkip1: ", más {n} sector de relleno",
+    secSkipN: ", más {n} sectores de relleno",
     swapped: "Paridad simple en un megabyte impar: las columnas 0 y 1 han intercambiado sus hijos.",
     dParity: "Columna {c}, {name}, en el hijo {dev} desde el sector {off}: {n}.",
     dData: "Columna {c}, {name}, en el hijo {dev} desde el sector {off}: sectores {from} a {to} del bloque.",
@@ -336,38 +336,42 @@ const SIZES = [4096, 8192, 32768, 131072];
     </div>
   </div>
   <p class="rz-summary" data-summary set:html={summary(L, S, lang)} />
-  <div class="rz-map" role="img" aria-label={`${S.figure}. ${summary(L, S, lang)}`} data-map set:html={grid(L, S)} />
-  <ul class="rz-legend" aria-hidden="true">
-    <li><span class="cell d d0">0</span>{S.legendData}</li>
-    <li><span class="cell p">P</span>{S.legendParity}</li>
-    <li><span class="cell k"></span>{S.legendSkip}</li>
-    <li data-legend-old hidden><span class="cell o o0">A</span>{S.legendOld}</li>
-    <li><span class="cell e"></span>{S.legendFree}</li>
-  </ul>
+  <div class="rz-stage">
+    <div class="rz-stage-map">
+    <div class="rz-map" role="img" aria-label={`${S.figure}. ${summary(L, S, lang)}`} data-map set:html={grid(L, S)} />
+    <ul class="rz-legend" aria-hidden="true">
+      <li><span class="cell d d0">0</span>{S.legendData}</li>
+      <li><span class="cell p">P</span>{S.legendParity}</li>
+      <li><span class="cell k"></span>{S.legendSkip}</li>
+      <li data-legend-old hidden><span class="cell o o0">A</span>{S.legendOld}</li>
+      <li><span class="cell e"></span>{S.legendFree}</li>
+    </ul>
+    </div>
+    <div class="rz-read" hidden>
+      <h3>{S.damage}</h3>
+      <ul class="rz-health" data-health></ul>
+      <div class="buttons">
+        <button class="btn btn--primary" type="button" data-act="read">{S.read}</button>
+        <button class="btn" type="button" data-act="finish" hidden>{S.finish}</button>
+        <button class="btn" type="button" data-act="heal">{S.reset}</button>
+      </div>
+      <ul class="rz-legend rz-legend-read" aria-hidden="true">
+        <li><span class="cell d lit"></span>{S.legendRead}</li>
+        <li><span class="cell d rebuilt"></span>{S.legendRebuilt}</li>
+        <li><span class="cell d sim"></span>{S.legendSim}</li>
+        <li><span class="cell d fixed"></span>{S.legendFixed}</li>
+      </ul>
+      <p class="rz-stepof muted" data-stepof></p>
+      <ol class="rz-steps" data-steps></ol>
+      <p class="visually-hidden" data-live aria-live="polite"></p>
+    </div>
+  </div>
   <p class="rz-note muted" data-write-note aria-live="polite"></p>
   <details class="rz-numbers">
     <summary>{S.numbers}</summary>
     <div data-readout set:html={readout(L, lang)} />
   </details>
   <noscript><p class="muted">{t.noScript}</p></noscript>
-  <div class="rz-read" hidden>
-    <h3>{S.damage}</h3>
-    <ul class="rz-health" data-health></ul>
-    <div class="buttons">
-      <button class="btn btn--primary" type="button" data-act="read">{S.read}</button>
-      <button class="btn" type="button" data-act="finish" hidden>{S.finish}</button>
-      <button class="btn" type="button" data-act="heal">{S.reset}</button>
-    </div>
-    <ul class="rz-legend rz-legend-read" aria-hidden="true">
-      <li><span class="cell d lit"></span>{S.legendRead}</li>
-      <li><span class="cell d rebuilt"></span>{S.legendRebuilt}</li>
-      <li><span class="cell d sim"></span>{S.legendSim}</li>
-      <li><span class="cell d fixed"></span>{S.legendFixed}</li>
-    </ul>
-    <p class="rz-stepof muted" data-stepof></p>
-    <ol class="rz-steps" data-steps></ol>
-    <p class="visually-hidden" data-live aria-live="polite"></p>
-  </div>
   <details class="text-version">
     <summary>{t.textVersion}</summary>
     <div data-describe set:html={describe(L, S, lang)} />
@@ -729,11 +733,6 @@ const SIZES = [4096, 8192, 32768, 131072];
   .rz-map :global(.cell.o1) {
     background: var(--surface-2);
   }
-  .rz-map :global(.cell.o.op) {
-    color: var(--accent);
-    border-style: dashed;
-    border-color: var(--accent);
-  }
   .rz-map :global(.cell.o.k) {
     background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 5px);
   }
@@ -839,8 +838,23 @@ const SIZES = [4096, 8192, 32768, 131072];
   [data-readout] :global(dt code) {
     color: var(--accent);
   }
+  /* The map and the read side by side when there is room, so each step's marks stay in view. */
+  .rz-stage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-5) var(--space-6);
+    align-items: flex-start;
+  }
+  /* As wide as the map: the legend wraps under it instead of widening the column. */
+  .rz-stage-map {
+    flex: 0 1 auto;
+    width: min-content;
+    min-width: min(100%, 20rem);
+    max-width: 100%;
+  }
   .rz-read {
-    margin-top: var(--space-6);
+    flex: 1 1 22rem;
+    min-width: 0;
   }
   .rz-read h3 {
     font-family: var(--font-caption);
@@ -856,7 +870,7 @@ const SIZES = [4096, 8192, 32768, 131072];
     padding: 0;
     margin: 0 0 var(--space-4);
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
     max-width: 52rem;
     gap: var(--space-2) var(--space-3);
   }

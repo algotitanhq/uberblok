@@ -3,83 +3,96 @@ import Base from "../../layouts/Base.astro";
 import RaidzMap from "../../components/RaidzMap.astro";
 import WriteHole from "../../components/WriteHole.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomUrl, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D23.1): the question, a plain
+// answer, the figures, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "en";
 const r = room("raidz");
 const V = "module/zfs/vdev_raidz.c";
 const L = {
-  maxParity: gh("include/sys/fs/zfs.h", 929),
-  pqr: gh(V, 121, 123),
   pad: gh("module/zfs/zio.c", 4718, 4729),
+  pqr: gh(V, 121, 123),
+  parity: gh(V, 2443),
+  issue: gh(V, 2445, 2462),
   nskip: gh(V, 699, 700),
   skipPlace: gh(V, 509, 580),
-  skipIo: gh(V, 553, 572),
-  dataLoop: gh(V, 548, 576),
-  oneSector: gh(V, 2300, 2303),
-  skipOpt: gh(V, 2481, 2506),
-  genP: gh(V, 1141, 1156),
-  startWrite: gh(V, 2443, 2462),
-  readRow: gh(V, 2573, 2588),
+  oneSector: gh(V, 2302, 2303),
+  enxio: gh(V, 2522, 2531),
+  known: gh(V, 3712, 3739),
   cksum: gh(V, 2767, 2772),
   readAll: gh(V, 3886, 3910),
-  combrecCall: gh(V, 3959),
-  order: gh(V, 3467, 3490),
-  simulate: gh(V, 3283, 3299),
+  numFailures: gh(V, 3523),
+  verify: gh(V, 3399),
   einval: gh(V, 3385, 3392),
-  parityChoice: gh(V, 2125, 2155),
   ecksum: gh(V, 3403, 3428),
-  verify: gh(V, 3132, 3163),
   repair: gh(V, 3166, 3210),
-  scrubRead: gh(V, 2580, 2582),
-  state: gh(V, 3977, 3983),
-  swap: gh(V, 725, 734),
-  recurse: gh("module/zfs/dsl_scan.c", 2248, 2255),
-  visit: gh("module/zfs/dsl_scan.c", 2440),
+  order: gh(V, 3467, 3490),
+  parityChoice: gh(V, 2125, 2155),
   window: gh("module/zfs/dsl_scan.c", 4844, 4848),
   needIo: gh("module/zfs/dsl_scan.c", 4878, 4880),
-  dtlWindow: gh("module/zfs/dsl_scan.c", 914, 915),
-  expansion: gh(V, 152, 162),
 };
 ---
 
 <Base
   lang={lang}
   roomId="raidz"
-  title="RAID-Z · Uberblok"
-  description="How RAID-Z gives every block its own stripe, of variable width, so there is no write hole, and how it finds a disk that lies: interactive, with the OpenZFS code."
+  title="What happens when a disk in my RAID-Z fails? RAID-Z, variable stripes and the write hole · Uberblok"
+  description="RAID-Z gives every block a stripe of its own, written to free space, so there is no write hole, and the checksum in the parent tells which disk returned wrong data. Interactive, with the OpenZFS code."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Room {roomNumber(r.id)}</p>
-      <h1>{r.title.en}</h1>
-      <div class="prose problem">
+      <p class="kicker">Room {roomNumber(r.id)} · {r.title.en}</p>
+      <h1>What happens when a disk in my RAID-Z fails?</h1>
+      <div class="prose answer">
         <p class="lead">
-          Classic RAID-5 keeps a fixed stripe across its disks: some data and the parity of that data. To change one
-          piece, it must write the new data and the new parity, in place, as two separate writes. A power failure between
-          the two leaves a stripe whose parity no longer matches its data, and nothing on disk says so. When a disk later
-          dies, its contents are rebuilt from that parity: wrong, without a word. This is the <em>write hole</em>.
+          A RAID-5 array cuts its disks into fixed stripes. Each stripe holds some data and its parity, extra sectors
+          computed from that data, so that any one missing piece can be rebuilt from the others. To change part of a stripe, the
+          array writes the new data and then the new parity, in place. If the power fails between those two writes, the
+          parity no longer matches the data, and nothing records that. The damage shows much later, when a disk dies
+          and its contents are rebuilt from that parity: the rebuilt data is wrong, and no error is reported. This is
+          called the write hole.
         </p>
         <p>
-          A small write is costly too: to compute the new parity, RAID-5 must first read the rest of the stripe, or the
-          old data and the old parity. RAID-Z does neither, because it never updates a stripe: every block gets a
-          stripe of its own, as wide as the block needs.
+          RAID-Z never changes a stripe that is on disk. Each block ZFS writes gets a stripe of its own, cut across as
+          many disks as the block needs, with parity computed from that block alone. A small block takes two or three
+          disks and a large one takes them all. Like every write in ZFS, the stripe goes to free space, and the old
+          version of the block stays where it was until the pool has switched to the new one. A power failure can leave
+          a half-written stripe, but nothing points to it.
+        </p>
+        <p>
+          When a disk dies, ZFS reads the parity of each block and rebuilds the missing part. A disk can also return
+          wrong data without reporting an error, and parity alone cannot say which disk that is. The checksum stored
+          with the pointer to each block can. ZFS assumes one disk is wrong, then another, rebuilds the block each time,
+          and keeps the version that matches the checksum. Then it writes the good data back to the disk that lied.
         </p>
       </div>
     </header>
 
     <section class="section" aria-labelledby="map">
-      <h2 id="map"><span class="n">1</span> One block, one stripe</h2>
+      <h2 id="map"><span class="n">1</span> Each block gets its own stripe</h2>
       <div class="prose">
         <p>
-          When ZFS writes a block to a raidz vdev, <code>vdev_raidz_map_alloc</code> cuts that block, and that block alone,
-          into columns, one per child disk. The <a href={L.pqr}>parity columns come first</a>, P, then Q and R for raidz2
-          and raidz3 (<a href={L.maxParity}>3 at most</a>). The data columns follow, each one
-          <a href={L.dataLoop}>a contiguous run of the block</a>: not one sector per disk in turn, as RAID is often drawn.
-          Then come the skip sectors that round the allocation up. Pick a size, a parity, a number of disks and a sector
-          size: the map and every number are what the code computes.
+          The map shows the disks of a raidz2 group side by side, six of them, which the code calls children. Each row
+          is one sector, the smallest unit a disk writes (4 KiB here). Block A is 24 KiB: its six sectors of data sit in
+          four columns, with two parity columns, P and Q, beside them. Write a 4 KiB block after it and see it take three
+          disks, one for data and two for parity. A 128 KiB block takes all six, over several rows. Change the number of
+          disks or the parity, and every block is laid out again.
+        </p>
+        <p>
+          The hatched sectors are padding. RAID-Z rounds each block up to a multiple of parity + 1 sectors, so that no
+          gap too small to use is left between two blocks. That is why an 8 KiB block on this group costs as much space
+          as 16 KiB of data.
+        </p>
+        <p>
+          Then damage the disks below the map and read the last block back, one step per press. With a disk missing, the
+          read asks for parity and rebuilds that column. With a disk that returns bad data, the first checksum fails,
+          ZFS reads every column, and the figure shows each guess in turn until one verifies.
         </p>
       </div>
       <RaidzMap lang={lang} />
@@ -89,222 +102,197 @@ const L = {
       <h2 id="hole"><span class="n">2</span> No write hole</h2>
       <div class="prose">
         <p>
-          The parity of a RAID-Z block is <a href={L.genP}>computed from its own data columns</a>, and
-          <a href={L.startWrite}>every column is sent to its disk at once</a>: nothing old is read, nothing old is
-          rewritten. The block goes to free space, as every block does in ZFS
-          (<a href={roomUrl(lang, "copy-on-write")}>copy-on-write</a>), and the old version stays where it was until a
-          transaction group that no longer needs it is committed by a single uberblock write
-          (<a href={roomUrl(lang, "txg")}>transaction groups</a>). A power failure in the middle leaves a half-written
-          stripe that nothing points to.
+          Step through both sides at once. On the left, RAID-5 writes D1′ over D1 and the power fails before the new
+          parity is written. Nothing looks wrong until disk 0 dies and D0 is rebuilt from the stale parity. On the right,
+          RAID-Z writes the new version to free space. After the reboot the old block is whole, and when a disk dies its
+          part is rebuilt correctly.
         </p>
-        <p class="muted">
-          That half of the argument is not in <code>vdev_raidz.c</code>: RAID-Z writes a whole stripe, and copy-on-write
-          and the txg commit make sure no one reads it before it is whole.
+        <p>
+          The RAID-Z code only does half of this: it writes whole stripes and never reads or rewrites an old one. The
+          other half is <a href={roomUrl(lang, "copy-on-write")}>copy-on-write</a> and the
+          <a href={roomUrl(lang, "txg")}>transaction group</a> commit, which make sure no pointer reaches a stripe before
+          all of it is on disk.
         </p>
       </div>
       <WriteHole lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">The idea, at three depths</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">In the code</h2>
+      <p class="prose">
+        The figures follow five places in <code>vdev_raidz.c</code>. Open a Source note to see the lines, taken from
+        release zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>In one sentence</h3>
-        <p class="lead prose">
-          RAID-Z never updates a stripe: each block is written to free space as a stripe of its own, data and parity
-          together, and the checksum in its parent tells which disk is lying when the block is read back.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>In one paragraph</h3>
+      <div class="step">
+        <h3>Cutting a block into columns</h3>
         <p class="prose">
-          A raidz vdev of <em>n</em> children with <em>p</em> parity is one address space, interleaved sector by sector
-          across the children. A block of <em>s</em> sectors starts somewhere in it and takes
-          ⌈<em>s</em> / (<em>n</em> − <em>p</em>)⌉ rows: its data in columns that each hold a contiguous run of the
-          block, and <em>p</em> parity columns as long as the longest data column. A small block uses only as many columns
-          as it needs: <a href={L.oneSector}>one sector of data always costs <em>p</em> + 1 sectors</a>, whatever the
-          width. Every allocation is <a href={L.nskip}>rounded up to a multiple of <em>p</em> + 1</a> sectors, the size of the
-          smallest block. On a read, ZFS reads the data
-          columns only, and checks them against the checksum in the parent block pointer. If it fails and no disk
-          reported an error, ZFS reads everything and tries, one combination after another, which disks to disbelieve,
-          until the checksum verifies; then it rewrites the bad column.
+          <code>vdev_raidz_map_alloc</code> builds the map of one block. It counts the block's sectors, divides them
+          among the data columns, and makes the parity columns as long as the longest data column. Nothing in the
+          arithmetic looks at any other block.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_raidz_map_alloc</code>, vdev_raidz.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={V}
+            from={634}
+            to={649}
+            symbol="vdev_raidz_map_alloc"
+            notes={[
+              {
+                from: 634,
+                to: 640,
+                text: `<code>s</code> is the block's size in sectors, already <a href="${L.pad}">padded to a whole sector</a>. <code>q</code> full rows of data, and <code>r</code> sectors left over.`,
+              },
+              {
+                from: 643,
+                text: `The <code>bc</code> "big columns" get one sector more: the <code>r</code> columns that hold the remainder, and the parity columns, which come first (<a href="${L.pqr}">P, Q, R</a>).`,
+              },
+              {
+                from: 649,
+                text: `<code>tot</code>, data plus parity. <code>vdev_raidz_io_start_write</code> <a href="${L.parity}">computes the parity of this map</a> and <a href="${L.issue}">sends every column to its disk</a>. Nothing old is read.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>In detail</h3>
-        <div class="prose">
-          <p>
-            <strong>Cutting the block.</strong> By the time the I/O reaches the raidz vdev, its size has been
-            <a href={L.pad}>padded to a whole sector</a>.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/vdev_raidz.c"
-          from={615}
-          to={649}
-          symbol="vdev_raidz_map_alloc"
-          notes={[
-            {
-              from: 617,
-              to: 623,
-              text: "Everything is in sectors of <code>1 &lt;&lt; ashift</code>. <code>b</code> is where the block starts on the vdev, <code>s</code> its size. Sector <code>b</code> of the vdev is on child <code>b % dcols</code>, at sector <code>b / dcols</code> of that child.",
-            },
-            {
-              from: 628,
-              text: "One row: on a raidz that is not being expanded, the whole block is one stripe.",
-            },
-            {
-              from: 634,
-              to: 643,
-              text: "<code>q</code> full rows of data, <code>r</code> sectors left over. The <code>bc</code> “big columns” get one more sector: the <code>r</code> data columns that hold the remainder, and the parity columns, which must be as long as the longest data column.",
-            },
-            {
-              from: 649,
-              text: "<code>tot</code>: data plus parity, the sectors actually written.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Placing the columns.</strong> The same function then gives each column its child, its offset and its size.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/vdev_raidz.c"
-          from={677}
-          to={700}
-          symbol="vdev_raidz_map_alloc"
-          notes={[
-            {
-              from: 679,
-              to: 686,
-              text: "Column <code>c</code> is on child <code>f + c</code>. Past the last child it wraps to child 0, one sector further down: the block is a run of consecutive sectors of the vdev’s address space.",
-            },
-            {
-              from: 688,
-              to: 693,
-              text: "A column past <code>acols</code> holds no data (a block narrower than the vdev); the first <code>bc</code> columns have <code>q + 1</code> sectors, the others <code>q</code>.",
-            },
-            {
-              from: 699,
-              to: 700,
-              text: `The padding: <code>roundup(tot, nparity + 1) - tot</code> skip sectors, from column <code>bc</code> on. <a href="${L.skipPlace}">Where they land</a>: one after each short column, wrapping onto the parity columns if the stripe runs out of columns. They are written as zeros, <a href="${L.skipIo}">in the same I/O as their column</a>, or <a href="${L.skipOpt}">as an optional I/O of their own</a> for a column with no data, so that the disk queue can merge contiguous writes.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>What the allocator reserves.</strong> The map writes <code>tot</code> sectors; the allocator has
-            already reserved the rounded-up size, computed from the size alone.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/vdev_raidz.c"
-          from={2305}
-          to={2317}
-          symbol="vdev_raidz_psize_to_asize"
-          notes={[
-            { from: 2315, text: "Data sectors: <code>psize</code> rounded up to a sector." },
-            { from: 2316, text: "Plus <code>nparity</code> parity sectors for each row of <code>cols - nparity</code> data sectors that is started." },
-            {
-              from: 2317,
-              text: "Rounded up to a multiple of <code>nparity + 1</code>. On a raidz2 of 12 disks with 4 KiB sectors, a 4 KiB block takes 12 KiB, an 8 KiB block 24 KiB (two skip sectors), a 40 KiB block 48 KiB: the figure computes any other.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            In raidz1, the parity column and the first data column <a href={L.swap}>swap children in every other
-            megabyte</a> of the vdev, so that parity is not always on the same disk; the comment there says the benefit is
-            doubtful but the on-disk format must keep it forever. Set the first sector <code>b</code> to 256 with 4 KiB
-            sectors to see it.
-          </p>
-          <p>
-            <strong>Reading it back.</strong> A normal read <a href={L.readRow}>asks only for the data columns</a>; parity is
-            read when a disk is missing, or by a scrub or a resilver. The block is reassembled and
-            <a href={L.cksum}>checked against the checksum in its parent block pointer</a>. A missing disk is an error ZFS
-            knows about: its data column is rebuilt from the first parity column still valid, P before Q before R
-            (<a href={L.parityChoice}>the choice</a>). But a disk can also return the wrong bytes and report success.
-            Then the checksum fails and no disk is to blame. ZFS <a href={L.readAll}>reads every column</a>, and
-            <a href={L.combrecCall}>calls <code>vdev_raidz_combrec</code></a>.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/vdev_raidz.c"
-          from={3523}
-          to={3558}
-          symbol="vdev_raidz_combrec"
-          notes={[
-            { from: 3523, text: "Suppose one disk is lying, then two, up to <code>nparity</code>." },
-            {
-              from: 3532,
-              to: 3536,
-              text: `<code>n</code> logical children. Without expansion it is the number of disks, and logical child <em>i</em> is <a href="${L.simulate}">disk <em>i</em></a>.`,
-            },
-            {
-              from: 3542,
-              to: 3546,
-              text: `The first combination, disks 0 to <code>num_failures - 1</code>; the loop after this excerpt walks through the others in <a href="${L.order}">the order the comment above the function lists</a>.`,
-            },
-            {
-              from: 3549,
-              to: 3558,
-              text: `<code>raidz_reconstruct</code> treats those disks as dead, rebuilds their data columns from parity and asks the checksum again. <code>EINVAL</code>: with the errors already known, <a href="${L.einval}">more columns dead than parity</a>; try more failures. 0: the checksum verifies.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            The checksum is the oracle. Parity alone can rebuild a column ZFS knows to be missing, but it cannot say which
-            of the columns it has is lying; the checksum, stored one level up in the tree, can. When a combination
-            verifies, <a href={L.ecksum}>its data columns are marked as checksum errors</a>, the parity that was read but
-            not used is <a href={L.verify}>regenerated and compared</a>, and <a href={L.repair}>the good data is written
-            back</a> to every column found wrong. A disk that returns bad parity is not caught by a normal read, which does
-            not read parity; <a href={L.scrubRead}>a scrub reads every column</a>. With more missing disks than parity, the
-            vdev <a href={L.state}>cannot be opened</a>; with one up to <code>nparity</code>, it is degraded.
-          </p>
-          <p>
-            <strong>Resilver.</strong> When a disk comes back after missing some writes, ZFS does not copy the whole disk.
-            A resilver walks the tree of block pointers, <a href={L.recurse}>indirect block by indirect block</a>, and
-            <a href={L.visit}>visits each block</a>. It skips the blocks <a href={L.window}>born outside the range of
-            txgs</a> that <a href={L.dtlWindow}>some disk missed</a>, then <a href={L.needIo}>asks the vdev</a> whether
-            this block touches such a disk.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/vdev_raidz.c"
-          from={4011}
-          to={4037}
-          symbol="vdev_raidz_need_resilver"
-          notes={[
-            { from: 4018, to: 4019, text: "The block was not born while a disk was missing writes: nothing to do." },
-            { from: 4021, to: 4022, text: "A block with at least as many columns as disks touches them all." },
-            {
-              from: 4024,
-              to: 4035,
-              text: "Otherwise, only if one of the <code>s + nparity</code> disks from the first column on missed writes. In the figure, set a disk to missing and read: the result says whether a resilver would rewrite this block.",
-            },
-          ]}
-        />
+      <div class="step">
+        <h3>Rounding up the space</h3>
+        <p class="prose">
+          Before the map exists, the allocator reserves space with <code>vdev_raidz_psize_to_asize</code>. It adds one
+          set of parity sectors for each row of data, then rounds up to a multiple of parity + 1 sectors. The extra
+          sectors are the padding in the figure.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_raidz_psize_to_asize</code>, vdev_raidz.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={V}
+            from={2315}
+            to={2317}
+            symbol="vdev_raidz_psize_to_asize"
+            notes={[
+              { from: 2315, to: 2316, text: "Data sectors, then <code>nparity</code> parity sectors for each row of <code>cols - nparity</code> data sectors that is started." },
+              {
+                from: 2317,
+                text: `Rounded up to a multiple of <code>nparity + 1</code>. The map calls the difference <a href="${L.nskip}">skip sectors</a> and <a href="${L.skipPlace}">writes them as zeros</a>. A one-sector block costs <code>nparity + 1</code> sectors <a href="${L.oneSector}">whatever the width</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Reading the data columns only</h3>
+        <p class="prose">
+          A normal read of a healthy block asks for its data columns and nothing else. Parity is read only when a data
+          column is missing, or by a scrub or a resilver. So a disk that holds bad parity goes unnoticed until one of
+          those reads it.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_raidz_io_start_read_row</code>, vdev_raidz.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={V}
+            from={2573}
+            to={2588}
+            symbol="vdev_raidz_io_start_read_row"
+            notes={[
+              {
+                from: 2577,
+                to: 2578,
+                text: `A column on a child that cannot be read is skipped. It was <a href="${L.enxio}">marked just above</a>.`,
+              },
+              {
+                from: 2580,
+                to: 2582,
+                text: `Parity columns are below <code>rr_firstdatacol</code>. They are read only with a data column missing (<code>rr_missingdata</code>), for a scrub or resilver, or when parity is forced. The missing data is then <a href="${L.known}">rebuilt from the first valid parity</a>, P before Q before R (<a href="${L.parityChoice}">the choice</a>).`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Finding the disk that lies</h3>
+        <p class="prose">
+          Every read ends with the checksum stored in the parent's block pointer. When it fails and no disk reported an
+          error, ZFS reads every column and calls <code>vdev_raidz_combrec</code>. The function
+          assumes one child is wrong, then two, up to the parity count, and tries each combination in turn.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_raidz_combrec</code>, vdev_raidz.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={V}
+            from={3542}
+            to={3558}
+            symbol="vdev_raidz_combrec"
+            notes={[
+              {
+                from: 3542,
+                to: 3546,
+                text: `Reached after <a href="${L.readAll}">every column has been read</a>. The first combination: children 0 to <code>num_failures - 1</code>, inside <a href="${L.numFailures}">a loop from 1 failure to <code>nparity</code></a>. The next ones follow <a href="${L.order}">the order the comment above lists</a>.`,
+              },
+              {
+                from: 3549,
+                to: 3556,
+                text: `<code>raidz_reconstruct</code> rebuilds those children's data from parity and <a href="${L.cksum}">checks the checksum</a> <a href="${L.verify}">again</a>. <code>EINVAL</code> means more dead columns than parity can rebuild (<a href="${L.einval}">the test</a>), so it tries one more failure.`,
+              },
+              {
+                from: 3557,
+                to: 3558,
+                text: `The checksum verifies. The columns found wrong are <a href="${L.ecksum}">counted as checksum errors</a> and <a href="${L.repair}">written back with the good data</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Resilvering only what is needed</h3>
+        <p class="prose">
+          When a disk comes back after missing some writes, a resilver does not copy the whole disk. It walks the tree
+          of blocks, skips those written while every disk was present, and asks the vdev whether each remaining block touches a disk that missed writes. The
+          figure answers that question for the last block when a disk is set to missing.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_raidz_need_resilver</code>, vdev_raidz.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={V}
+            from={4018}
+            to={4035}
+            symbol="vdev_raidz_need_resilver"
+            notes={[
+              {
+                from: 4018,
+                to: 4019,
+                text: `The block was not written while a child was missing writes: nothing to do. The scan has already <a href="${L.window}">skipped blocks born outside that window</a>, then <a href="${L.needIo}">asked this question</a> for the rest.`,
+              },
+              { from: 4021, to: 4022, text: "A block with at least as many columns as children touches every child." },
+              { from: 4024, to: 4035, text: "Otherwise, only if one of the <code>s + nparity</code> children from the first column on missed writes." },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
-      <h2 id="simplified">What the figure leaves out</h2>
+      <h2 id="simplified">What the figures leave out</h2>
       <p class="prose muted">
-        The figure runs the arithmetic of <code>vdev_raidz_map_alloc</code> and <code>vdev_raidz_psize_to_asize</code>
-        as the code writes it, so every layout and every number is the code’s. The read follows the code’s decisions
-        (which columns are read, which parity rebuilds what, the order of the combinations, what is written back), but
-        tracks only whether each column is right or wrong, not its bytes: a rebuild is right exactly when every column it
-        reads is right. It leaves out disks that missed writes (read as stale, not missing), slow disks skipped on
-        purpose, gang blocks, the scrub path, and dRAID. Blocks are limited to 128 KiB and 16 disks so the map stays
-        legible. RAID-Z expansion, which <a href={L.expansion}>adds a disk to an existing raidz</a> and gives older blocks
-        maps of several rows, is left for another time.
+        The map runs the arithmetic of <code>vdev_raidz_map_alloc</code> and <code>vdev_raidz_psize_to_asize</code> as
+        the code writes it, so every layout and every number is the code's. It places each block right after the
+        previous one. The allocator puts blocks wherever a metaslab has room. In raidz1, parity and the first data
+        column swap disks in every other megabyte of the vdev. Set the first sector to 256 with 4 KiB sectors to see
+        it. The read follows the code's decisions (which columns are read, which parity rebuilds what, the order of the
+        guesses, what is written back), but tracks only whether each column is right or wrong, not its bytes. It leaves
+        out disks that missed writes (read as stale, not missing), slow disks skipped on purpose, gang blocks, the scrub
+        path and dRAID. Blocks stop at 128 KiB and groups at 16 disks, so the map stays legible. RAID-Z expansion, which
+        adds a disk to an existing group and gives older blocks maps of several rows, is left for another time.
       </p>
     </section>
   </article>
@@ -319,7 +307,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -328,10 +316,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -339,8 +327,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

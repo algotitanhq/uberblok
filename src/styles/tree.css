@@ -308,7 +308,8 @@
   color: var(--bad);
   font-weight: 600;
 }
-.tr td {
+.tr td,
+.tr th {
   white-space: nowrap;
 }
 .tr-legend {

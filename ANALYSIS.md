@@ -1021,7 +1021,7 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 	    (VDEV_UBERBLOCK_COUNT(vd) - m);
 ```
 
-Excerpt 2, the slot alone. `n` is `ub_txg` modulo the number of slots (one fewer per label with multihost), minus one while a RAID-Z expansion's scratch copy is valid. Two consecutive txgs never share a slot, so the new uberblock never lands on the one the pool is using. The same `n` is written in the four labels of the disk ([`module/zfs/vdev_label.c#L1792-L1796`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1792-L1796)).
+Excerpt 2, the slot alone. `n` is `ub_txg` modulo the number of slots (one fewer per label with multihost). Consecutive txgs take consecutive slots, so the new uberblock never lands on the slot of the one the pool is using. The one exception is an uberblock that updates the current txg during a RAID-Z expansion (`RRSS_SCRATCH_VALID`): it takes `ub_txg` − 1, the slot before, for the same reason (the comment at L1768-L1781). The same `n` is written in the four labels of the disk ([`module/zfs/vdev_label.c#L1792-L1796`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1792-L1796)).
 
 ### 16. `vdev_config_sync`, the two cases of a cut — module/zfs/vdev_label.c
 

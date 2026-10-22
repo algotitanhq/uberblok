@@ -310,8 +310,10 @@ const textVersion = {
         offsets.set(v.key, Math.min(seen[v.id], 2) * OFF);
       }
       // A card with a newer version in front of it shows a one-line label in
-      // the strip that stays visible above the front card.
-      const behind = new Set(shown.filter((v) => shown.some((w) => w.id === v.id && w !== v && offsets.get(w.key)! > offsets.get(v.key)!)).map((v) => v.key));
+      // the strip that stays visible above the front card.      // After a power cut the unreachable blocks are drawn underneath, so the tree the pool
+      // came back to stays whole on top.
+      const behind = new Set(shown.filter((v) => shown.some((w) => w.id === v.id && w !== v && w.state !== "orphan" && offsets.get(w.key)! > offsets.get(v.key)!)).map((v) => v.key));
+      shown.sort((a, b) => Number(b.state === "orphan") - Number(a.state === "orphan"));
       const at = (v: V): [number, number] => {
         const [x, y] = POS[v.id], o = offsets.get(v.key)!;
         return [x + o, y + o];

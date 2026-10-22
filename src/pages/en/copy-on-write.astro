@@ -3,233 +3,228 @@ import Base from "../../layouts/Base.astro";
 import CowTree from "../../components/CowTree.astro";
 import MirrorHeal from "../../components/MirrorHeal.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1): the question, a plain answer,
+// the figures, then the code in Source notes. Links to the code live in the notes only.
 const lang = "en";
 const r = room("copy-on-write");
 const L = {
-  bp: gh("include/sys/spa.h", 374, 382),
-  bpSize: gh("include/sys/spa.h", 361),
-  cksum: gh("include/sys/spa.h", 381),
-  dvas: gh("include/sys/spa.h", 362),
-  compute: gh("module/zfs/zio_checksum.c", 411, 417),
   passRewrite: gh("module/zfs/zio.c", 128),
-  allocStage: gh("include/sys/zio_impl.h", 153),
   hole: gh("module/zfs/zio.c", 4345, 4346),
-  metaslab: gh("module/zfs/zio.c", 4380, 4382),
-  hole0: gh("module/zfs/zio.c", 2107, 2115),
-  ddt: gh("module/zfs/zio.c", 2126, 2131),
-  nop: gh("module/zfs/zio.c", 2133, 2136),
   writeDone: gh("module/zfs/dbuf.c", 5152, 5154),
-  kill: gh("module/zfs/dsl_dataset.c", 294),
-  dead: gh("module/zfs/dsl_dataset.c", 332, 345),
-  childVerify: gh("module/zfs/zio.c", 1631, 1639),
+  dvas: gh("include/sys/spa.h", 362),
   label: gh("module/zfs/zio_checksum.c", 175, 177),
-  labelVerifier: gh("module/zfs/zio_checksum.c", 295, 298),
-  embedded: gh("module/zfs/zio_checksum.c", 386, 393),
-  gang: gh("module/zfs/zio_checksum.c", 178, 180),
-  zilog: gh("module/zfs/zio_checksum.c", 181, 182),
-  zilog2: gh("module/zfs/zio_checksum.c", 190, 191),
-  off: gh("module/zfs/zio_checksum.c", 173, 174),
   fletcherDefault: gh("include/sys/zio.h", 119, 120),
-  fletcher: gh("module/zcommon/zfs_fletcher.c", 317, 338),
-  childSelect: gh("module/zfs/vdev_mirror.c", 793, 802),
+  compare: gh("module/zfs/zio_checksum.c", 535, 536),
+  counter: gh("module/zfs/zio.c", 5295, 5300),
   repairCond: gh("module/zfs/vdev_mirror.c", 883, 886),
   noGood: gh("module/zfs/vdev_mirror.c", 878, 881),
-  counter: gh("module/zfs/zio.c", 5295, 5300),
 };
 ---
 
 <Base
   lang={lang}
   roomId="copy-on-write"
-  title="Copy-on-write, checksums and self-healing · Uberblok"
-  description="Why a ZFS pool stays consistent without fsck, and how a checksum stored in the parent catches a disk that lies: interactive, with the OpenZFS code."
+  title="What happens when I change a block? Copy-on-write, checksums and self-healing · Uberblok"
+  description="ZFS writes a changed block to a new place and keeps its checksum in the parent, so a crash cannot leave a half-written pool and a bad disk cannot slip wrong data through. Interactive, with the OpenZFS code."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Room {roomNumber(r.id)}</p>
-      <h1>{r.title.en}</h1>
-      <div class="prose problem">
+      <p class="kicker">Room {roomNumber(r.id)} · {r.title.en}</p>
+      <h1>What happens when I change a block?</h1>
+      <div class="prose answer">
         <p class="lead">
-          Disks return wrong data without reporting an error. A bit rots; a write lands at the wrong place, or never
-          lands at all; a firmware bug answers with stale sectors. A checksum stored next to the data cannot catch a lost
-          or misdirected write, because the stale block carries a checksum that matches it. And a filesystem that
-          overwrites live blocks in place can be left half old and half new by a crash.
+          Two things can go wrong under a filesystem. The power can fail in the middle of a write and leave a file
+          part old and part new. And a disk can return wrong data without reporting an error. A bit flips, or a write
+          never reaches the disk, or it lands in the wrong place.
         </p>
-        <p>ZFS answers both problems with one rule and one placement.</p>
+        <p>
+          ZFS never writes over a block that is in use. When you change a block, the new version goes to free space
+          and the old one stays where it was. The block that points to it has to change too, so it is also written to
+          a new place, and so on up to the top of the pool. One last small write, the uberblock, switches the pool to
+          the new version. If the power fails before that write, the pool comes back as it was before the change, with
+          nothing half written.
+        </p>
+        <p>
+          Each pointer also stores a checksum of the block it points to, and every read is checked against it. A disk
+          that returns wrong data gets caught. If the pool has a second copy, on a mirror for example, ZFS reads that
+          one and writes it over the bad one.
+        </p>
       </div>
     </header>
 
     <section class="section" aria-labelledby="never">
-      <h2 id="never"><span class="n">1</span> Never overwrite a live block</h2>
+      <h2 id="never"><span class="n">1</span> The new version goes somewhere else</h2>
       <div class="prose">
         <p>
-          When a block changes, ZFS writes the new version somewhere else and leaves the old one where it is. The
-          pointer to the block changes, so its parent changes and is written elsewhere too, and so on up to the root.
-          The old tree stays whole until a single write, the new uberblock, switches the pool from one tree to the
-          other. Rewrite a block step by step, and cut the power before the commit.
+          Pick a data block in the figure and step through the change. The new block gets a new address. Its parent
+          holds the pointer to it, so the parent changes as well and moves to a new address. The same happens to the
+          top of the file’s tree.
+        </p>
+        <p>
+          Until the last step, the pool still points to the old tree, and nothing in that tree has been touched. The
+          last step writes the uberblock, and only then does the pool use the new tree. Cut the power before that
+          step to see what the pool finds when it comes back. Take a snapshot first, and the old blocks stay on disk.
         </p>
       </div>
       <CowTree lang={lang} />
     </section>
 
     <section class="section" aria-labelledby="parent">
-      <h2 id="parent"><span class="n">2</span> The checksum lives in the parent</h2>
+      <h2 id="parent"><span class="n">2</span> The parent holds the checksum</h2>
       <div class="prose">
         <p>
-          Each block pointer, the <a href={L.bpSize}>128-byte</a> <a href={L.bp}><code>blkptr_t</code></a>, carries the
-          <a href={L.cksum}>256-bit checksum</a> of the block it points to. A block never vouches for itself: its parent
-          does, and the parent’s parent vouches for the parent, up to the uberblock. Reading a block means recomputing
-          its checksum and comparing it with the one in the pointer that led to it. On a mirror, a mismatch sends the
-          read to the other disk, and the good copy is written back over the bad one.
+          A checksum kept next to the block it protects misses some faults. Say a write never reaches the disk. The
+          place it was meant for still holds older data, and that data still matches the checksum stored beside it.
+          The read looks fine and returns the wrong thing.
+        </p>
+        <p>
+          ZFS keeps the checksum in the parent, inside the pointer. The parent is checked by its own parent, and so on
+          up to the uberblock. When a block is read, ZFS computes its checksum again and compares it with the one in
+          the pointer. Damage one side of the mirror below, then read the file. ZFS catches the bad copy, reads the
+          other side, and writes the good data back over the bad copy.
         </p>
       </div>
       <MirrorHeal lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">The idea, at three depths</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">In the code</h2>
+      <p class="prose">
+        The figures follow four places in the OpenZFS source. Open a source to see the lines, taken from release
+        zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>In one sentence</h3>
-        <p class="lead prose">
-          ZFS never overwrites live data and keeps each block’s checksum in the pointer to it, so a crash cannot leave
-          the pool half written and a disk cannot return wrong data unnoticed.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>In one paragraph</h3>
+      <div class="step">
+        <h3>Writing a block</h3>
         <p class="prose">
-          Every write goes to a new place: the block gets a new address, which changes its parent’s block pointer,
-          which changes the parent, up to the root. Nothing the current uberblock reaches is ever modified, so at every
-          instant the disks hold a complete, consistent tree, and writing one new uberblock commits the next one. Each
-          block pointer also carries the checksum of its child, which makes the tree a Merkle tree: one trusted root
-          vouches for every block below it. A mismatch on read is a detected error, never silent corruption, and
-          with a second copy (a mirror, or <a href={L.dvas}>up to three addresses</a> in one block pointer) ZFS
-          returns the good copy and repairs the bad one.
+          <code>zio_write_compress</code> decides whether a write may go over the old block. It may only when the
+          block was created in the same transaction group, because no committed uberblock points to it yet. Every
+          other write clears the block pointer, so the block gets a new address.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_write_compress</code>, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/zio.c"
+            from={2094}
+            to={2105}
+            symbol="zio_write_compress"
+            notes={[
+              {
+                from: 2094,
+                to: 2101,
+                text: `Writing over the old block is allowed only for a block born in the transaction group being synced (<code>BP_GET_BIRTH(bp) == zio-&gt;io_txg</code>), of the same size, from sync pass 2 on (<a href="${L.passRewrite}"><code>zfs_sync_pass_rewrite</code></a>). No committed uberblock points to such a block yet.`,
+              },
+              {
+                from: 2102,
+                to: 2104,
+                text: `Every other write clears the pointer and takes the full write pipeline. <code>zio_dva_allocate</code> <a href="${L.hole}">checks that the pointer is empty</a> before it takes a new address. When the write is done, <a href="${L.writeDone}"><code>dbuf_write_done</code></a> frees the old block, or leaves it to a snapshot that still uses it.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>In detail</h3>
-        <div class="prose">
-          <p>
-            <strong>Where a write becomes a new block.</strong> In the write pipeline,
-            <code>zio_write_compress</code> decides between a rewrite in place and a fresh allocation.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/zio.c"
-          from={2086}
-          to={2105}
-          symbol="zio_write_compress"
-          notes={[
-            {
-              from: 2094,
-              to: 2101,
-              text: `In-place rewrite is allowed only for a block born in the very txg being synced (<code>BP_GET_BIRTH(bp) == zio-&gt;io_txg</code>), of unchanged size, from sync pass <a href="${L.passRewrite}"><code>zfs_sync_pass_rewrite</code></a> (2) on. No committed uberblock references such a block yet, so overwriting it touches no live data. This is the one exception to copy-on-write for blocks of the tree.`,
-            },
-            {
-              from: 2102,
-              to: 2104,
-              text: `Every other write zeroes the block pointer and takes the full write pipeline, whose <a href="${L.allocStage}">DVA_ALLOCATE stage</a> normally gives the block a new address: <code>zio_dva_allocate</code> <a href="${L.hole}">asserts the pointer is a hole</a> before <a href="${L.metaslab}">calling <code>metaslab_alloc</code></a>. Just below, three cases change the pipeline: a block that compresses to nothing <a href="${L.hole0}">becomes a hole</a>, dedup <a href="${L.ddt}">takes the DDT pipeline</a>, and nopwrite <a href="${L.nop}">adds its own stage</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            When the write completes, <a href={L.writeDone}><code>dbuf_write_done</code></a> calls
-            <code>dsl_dataset_block_kill</code> on the old pointer and <code>dsl_dataset_block_born</code> on the new one.
-            The old block is <a href={L.kill}>freed only if it was born after the most recent snapshot</a>; otherwise it
-            <a href={L.dead}>goes on the dataset’s deadlist</a>, and the snapshot keeps it.
-          </p>
-          <p>
-            <strong>Where the checksum is checked.</strong> On write, <code>zio_checksum_compute</code>
-            <a href={L.compute}>stores the computed value in <code>bp-&gt;blk_cksum</code></a>. On read, the block is
-            checked against that field.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/zio_checksum.c"
-          from={501}
-          to={538}
-          symbol="zio_checksum_error_impl"
-          notes={[
-            {
-              from: 502,
-              to: 505,
-              text: "The expected value is <code>bp-&gt;blk_cksum</code>, taken from the block pointer the reader followed; the actual value is recomputed over the bytes just read.",
-            },
-            {
-              from: 515,
-              to: 526,
-              text: "Encrypted blocks other than objsets: half of the 256 bits is the encryption MAC, which decryption verifies, so only the other 128 bits are compared here.",
-            },
-            {
-              from: 535,
-              to: 536,
-              text: `A mismatch returns <code>ECKSUM</code>. On a mirror this runs in each child read, not in the parent: <code>zio_vdev_child_io</code> <a href="${L.childVerify}">moves the CHECKSUM_VERIFY stage down to the child</a>. Each error is <a href="${L.counter}">counted on the leaf vdev</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            The chain stops at the uberblock: <code>ub_rootbp</code> has no parent pointer. Each uberblock slot is
-            protected instead by an <a href={L.label}>embedded SHA-256 “label” checksum</a> whose
-            <a href={L.labelVerifier}>verifier is the slot’s own offset on disk</a>. <a href={L.gang}>Gang headers</a> and ZIL blocks
-            (<a href={L.zilog}><code>zilog</code></a>, <a href={L.zilog2}><code>zilog2</code></a>) also
-            <a href={L.embedded}>carry embedded checksums</a>, and <a href={L.off}><code>checksum=off</code></a> exists.
-            The default, <code>checksum=on</code>, <a href={L.fletcherDefault}>means fletcher4</a>: four 64-bit running
-            sums over the block <a href={L.fletcher}>read as 32-bit words</a>. The figures above compute it for real.
-          </p>
-          <p>
-            <strong>Where the mirror heals.</strong> In <code>vdev_mirror_io_done</code>, if no child has returned good
-            data yet, <a href={L.childSelect}><code>vdev_mirror_child_select</code> picks another child</a> and a new read
-            is issued. If none is left, <a href={L.noGood}>the read fails with an error</a>. Repair needs at least one
-            good copy, a writable pool, and either an unexpected error, a resilver, or a resilvering scrub
-            (<a href={L.repairCond}>L883–L886</a>). Then:
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/vdev_mirror.c"
-          from={900}
-          to={934}
-          symbol="vdev_mirror_io_done"
-          notes={[
-            {
-              from: 900,
-              to: 904,
-              text: "Children that returned good data are never rewritten: the comment just above warns that rewriting the only good copy during a power loss could lose it.",
-            },
-            {
-              from: 905,
-              to: 924,
-              text: "A child that was not tried is repaired only during a scrub, for indirect or dRAID-spare vdevs, or when its DTL says this txg is missing there.",
-            },
-            {
-              from: 927,
-              to: 933,
-              text: "The good buffer <code>zio-&gt;io_abd</code> is written to each damaged child as a <code>ZIO_FLAG_IO_REPAIR</code> write, flagged <code>ZIO_FLAG_SELF_HEAL</code> when the cause was an unexpected error.",
-            },
-          ]}
-        />
+      <div class="step">
+        <h3>Storing the checksum</h3>
+        <p class="prose">
+          A block pointer, <code>blkptr_t</code>, takes 128 bytes. It holds up to three addresses for the block and
+          one 256-bit checksum that covers them all. The pointer sits inside the parent block, which is how the parent
+          vouches for the child.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>blkptr_t</code>, spa.h</Fragment>
+          <Excerpt
+            lang={lang}
+            path="include/sys/spa.h"
+            from={374}
+            to={382}
+            symbol="blkptr_t"
+            notes={[
+              {
+                from: 375,
+                text: `Up to three addresses for the same block (<a href="${L.dvas}"><code>SPA_DVAS_PER_BP</code></a>), all covered by the one checksum.`,
+              },
+              {
+                from: 381,
+                text: `The checksum of the block this pointer leads to. The uberblock has no parent, so it carries <a href="${L.label}">its own checksum</a> instead.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Reading a block</h3>
+        <p class="prose">
+          On every read, <code>zio_checksum_error_impl</code> takes the expected checksum from the pointer the read
+          came through. It computes the actual checksum over the bytes the disk returned. If the two differ, the read
+          fails with <code>ECKSUM</code>, and the error shows in the CKSUM column of <code>zpool status</code>.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_checksum_error_impl</code>, zio_checksum.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/zio_checksum.c"
+            from={501}
+            to={506}
+            symbol="zio_checksum_error_impl"
+            notes={[
+              {
+                from: 503,
+                text: "The expected value comes from the block pointer the reader followed, in the parent.",
+              },
+              {
+                from: 504,
+                to: 505,
+                text: `The actual value is computed over the bytes just read. With <code>checksum=on</code>, the default, the function is <a href="${L.fletcherDefault}">fletcher4</a>. The two are <a href="${L.compare}">compared further down</a>, and each mismatch is <a href="${L.counter}">counted on the disk</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Repairing a mirror</h3>
+        <p class="prose">
+          When one side of a mirror fails the check, ZFS reads another side. If that copy is good and the pool is
+          writable, it writes the good data to each side that failed. If no side is good, the read returns an error,
+          and the application never gets the wrong bytes.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_mirror_io_done</code>, vdev_mirror.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/vdev_mirror.c"
+            from={927}
+            to={933}
+            symbol="vdev_mirror_io_done"
+            notes={[
+              {
+                from: 927,
+                to: 933,
+                text: `The good buffer, <code>zio-&gt;io_abd</code>, is written to each damaged side as a repair write, marked <code>ZIO_FLAG_SELF_HEAL</code> when the cause was an unexpected error. This runs only with a good copy and a writable pool (<a href="${L.repairCond}">the condition</a>). With no good copy, <a href="${L.noGood}">the read fails</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">What the figures leave out</h2>
       <p class="prose muted">
-        The figures show one file, so the tree is short: in a pool it runs from the uberblock through the MOS, the
-        dataset and the object’s dnode. They leave out sync passes, gang blocks, dedup, nopwrite, encryption MACs, and
-        the mirror’s load-based choice of the side to read first (here, always disk A). The uberblock ring has 32
-        slots, as on 4K-sector disks. Checksums are real fletcher4 values over the demo blocks; addresses and txg
+        The figures show one file, so the tree is short. In a real pool it runs from the uberblock through the MOS,
+        the dataset and the file’s dnode. They leave out sync passes, gang blocks, dedup, nopwrite and encryption.
+        The mirror here always reads disk A first, where ZFS picks the side by load. The uberblock ring has 32 slots,
+        as on disks with 4K sectors. The checksums are real fletcher4 values over the demo blocks. Addresses and txg
         numbers are made up.
       </p>
     </section>
@@ -245,7 +240,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -254,10 +249,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -265,8 +260,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

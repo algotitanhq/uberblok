@@ -31,7 +31,7 @@ const L = {
   lang={lang}
   roomId="copy-on-write"
   title="What happens when I change a block? Copy-on-write, checksums and self-healing · Uberblok"
-  description="ZFS writes a changed block to a new place and keeps its checksum in the parent, so a crash cannot leave a half-written pool and a bad disk cannot slip wrong data through. Interactive, with the OpenZFS code."
+  description="ZFS writes a changed block to a new place and keeps its checksum in the parent, so a crash cannot leave a half-written pool and wrong data from a disk is caught on read. Interactive, with the OpenZFS code."
 >
   <article class="wrap">
     <header class="room-head">
@@ -40,20 +40,19 @@ const L = {
       <div class="prose answer">
         <p class="lead">
           Two things can go wrong under a filesystem. The power can fail in the middle of a write and leave a file
-          part old and part new. And a disk can return wrong data without reporting an error. A bit flips, or a write
-          never reaches the disk, or it lands in the wrong place.
+          part old and part new. And a disk can return wrong data without reporting an error. A bit can flip. A write
+          can be lost, or land in the wrong place.
         </p>
         <p>
-          ZFS never writes over a block that is in use. When you change a block, the new version goes to free space
-          and the old one stays where it was. The block that points to it has to change too, so it is also written to
-          a new place, and so on up to the top of the pool. One last small write, the uberblock, switches the pool to
-          the new version. If the power fails before that write, the pool comes back as it was before the change, with
-          nothing half written.
+          ZFS never writes over a block that is in use. The new version of a block goes to free space, and the old
+          one stays where it was. The blocks that point to it are copied the same way, up to the top of the pool. Then one
+          small write, to a root record called the uberblock, switches the pool to the new version. If the power fails
+          before that write, the pool comes back at the last finished version, with nothing half written.
         </p>
         <p>
-          Each pointer also stores a checksum of the block it points to, and every read is checked against it. A disk
-          that returns wrong data gets caught. If the pool has a second copy, on a mirror for example, ZFS reads that
-          one and writes it over the bad one.
+          Each pointer also stores a checksum of the block it points to, and every block read from disk is checked
+          against it. Wrong data gets caught. If the pool has redundancy, such as a mirror, ZFS takes the good data
+          from another copy and writes it over the bad one.
         </p>
       </div>
     </header>
@@ -85,7 +84,7 @@ const L = {
         </p>
         <p>
           ZFS keeps the checksum in the parent, inside the pointer. The parent is checked by its own parent, and so on
-          up to the uberblock. When a block is read, ZFS computes its checksum again and compares it with the one in
+          up to the uberblock. When a block is read from disk, ZFS computes its checksum again and compares it with the one in
           the pointer. Damage one side of the mirror below, then read the file. ZFS catches the bad copy, reads the
           other side, and writes the good data back over the bad copy.
         </p>
@@ -96,7 +95,7 @@ const L = {
     <section class="section" aria-labelledby="code">
       <h2 id="code">In the code</h2>
       <p class="prose">
-        The figures follow four places in the OpenZFS source. Open a source to see the lines, taken from release
+        The figures follow four places in the OpenZFS source. Open a Source note to see the lines, taken from release
         zfs-2.4.4.
       </p>
 
@@ -104,8 +103,9 @@ const L = {
         <h3>Writing a block</h3>
         <p class="prose">
           <code>zio_write_compress</code> decides whether a write may go over the old block. It may only when the
-          block was created in the same transaction group, because no committed uberblock points to it yet. Every
-          other write clears the block pointer, so the block gets a new address.
+          block was created in the current transaction group (txg), the batch of changes ZFS writes out together every
+          few seconds. No committed uberblock points to such a block yet. Otherwise the pointer is cleared, and the
+          block normally gets a new address.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>zio_write_compress</code>, zio.c</Fragment>
@@ -134,9 +134,9 @@ const L = {
       <div class="step">
         <h3>Storing the checksum</h3>
         <p class="prose">
-          A block pointer, <code>blkptr_t</code>, takes 128 bytes. It holds up to three addresses for the block and
-          one 256-bit checksum that covers them all. The pointer sits inside the parent block, which is how the parent
-          vouches for the child.
+          A block pointer, <code>blkptr_t</code>, takes 128 bytes. It holds up to three addresses, for copies of the
+          same block, and one 256-bit checksum. The copies hold the same bytes, so the one checksum checks any of them.
+          The pointer sits inside the parent block, so the parent checks the child.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>blkptr_t</code>, spa.h</Fragment>
@@ -163,9 +163,10 @@ const L = {
       <div class="step">
         <h3>Reading a block</h3>
         <p class="prose">
-          On every read, <code>zio_checksum_error_impl</code> takes the expected checksum from the pointer the read
-          came through. It computes the actual checksum over the bytes the disk returned. If the two differ, the read
-          fails with <code>ECKSUM</code>, and the error shows in the CKSUM column of <code>zpool status</code>.
+          On every read from disk, <code>zio_checksum_error_impl</code> takes the expected checksum from the pointer
+          the read came through. It computes the actual checksum over the bytes the disk returned. If the two differ,
+          that copy is rejected with <code>ECKSUM</code>, and the error counts against that disk in the CKSUM column
+          of <code>zpool status</code>.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>zio_checksum_error_impl</code>, zio_checksum.c</Fragment>
@@ -221,11 +222,12 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">What the figures leave out</h2>
       <p class="prose muted">
-        The figures show one file, so the tree is short. In a real pool it runs from the uberblock through the MOS,
-        the dataset and the file’s dnode. They leave out sync passes, gang blocks, dedup, nopwrite and encryption.
-        The mirror here always reads disk A first, where ZFS picks the side by load. The uberblock ring has 32 slots,
-        as on disks with 4K sectors. The checksums are real fletcher4 values over the demo blocks. Addresses and txg
-        numbers are made up.
+        The figures show one file, so the tree is short. In a real pool it runs from the uberblock through the MOS
+        (the pool’s own metadata), the dataset and the file’s dnode. They leave out sync passes, gang blocks, dedup,
+        nopwrite and encryption. Writes an application forced to disk with fsync also go to the ZIL, the intent log,
+        and are replayed after a crash. The ZIL room shows that. The mirror here always reads disk A first. ZFS picks the side
+        by load. The uberblock ring has 32 slots, as on disks with 4K sectors. The checksums are real fletcher4 values
+        over the demo blocks. Addresses and txg numbers are made up.
       </p>
     </section>
   </article>

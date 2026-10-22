@@ -1928,3 +1928,51 @@ opened by find-in-page, one panel per page, print: fixed or documented.
 
 **Debts.** The other rooms and the FR/ES copy of this one keep the old format until the pilot
 is approved. The figures' own "see the code" links stay inside the figures.
+
+## v1.4 tree room (ALG-185): a question, and a figure that climbs one row per step
+
+**What changed.** The tree and the uberblock room, in EN, FR and ES, asks one question ("What
+if the power fails while ZFS is writing?"), answers it in three plain paragraphs, keeps its
+figure with what to try, then shows the code in seven Source notes (D21.1, D22.1). In the
+figure, Next step now writes the new tree one row per step, data first and the objset last,
+before the four beats of the commit: a new copy is an outline while in memory and fills in
+when written, and the pointer to a child not yet written is dotted until the child lands
+(`zio_write_compress` holds a parent until its children are ready). The 3D view draws the
+same states. Six short excerpts are new in `ANALYSIS.md` (tree room, 12 to 17). The other
+rooms are unchanged, except the Engine room's computed excerpt count (120 → 126) and the
+copy-on-write page, whose CSS now comes in two `<style>` blocks (the Source note styles are
+shared with the tree room; same rules).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 58 | 28 |
+| of them in the prose | 27 | 0 |
+| in Source notes (excerpt captions and notes) | 25 | 22 |
+| in the figure ("code" links) | 6 | 6 |
+| Code excerpts | 12 | 7 |
+| Lines of code shown | 255 | 69 |
+
+**Proof.** `npm run build`, `npm test` (241 pass), `check-permalinks` (ANALYSIS.md 126
+excerpts, 923 line references; built site 2343 references), `check-sources` (156 references,
+44 pages), `check-csp` (44 pages, no new hash) and `check-plate`: all pass.
+`scripts/audit.mjs` over the whole visit: 42 pages, 0 problems. `scripts/verify.mjs`: 465
+captures, 0 console errors; the tree replay compares 332 states with the model (every row of
+the climb, the plug before any write, halfway up and at each beat, config on and off, beat 3
+with 0 to 3 uberblock writes landed, four commits in a row), 0 mismatches; reduced motion
+runs no animation; no script shows D2 in memory and the old tree under the uberblock; the
+keyboard walk takes twelve actions, each announced once.
+
+**Reviews.** `technical-writer` on the EN text (16 fixes: when the cut falls, the even labels
+only when the configuration changed, the switch locked once the sync starts, uberblocks on
+three top-level vdevs in an ordinary txg, the flush promise, the slot rule under RAID-Z
+expansion, a fragment and a short dramatic sentence), then on FR and ES (24 fixes: calques,
+wrong referents, a gender clash). `code-reviewer` on the diff: the 3D view did not tell
+written copies from those in memory and re-grew every box on each step, beat 0 was labelled
+"next" while under way, "levels" meant two things: all fixed.
+
+**Debts.** On a phone (390 px) the tree is drawn at about 60 % of its desktop size, so the
+block names are small; the 3D view and the text version carry the same state. The figure's
+own "code" links stay in the figure, as in the pilot. The disk table's header no longer wraps
+letter by letter at 390 px (fixed here, in the room's own stylesheet).

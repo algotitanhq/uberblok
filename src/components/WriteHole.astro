@@ -1,9 +1,10 @@
 ---
-// Static figure of the RAID-Z room: a RAID-5 stripe updated in place, cut by a
-// power failure, beside a RAID-Z block written to free space. No script: the
-// figure is three states of each, side by side. The RAID-Z half rests on
-// copy-on-write and the txg commit (copy-on-write and transaction groups
-// rooms), not on code in vdev_raidz.c; the caption says so.
+// Figure of the RAID-Z room: a RAID-5 stripe updated in place, cut by a
+// power failure, beside a RAID-Z block written to free space, then a disk dies
+// on each side. Four steps, side by side. Without script every step shows, one
+// under the other; with script the reader steps through them (DECISIONS.md
+// D23.1). The RAID-Z half rests on copy-on-write and the txg commit
+// (copy-on-write and transaction groups rooms), not on code in vdev_raidz.c.
 import type { Lang } from "../lib/rooms";
 import { fr } from "../lib/fr";
 
@@ -11,7 +12,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-type Cell = [string, string]; // label, kind: d (data), p (parity), n (new), x (wrong), k (skip), e (free), o (old, kept)
+type Cell = [string, string]; // label, kind: d (data), p (parity), n (new), x (wrong), k (skip), e (free), o (old, kept), r (rebuilt right)
 interface Row {
   caption: string;
   cells: Cell[];
@@ -20,46 +21,67 @@ const T = {
   en: {
     figure: "The write hole, and why RAID-Z has none",
     r5: "RAID-5: the stripe is updated in place",
-    rz: "RAID-Z: the new block gets a new stripe",
+    rz: "RAID-Z: the new version gets a new stripe",
+    back: "Back",
+    next: "Next step",
+    again: "Start again",
+    stepOf: "Step {i} of {n}",
+    steps: ["Before", "The power fails", "After the reboot", "A disk dies"],
     r5rows: [
-      "Before: D1 is part of a stripe shared with D0 and D2; P is their parity.",
-      "Read D0, D2 (or the old D1 and P), compute P′, write D1′ over D1. The power fails before P′ is written.",
-      "After the reboot, P no longer matches D0, D1′, D2, and nothing says so. When disk 0 dies, D0 is rebuilt from the wrong parity: garbage, silently.",
+      "D1 shares a stripe with D0 and D2. P is the parity of all three.",
+      "D1′ is written over D1. P′ has to be written too, and the power fails before it is.",
+      "P still holds the parity of the old D1, so it no longer matches D0, D1′ and D2. Nothing on disk records that.",
+      "Disk 0 dies. D0 is rebuilt from P, D1′ and D2, and comes out wrong. No error is reported.",
     ],
     rzrows: [
-      "Before: the block (A0, A1 and their parity PA) is one stripe of its own.",
-      "The new version (B0, B1, PB) goes to free space as a stripe of its own, parity computed from it alone. The power fails mid-write: B1 never lands.",
-      "After the reboot, the last committed uberblock still points to the old block, untouched. The half-written stripe is referenced by nothing: it is free space.",
+      "The block, A0 and A1 with their parity PA, has a stripe of its own.",
+      "The new version, B0 and B1 with PB, goes to free space, with parity computed from it alone. The power fails before B1 is written.",
+      "The last committed uberblock still points to the old block, which nothing has touched. Nothing points to the half-written stripe, so its space is free again.",
+      "Disk 2 dies. A1 is rebuilt from PA and A0, and it is right, because PA was written with A0 and A1 and has not changed since.",
     ],
   },
   fr: {
     figure: "Le trou d’écriture, et pourquoi RAID-Z n’en a pas",
     r5: "RAID-5 : la bande est mise à jour sur place",
-    rz: "RAID-Z : le nouveau bloc a une nouvelle bande",
+    rz: "RAID-Z : la nouvelle version a une nouvelle bande",
+    back: "Retour",
+    next: "Étape suivante",
+    again: "Recommencer",
+    stepOf: "Étape {i} sur {n}",
+    steps: ["Avant", "Le courant est coupé", "Au redémarrage", "Un disque meurt"],
     r5rows: [
-      "Avant : D1 fait partie d’une bande partagée avec D0 et D2 ; P est leur parité.",
-      "Lire D0, D2 (ou l’ancien D1 et P), calculer P′, écrire D1′ par-dessus D1. Le courant est coupé avant l’écriture de P′.",
-      "Au redémarrage, P ne correspond plus à D0, D1′, D2, et rien ne le signale. Quand le disque 0 meurt, D0 est reconstruit à partir de la mauvaise parité : du bruit, en silence.",
+      "D1 partage une bande avec D0 et D2. P est la parité des trois.",
+      "D1′ est écrit par-dessus D1. Il faudrait écrire P′ aussi, et le courant est coupé avant.",
+      "P contient toujours la parité de l’ancien D1 : elle ne correspond plus à D0, D1′ et D2. Rien sur le disque ne le note.",
+      "Le disque 0 meurt. D0 est reconstruit à partir de P, D1′ et D2, et il est faux. Aucune erreur n’est signalée.",
     ],
     rzrows: [
-      "Avant : le bloc (A0, A1 et leur parité PA) forme une bande à lui seul.",
-      "La nouvelle version (B0, B1, PB) va dans de l’espace libre, en une bande à elle seule, sa parité calculée à partir d’elle seule. Le courant est coupé en pleine écriture : B1 n’arrive jamais.",
-      "Au redémarrage, le dernier uberblock validé désigne toujours l’ancien bloc, intact. La bande à moitié écrite n’est désignée par rien : c’est de l’espace libre.",
+      "Le bloc, A0 et A1 avec leur parité PA, a sa propre bande.",
+      "La nouvelle version, B0 et B1 avec PB, va dans de l’espace libre, avec une parité calculée à partir d’elle seule. Le courant est coupé avant l’écriture de B1.",
+      "Le dernier uberblock validé désigne toujours l’ancien bloc, auquel rien n’a touché. Rien ne désigne la bande à moitié écrite : son espace redevient libre.",
+      "Le disque 2 meurt. A1 est reconstruit à partir de PA et A0, et il est juste : PA a été écrite avec A0 et A1 et n’a pas changé depuis.",
     ],
   },
   es: {
     figure: "El agujero de escritura («write hole») y por qué RAID-Z no lo tiene",
-    r5: "RAID-5: la banda se actualiza in situ",
-    rz: "RAID-Z: el bloque nuevo recibe una banda nueva",
+    r5: "RAID-5: la banda se actualiza en su sitio",
+    rz: "RAID-Z: la versión nueva recibe una banda nueva",
+    back: "Atrás",
+    next: "Paso siguiente",
+    again: "Empezar de nuevo",
+    stepOf: "Paso {i} de {n}",
+    steps: ["Antes", "Se va la corriente", "Tras el reinicio", "Muere un disco"],
     r5rows: [
-      "Antes: D1 forma parte de una banda compartida con D0 y D2; P es su paridad.",
-      "Leer D0, D2 (o el antiguo D1 y P), calcular P′, escribir D1′ sobre D1. La corriente se corta antes de que se escriba P′.",
-      "Tras el reinicio, P ya no coincide con D0, D1′, D2, y nada lo indica. Cuando el disco 0 muere, D0 se reconstruye a partir de la paridad errónea: basura, en silencio.",
+      "D1 comparte banda con D0 y D2. P es la paridad de los tres.",
+      "D1′ se escribe sobre D1. También hay que escribir P′, y la corriente se va antes.",
+      "P sigue teniendo la paridad del D1 antiguo, así que ya no coincide con D0, D1′ y D2. Nada en el disco lo registra.",
+      "Muere el disco 0. D0 se reconstruye a partir de P, D1′ y D2, y sale mal. No se informa de ningún error.",
     ],
     rzrows: [
-      "Antes: el bloque (A0, A1 y su paridad PA) forma una banda propia.",
-      "La versión nueva (B0, B1, PB) va al espacio libre como una banda propia, con la paridad calculada solo a partir de ella. La corriente se corta en mitad de la escritura: B1 nunca llega.",
-      "Tras el reinicio, el último uberblock confirmado sigue apuntando al bloque antiguo, intacto. Nada hace referencia a la banda a medio escribir: es espacio libre.",
+      "El bloque, A0 y A1 con su paridad PA, tiene su propia banda.",
+      "La versión nueva, B0 y B1 con PB, va al espacio libre, con la paridad calculada solo a partir de ella. La corriente se va antes de que se escriba B1.",
+      "El último uberblock confirmado sigue apuntando al bloque antiguo, que nadie ha tocado. Nada apunta a la banda a medio escribir, así que su espacio vuelve a estar libre.",
+      "Muere el disco 2. A1 se reconstruye a partir de PA y A0, y sale bien, porque PA se escribió con A0 y A1 y no ha cambiado desde entonces.",
     ],
   },
 }[lang];
@@ -67,7 +89,8 @@ const f = (s: string) => (lang === "fr" ? fr(s) : s);
 const r5: Row[] = [
   { caption: T.r5rows[0], cells: [["D0", "d"], ["D1", "d"], ["D2", "d"], ["P", "p"]] },
   { caption: T.r5rows[1], cells: [["D0", "d"], ["D1′", "n"], ["D2", "d"], ["P", "p"]] },
-  { caption: T.r5rows[2], cells: [["D0", "x"], ["D1′", "n"], ["D2", "d"], ["P", "x"]] },
+  { caption: T.r5rows[2], cells: [["D0", "d"], ["D1′", "n"], ["D2", "d"], ["P", "x"]] },
+  { caption: T.r5rows[3], cells: [["D0?", "x"], ["D1′", "n"], ["D2", "d"], ["P", "x"]] },
 ];
 // RAID-Z: two rows of sectors on a 4-child raidz1: the old block (2 data
 // sectors, P, and the skip sector that rounds it to 4, as mapAlloc(8K, 12, 4, 1)
@@ -76,20 +99,26 @@ const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
   { caption: T.rzrows[0], old: [["PA", "p"], ["A0", "d"], ["A1", "d"], ["", "k"]], neu: [["", "e"], ["", "e"], ["", "e"], ["", "e"]] },
   { caption: T.rzrows[1], old: [["PA", "p"], ["A0", "d"], ["A1", "d"], ["", "k"]], neu: [["PB", "n"], ["B0", "n"], ["", "e"], ["", "e"]] },
   { caption: T.rzrows[2], old: [["PA", "o"], ["A0", "o"], ["A1", "o"], ["", "k"]], neu: [["", "e"], ["", "e"], ["", "e"], ["", "e"]] },
+  { caption: T.rzrows[3], old: [["PA", "o"], ["A0", "o"], ["A1", "r"], ["", "k"]], neu: [["", "e"], ["", "e"], ["", "e"], ["", "e"]] },
 ];
 ---
 
-<figure class="wh" aria-label={f(T.figure)}>
+<figure class="wh" aria-label={f(T.figure)} data-write-hole data-steps={T.steps.length} data-step-of={f(T.stepOf)} data-again={f(T.again)} data-next={f(T.next)}>
+  <div class="wh-nav" hidden>
+    <button class="btn" type="button" data-act="back">{f(T.back)}</button>
+    <button class="btn btn--primary" type="button" data-act="next">{f(T.next)}</button>
+    <p class="muted" data-at aria-live="polite"></p>
+  </div>
   <div class="side">
     <h3>{f(T.r5)}</h3>
     <ol>
       {
-        r5.map((row) => (
-          <li>
+        r5.map((row, i) => (
+          <li data-step={i}>
             <div class="disks" aria-hidden="true">
               {row.cells.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
             </div>
-            <p>{f(row.caption)}</p>
+            <p><strong>{f(T.steps[i])}.</strong> {f(row.caption)}</p>
           </li>
         ))
       }
@@ -99,13 +128,13 @@ const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
     <h3>{f(T.rz)}</h3>
     <ol>
       {
-        rz.map((row) => (
-          <li>
+        rz.map((row, i) => (
+          <li data-step={i}>
             <div class="disks two" aria-hidden="true">
               {row.old.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
               {row.neu.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
             </div>
-            <p>{f(row.caption)}</p>
+            <p><strong>{f(T.steps[i])}.</strong> {f(row.caption)}</p>
           </li>
         ))
       }
@@ -113,7 +142,62 @@ const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
   </div>
 </figure>
 
+<script>
+  import { fill } from "../lib/svg";
+
+  // Step through the four rows on both sides at once; the rows not reached yet are hidden.
+  for (const fig of document.querySelectorAll<HTMLElement>("[data-write-hole]")) {
+    const n = Number(fig.dataset.steps);
+    const rows = [...fig.querySelectorAll<HTMLElement>("li[data-step]")];
+    const back = fig.querySelector<HTMLButtonElement>("[data-act=back]")!;
+    const next = fig.querySelector<HTMLButtonElement>("[data-act=next]")!;
+    const at = fig.querySelector<HTMLElement>("[data-at]")!;
+    let step = 0;
+    const draw = () => {
+      for (const r of rows) {
+        const i = Number(r.dataset.step);
+        r.hidden = i > step;
+        r.classList.toggle("now", i === step);
+      }
+      back.disabled = step === 0;
+      next.textContent = step === n - 1 ? fig.dataset.again! : fig.dataset.next!;
+      at.textContent = fill(fig.dataset.stepOf!, { i: step + 1, n });
+    };
+    back.addEventListener("click", () => {
+      step = Math.max(0, step - 1);
+      draw();
+    });
+    next.addEventListener("click", () => {
+      step = step === n - 1 ? 0 : step + 1;
+      draw();
+    });
+    draw();
+    fig.querySelector<HTMLElement>(".wh-nav")!.hidden = false;
+  }
+</script>
+
 <style>
+  .wh-nav {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+  }
+  .wh-nav[hidden],
+  li[hidden] {
+    display: none;
+  }
+  .wh-nav p {
+    font-size: var(--step--1);
+  }
+  li.now p {
+    color: var(--fg);
+  }
+  li p strong {
+    font-weight: 600;
+    color: var(--fg);
+  }
   .wh {
     margin: var(--space-6) 0 0;
     display: grid;
@@ -188,6 +272,12 @@ const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
   .c.o {
     border-color: var(--ok);
     background: var(--ok-soft);
+  }
+  .c.r {
+    border: 2px dashed var(--ok);
+    background: var(--ok-soft);
+    color: var(--ok);
+    font-weight: 600;
   }
   .c.k {
     background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line-strong) 4px 5px);

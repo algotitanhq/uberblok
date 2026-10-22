@@ -9,20 +9,11 @@
 //   error counter                   zio.c L5295-L5300
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 
 interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const refs = {
-  verify: gh("module/zfs/zio_checksum.c", 501, 505),
-  ecksum: gh("module/zfs/zio_checksum.c", 535, 536),
-  retry: gh("module/zfs/vdev_mirror.c", 793, 802),
-  repair: gh("module/zfs/vdev_mirror.c", 927, 933),
-  fail: gh("module/zfs/vdev_mirror.c", 878, 881),
-  count: gh("module/zfs/zio.c", 5295, 5300),
-};
 const S = {
   en: {
     parent: "Pointers in the parent block: the expected checksums",
@@ -44,7 +35,9 @@ const S = {
     failed: "D{i}: no copy matches. The read fails with an error: the application never receives wrong bytes.",
     doneOk: "File read: {good} of 4 blocks correct, {healed} repaired on the way.",
     doneErr: "File read failed on D{i}: both copies are damaged, and ZFS says so instead of returning them.",
-    see: "code",
+    rotDone: "One bit of D1 flipped on disk A. The disk does not know, and will return these bytes without an error.",
+    lostDone: "Disk A reported the new D2 as written, but the write never happened. The new address still holds old bytes from a freed block.",
+    bothDone: "D3 is now damaged on both disks, in different places.",
     damaged: "damaged",
     healed: "healed",
     stale: "stale",
@@ -69,7 +62,9 @@ const S = {
     failed: "D{i} : aucune copie ne correspond. La lecture échoue avec une erreur : l’application ne reçoit jamais d’octets faux.",
     doneOk: "Fichier lu : {good} blocs corrects sur 4 ; blocs réparés au passage : {healed}.",
     doneErr: "La lecture du fichier échoue sur D{i} : les deux copies sont abîmées, et ZFS le dit au lieu de les rendre.",
-    see: "code",
+    rotDone: "Un bit de D1 s’est inversé sur le disque A. Le disque n’en sait rien et rendra ces octets sans erreur.",
+    lostDone: "Le disque A a confirmé l’écriture du nouveau D2, mais elle n’a jamais eu lieu. La nouvelle adresse garde les vieux octets d’un bloc libéré.",
+    bothDone: "D3 est maintenant abîmé sur les deux disques, à des endroits différents.",
     damaged: "abîmé",
     healed: "réparé",
     stale: "périmé",
@@ -94,7 +89,9 @@ const S = {
     failed: "D{i}: ninguna copia coincide. La lectura falla con un error: la aplicación nunca recibe bytes erróneos.",
     doneOk: "Archivo leído: {good} de 4 bloques correctos; bloques reparados por el camino: {healed}.",
     doneErr: "La lectura del archivo falla en D{i}: las dos copias están dañadas, y ZFS lo dice en lugar de devolverlas.",
-    see: "código",
+    rotDone: "Un bit de D1 se ha invertido en el disco A. El disco no lo sabe y devolverá estos bytes sin ningún error.",
+    lostDone: "El disco A dio por escrito el nuevo D2, pero la escritura nunca ocurrió. La nueva dirección conserva bytes viejos de un bloque liberado.",
+    bothDone: "D3 está ahora dañado en los dos discos, en sitios distintos.",
     damaged: "dañado",
     healed: "reparado",
     stale: "obsoleto",
@@ -126,7 +123,7 @@ const textVersion = {
 }[lang];
 ---
 
-<figure class="mirror" data-mirror data-strings={JSON.stringify({ ...S, refs })}>
+<figure class="mirror" data-mirror data-strings={JSON.stringify(S)}>
   <div class="board">
     <p class="parent-title">{S.parent}</p>
     <ol class="expected"></ol>
@@ -154,7 +151,7 @@ const textVersion = {
   import { h, strings, fill, wait } from "../lib/svg";
   import { fletcher4, block, sameCksum, shortCksum, type Cksum } from "../lib/fletcher4";
 
-  type S = Record<string, string> & { refs: Record<string, string> };
+  type S = Record<string, string>;
   type Mark = "" | "reading" | "ok" | "bad" | "healed";
   const VERSIONS = [3, 1, 2, 1];
   const content = (i: number, v: number) => `D${i} version ${v}`;
@@ -173,6 +170,8 @@ const textVersion = {
     let marks: Mark[][] = [];
     let tags: string[][] = [];
     let errors = [0, 0];
+    // The expected checksum being compared, and how the comparison went.
+    let cmp: { i: number; mark: Mark } | null = null;
     let busy = false;
 
     function init() {
@@ -180,6 +179,7 @@ const textVersion = {
       marks = [Array(4).fill(""), Array(4).fill("")];
       tags = [Array(4).fill(""), Array(4).fill("")];
       errors = [0, 0];
+      cmp = null;
       log.replaceChildren();
       result.textContent = "";
     }
@@ -188,7 +188,7 @@ const textVersion = {
 
     function draw() {
       expectedList.replaceChildren(
-        ...expected.map((c, i) => h("li", {}, h("span", { class: "who" }, `→ D${i}`), h("code", {}, `…${shortCksum(c)}`))),
+        ...expected.map((c, i) => h("li", { class: cmp?.i === i ? `cmp cmp--${cmp.mark}` : undefined }, h("span", { class: "who" }, `→ D${i}`), h("code", {}, `…${shortCksum(c)}`))),
       );
       disksEl.replaceChildren(
         ...[0, 1].map((d) =>
@@ -209,11 +209,15 @@ const textVersion = {
       for (const a of ["rot", "lost", "both", "read", "reset"]) btn(a).disabled = busy;
     }
 
-    function note(msg: string, ref?: string, cls = "") {
-      const li = h("li", { class: cls }, msg);
-      if (ref) li.append(" ", h("a", { href: ref }, `(${t.see})`));
-      log.append(li);
-    }
+    const note = (msg: string, cls = "") => log.append(h("li", { class: cls }, msg));
+
+    // Each damage says what it did, in one line, before any read.
+    const damaged = (msg: string) => {
+      cmp = null;
+      log.replaceChildren(h("li", {}, msg));
+      result.textContent = "";
+      draw();
+    };
 
     function flipBit(d: number, i: number) {
       const b = disks[d][i];
@@ -224,19 +228,19 @@ const textVersion = {
 
     btn("rot").addEventListener("click", () => {
       flipBit(0, 1);
-      draw();
+      damaged(t.rotDone);
     });
     btn("lost").addEventListener("click", () => {
       disks[0][2] = block(t.staleBytes); // copy-on-write: the dropped write was to a new address
       marks[0][2] = "";
       tags[0][2] = t.stale;
-      draw();
+      damaged(t.lostDone);
     });
     btn("both").addEventListener("click", () => {
       flipBit(0, 3);
       disks[1][3][9] ^= 0x01;
       tags[1][3] = t.damaged;
-      draw();
+      damaged(t.bothDone);
     });
     btn("reset").addEventListener("click", () => {
       init();
@@ -255,24 +259,27 @@ const textVersion = {
         let ok = false;
         for (const d of [0, 1]) {
           const D = "AB"[d];
-          if (d === 1) note(fill(t.other, { i, d: D }), t.refs.retry);
+          if (d === 1) note(fill(t.other, { i, d: D }));
           else note(fill(t.readFrom, { i, d: D }));
           marks[d][i] = "reading";
+          cmp = { i, mark: "reading" };
           draw();
           await wait(650);
           const got = fletcher4(disks[d][i]);
           if (sameCksum(got, expected[i])) {
             marks[d][i] = "ok";
-            note(fill(t.ok, { i, d: D }), d === 0 ? t.refs.verify : undefined, "ok");
+            cmp = { i, mark: "ok" };
+            note(fill(t.ok, { i, d: D }), "ok");
             ok = true;
             draw();
             await wait(350);
             break;
           }
           marks[d][i] = "bad";
+          cmp = { i, mark: "bad" };
           errors[d] += 1;
           const stale = tags[d][i] === t.stale;
-          note(fill(stale ? t.badLost : t.bad, { i, d: D, got: shortCksum(got), exp: shortCksum(expected[i]) }), t.refs.ecksum, "bad");
+          note(fill(stale ? t.badLost : t.bad, { i, d: D, got: shortCksum(got), exp: shortCksum(expected[i]) }), "bad");
           draw();
           await wait(900);
         }
@@ -281,18 +288,19 @@ const textVersion = {
           marks[0][i] = "healed";
           tags[0][i] = t.healed;
           healed += 1;
-          note(fill(t.repaired, { i, d: "A" }), t.refs.repair, "ok");
+          note(fill(t.repaired, { i, d: "A" }), "ok");
           draw();
           await wait(650);
         }
         if (!ok) {
           failedAt = i;
-          note(fill(t.failed, { i }), t.refs.fail, "bad");
+          note(fill(t.failed, { i }), "bad");
         }
       }
       result.textContent = failedAt >= 0 ? fill(t.doneErr, { i: failedAt }) : fill(t.doneOk, { good: 4, healed });
       result.className = failedAt >= 0 ? "result result--bad" : "result result--ok";
       busy = false;
+      cmp = null;
       draw();
       btn("read").focus();
     });
@@ -335,6 +343,18 @@ const textVersion = {
     padding: var(--space-2);
     display: grid;
     gap: 2px;
+  }
+  .expected :global(li.cmp--reading) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .expected :global(li.cmp--ok) {
+    border-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .expected :global(li.cmp--bad) {
+    border-color: var(--bad);
+    background: var(--bad-soft);
   }
   .expected :global(.who) {
     font-weight: 600;

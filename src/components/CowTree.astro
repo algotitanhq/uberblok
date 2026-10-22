@@ -9,21 +9,11 @@
 //   free or keep     dsl_dataset_block_kill, dsl_dataset.c L294, L332-L345
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 
 interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const refs = {
-  alloc: gh("module/zfs/zio.c", 2102, 2104),
-  cksum: gh("module/zfs/zio_checksum.c", 411, 417),
-  ripple: gh("module/zfs/dbuf.c", 2552),
-  commit: gh("module/zfs/vdev_label.c", 1782, 1784),
-  free: gh("module/zfs/dsl_dataset.c", 294),
-  dead: gh("module/zfs/dsl_dataset.c", 332, 345),
-  pick: gh("module/zfs/vdev_label.c", 1547, 1551),
-};
 const S = {
   en: {
     figure: "A file’s block tree under one uberblock",
@@ -35,16 +25,17 @@ const S = {
     snapshotTaken: "Snapshot of txg {txg} taken",
     reset: "Reset",
     step: "Step {n} of 5",
-    idle: "The pool is at txg {txg}. Choose a data block, then step through its rewrite.",
-    s1: "D{k} is rewritten. zio_write_compress zeroes its block pointer, so the new D{k} gets a new address, {addr}. The old D{k}, at {old}, is not touched.",
-    s2: "The pointer to D{k} lives inside {p}. That pointer now holds a new address and the fletcher4 checksum of the new D{k}, so {p} has changed too: it is written to a new address, {addr}, like any other block.",
-    s3: "Same for R, the top of the tree: a new copy at {addr} points to the new {p}. The uberblock of txg {txg} still reaches the old tree, unchanged.",
-    s4: "The uberblock of txg {txg1} goes to slot {slot} of the ring ({txg1} mod 32). That one write is the commit: from now on the pool is the new tree. Blocks that did not change are shared by both trees.",
-    s5free: "The replaced blocks were born after the last snapshot, so dsl_dataset_block_kill frees them: {list}.",
-    s5dead: "A snapshot still uses the replaced blocks born before it ({list}): they go on the dataset’s deadlist and stay on disk, intact, in grey.",
-    s5mixed: "Blocks born before the snapshot go on the deadlist and stay ({kept}); the others are freed ({freed}).",
-    crashed: "Power lost before the uberblock of txg {txg1} was written. On import, ZFS takes the newest valid uberblock, txg {txg}, and its tree is intact: nothing it reaches was overwritten. The new blocks are reachable from nothing. No fsck, no journal replay for this.",
-    see: "see the code",
+    idle: "The pool is at txg {txg}. Pick a data block, then press Next step to change it.",
+    picked: "D{k} is picked. Press Next step to change it.",
+    s1: "The new D{k} is written to free space, at {addr}. The old D{k} stays at {old}, untouched.",
+    s2: "{p} holds the pointer to D{k}: its address and its checksum. That pointer has changed, so a new copy of {p} is written as well, at {addr}.",
+    s3: "The same goes for R, the top of the file’s tree, now at {addr}. The pool still uses the old tree, because the uberblock of txg {txg} points to it.",
+    s4: "One write puts the uberblock of txg {txg1} in slot {slot} of the ring. From now on the pool uses the new tree. The blocks that did not change belong to both trees.",
+    s5free: "Nothing uses the replaced blocks any more, so they are freed: {list}.",
+    s5dead: "The snapshot still uses the replaced blocks ({list}). They stay on disk, in grey, until the snapshot is destroyed.",
+    s5mixed: "The snapshot keeps the replaced blocks it uses ({kept}). The others are freed ({freed}).",
+    snapped: "Snapshot of txg {txg} taken. It keeps this tree as it is: the blocks marked S stay on disk as long as the snapshot exists, even after the file changes.",
+    crashed: "Power lost before the uberblock of txg {txg1} was written. On import, ZFS takes the newest valid uberblock, txg {txg}, and finds its tree intact. The new blocks, in red, cannot be reached from it, so their space is still free. There is nothing to check or repair.",
     table: "Block pointers of the newest tree",
     from: "Pointer",
     dva: "Address",
@@ -55,6 +46,10 @@ const S = {
     changed: "changed",
     prevUb: "previous",
     keptBySnap: "snapshot",
+    keyNew: "new copy",
+    keyOld: "old copy, still on disk",
+    keyPin: "kept by the snapshot",
+    keyOrphan: "written, never committed",
     aria: "Tree: uberblock at txg {txg}, root R, indirect blocks I0 and I1, data blocks D0 to D3.",
   },
   fr: {
@@ -67,16 +62,17 @@ const S = {
     snapshotTaken: "Instantané du txg {txg} pris",
     reset: "Recommencer",
     step: "Étape {n} sur 5",
-    idle: "Le pool est au txg {txg}. Choisissez un bloc de données, puis suivez sa réécriture pas à pas.",
-    s1: "D{k} est réécrit. zio_write_compress remet à zéro son pointeur de bloc : le nouveau D{k} reçoit une nouvelle adresse, {addr}. L’ancien D{k}, en {old}, n’est pas touché.",
-    s2: "Le pointeur vers D{k} est rangé dans {p}. Ce pointeur contient désormais une nouvelle adresse et la somme fletcher4 du nouveau D{k} : {p} a donc changé lui aussi, et il est écrit à une nouvelle adresse, {addr}, comme tout bloc.",
-    s3: "Même chose pour R, le sommet de l’arbre : une nouvelle copie en {addr} pointe vers le nouveau {p}. L’uberblock du txg {txg} atteint toujours l’ancien arbre, inchangé.",
-    s4: "L’uberblock du txg {txg1} est écrit dans la case {slot} de l’anneau ({txg1} mod 32). Cette seule écriture est la validation : désormais, le pool, c’est le nouvel arbre. Les blocs qui n’ont pas changé sont partagés par les deux arbres.",
-    s5free: "Les blocs remplacés sont nés après le dernier instantané : dsl_dataset_block_kill les libère ({list}).",
-    s5dead: "Un instantané utilise encore les blocs remplacés nés avant lui ({list}) : ils passent dans la deadlist du dataset et restent sur le disque, intacts, en gris.",
-    s5mixed: "Les blocs nés avant l’instantané passent dans la deadlist et restent ({kept}) ; les autres sont libérés ({freed}).",
-    crashed: "Courant coupé avant l’écriture de l’uberblock du txg {txg1}. À l’import, ZFS prend l’uberblock valide le plus récent, celui du txg {txg}, et son arbre est intact : rien de ce qu’il atteint n’a été écrasé. Les nouveaux blocs ne sont atteints par rien. Pas de fsck, pas de rejeu de journal pour cela.",
-    see: "voir le code",
+    idle: "Le pool est au txg {txg}. Choisissez un bloc de données, puis appuyez sur Étape suivante pour le modifier.",
+    picked: "D{k} est choisi. Appuyez sur Étape suivante pour le modifier.",
+    s1: "Le nouveau D{k} est écrit dans l’espace libre, en {addr}. L’ancien D{k} reste en {old}, intact.",
+    s2: "{p} contient le pointeur vers D{k} : son adresse et sa somme de contrôle. Ce pointeur a changé, donc une nouvelle copie de {p} est écrite aussi, en {addr}.",
+    s3: "Même chose pour R, le sommet de l’arbre du fichier, désormais en {addr}. Le pool utilise toujours l’ancien arbre, car l’uberblock du txg {txg} pointe vers lui.",
+    s4: "Une seule écriture place l’uberblock du txg {txg1} dans la case {slot} de l’anneau. À partir de là, le pool utilise le nouvel arbre. Les blocs qui n’ont pas changé appartiennent aux deux arbres.",
+    s5free: "Plus rien n’utilise les blocs remplacés, ils sont donc libérés : {list}.",
+    s5dead: "L’instantané utilise encore les blocs remplacés ({list}). Ils restent sur le disque, en gris, jusqu’à la destruction de l’instantané.",
+    s5mixed: "L’instantané garde les blocs remplacés qu’il utilise ({kept}). Les autres sont libérés ({freed}).",
+    snapped: "Instantané du txg {txg} pris. Il garde cet arbre tel quel : les blocs marqués S restent sur le disque tant que l’instantané existe, même quand le fichier change.",
+    crashed: "Courant coupé avant l’écriture de l’uberblock du txg {txg1}. À l’import, ZFS prend l’uberblock valide le plus récent, celui du txg {txg}, et trouve son arbre intact. Les nouveaux blocs, en rouge, ne sont pas atteignables depuis lui, et leur place reste libre. Il n’y a rien à vérifier ni à réparer.",
     table: "Pointeurs de bloc de l’arbre le plus récent",
     from: "Pointeur",
     dva: "Adresse",
@@ -87,6 +83,10 @@ const S = {
     changed: "modifié",
     prevUb: "précédent",
     keptBySnap: "instantané",
+    keyNew: "nouvelle copie",
+    keyOld: "ancienne copie, encore sur le disque",
+    keyPin: "gardé par l’instantané",
+    keyOrphan: "écrit, jamais validé",
     aria: "Arbre : uberblock au txg {txg}, racine R, blocs indirects I0 et I1, blocs de données D0 à D3.",
   },
   es: {
@@ -99,16 +99,17 @@ const S = {
     snapshotTaken: "Instantánea del txg {txg} tomada",
     reset: "Reiniciar",
     step: "Paso {n} de 5",
-    idle: "El pool está en el txg {txg}. Elige un bloque de datos y sigue su reescritura paso a paso.",
-    s1: "D{k} se reescribe. zio_write_compress pone a cero su puntero de bloque, así que el nuevo D{k} recibe una nueva dirección, {addr}. El antiguo D{k}, en {old}, no se toca.",
-    s2: "El puntero a D{k} está dentro de {p}. Ese puntero contiene ahora una nueva dirección y la suma fletcher4 del nuevo D{k}, así que {p} también ha cambiado: se escribe en una nueva dirección, {addr}, como cualquier otro bloque.",
-    s3: "Lo mismo ocurre con R, la cima del árbol: una nueva copia en {addr} apunta al nuevo {p}. El uberblock del txg {txg} sigue alcanzando el árbol antiguo, sin cambios.",
-    s4: "El uberblock del txg {txg1} va a la ranura {slot} del anillo ({txg1} mod 32). Esa única escritura es la confirmación: a partir de ahora, el pool es el árbol nuevo. Los bloques que no cambiaron los comparten ambos árboles.",
-    s5free: "Los bloques sustituidos nacieron después de la última instantánea, así que dsl_dataset_block_kill los libera: {list}.",
-    s5dead: "Una instantánea sigue usando los bloques sustituidos nacidos antes que ella ({list}): pasan a la deadlist del dataset y siguen en el disco, intactos, en gris.",
-    s5mixed: "Los bloques nacidos antes de la instantánea pasan a la deadlist y se quedan ({kept}); los demás se liberan ({freed}).",
-    crashed: "La corriente se cortó antes de que se escribiera el uberblock del txg {txg1}. Al importar, ZFS toma el uberblock válido más reciente, el del txg {txg}, y su árbol está intacto: nada de lo que alcanza se ha sobrescrito. Nada alcanza los bloques nuevos. Para esto no hace falta fsck ni reproducir ningún diario.",
-    see: "ver el código",
+    idle: "El pool está en el txg {txg}. Elige un bloque de datos y pulsa Paso siguiente para cambiarlo.",
+    picked: "D{k} está elegido. Pulsa Paso siguiente para cambiarlo.",
+    s1: "El nuevo D{k} se escribe en espacio libre, en {addr}. El antiguo D{k} sigue en {old}, intacto.",
+    s2: "{p} guarda el puntero a D{k}: su dirección y su suma de comprobación. Ese puntero ha cambiado, así que también se escribe una copia nueva de {p}, en {addr}.",
+    s3: "Lo mismo pasa con R, la cima del árbol del archivo, ahora en {addr}. El pool sigue usando el árbol antiguo, porque el uberblock del txg {txg} apunta a él.",
+    s4: "Una sola escritura pone el uberblock del txg {txg1} en la ranura {slot} del anillo. A partir de ahí, el pool usa el árbol nuevo. Los bloques que no cambiaron pertenecen a los dos árboles.",
+    s5free: "Ya nada usa los bloques sustituidos, así que se liberan: {list}.",
+    s5dead: "La instantánea sigue usando los bloques sustituidos ({list}). Se quedan en el disco, en gris, hasta que se destruya la instantánea.",
+    s5mixed: "La instantánea conserva los bloques sustituidos que usa ({kept}). Los demás se liberan ({freed}).",
+    snapped: "Instantánea del txg {txg} tomada. Conserva este árbol tal como está: los bloques marcados con S se quedan en el disco mientras exista la instantánea, aunque el archivo cambie.",
+    crashed: "La corriente se cortó antes de escribir el uberblock del txg {txg1}. Al importar, ZFS toma el uberblock válido más reciente, el del txg {txg}, y encuentra su árbol intacto. Los bloques nuevos, en rojo, no se pueden alcanzar desde él, así que su espacio sigue libre. No hay nada que comprobar ni reparar.",
     table: "Punteros de bloque del árbol más reciente",
     from: "Puntero",
     dva: "Dirección",
@@ -119,6 +120,10 @@ const S = {
     changed: "modificado",
     prevUb: "anterior",
     keptBySnap: "instantánea",
+    keyNew: "copia nueva",
+    keyOld: "copia antigua, aún en el disco",
+    keyPin: "conservado por la instantánea",
+    keyOrphan: "escrito, nunca confirmado",
     aria: "Árbol: uberblock en el txg {txg}, raíz R, bloques indirectos I0 e I1, bloques de datos D0 a D3.",
   },
 }[lang];
@@ -129,7 +134,7 @@ const textVersion = {
     "Rewriting a data block writes a new copy at a new address; the old copy stays where it is.",
     "Its parent now needs a new pointer (new address, new checksum), so the parent is copied too, and so on up to R.",
     "Writing the new uberblock to the next slot of the ring is the commit. Before it, a power cut leaves the old tree intact and current; after it, the new tree is the pool.",
-    "Replaced blocks are freed, unless a snapshot still references them: then they stay on the deadlist.",
+    "A snapshot keeps the tree of its txg: every block it reaches stays on disk. Replaced blocks are freed, unless the snapshot still uses them: then they stay, on the dataset’s deadlist.",
   ],
   fr: [
     "L’arbre a un uberblock au sommet, un bloc indirect racine R, deux blocs indirects I0 et I1, et quatre blocs de données D0 à D3. Chaque pointeur de bloc contient l’adresse de l’enfant, son txg de naissance et sa somme de contrôle.",
@@ -143,15 +148,21 @@ const textVersion = {
     "Reescribir un bloque de datos escribe una copia nueva en una dirección nueva; la copia antigua se queda donde está.",
     "Su padre necesita entonces un puntero nuevo (dirección nueva, suma nueva), así que el padre también se copia, y así sucesivamente hasta R.",
     "Escribir el nuevo uberblock en la ranura siguiente del anillo es la confirmación. Antes de ella, un corte de corriente deja el árbol antiguo intacto y vigente; después de ella, el árbol nuevo es el pool.",
-    "Los bloques sustituidos se liberan, salvo que una instantánea siga haciendo referencia a ellos: entonces se quedan en la deadlist.",
+    "Una instantánea conserva el árbol de su txg: cada bloque al que llega se queda en el disco. Los bloques sustituidos se liberan, salvo que la instantánea aún los use: entonces se quedan, en la deadlist del dataset.",
   ],
 }[lang];
 ---
 
-<figure class="cow" data-cow data-strings={JSON.stringify({ ...S, refs })}>
+<figure class="cow" data-cow data-strings={JSON.stringify(S)}>
   <div class="layout">
     <div class="canvas">
       <svg viewBox="0 0 420 356" role="img" aria-label={S.figure}></svg>
+      <ul class="key" hidden>
+        <li><span class="swatch swatch--new"></span>{S.keyNew}</li>
+        <li><span class="swatch swatch--old"></span>{S.keyOld}</li>
+        <li><span class="swatch swatch--pin">S</span>{S.keyPin}</li>
+        <li><span class="swatch swatch--orphan"></span>{S.keyOrphan}</li>
+      </ul>
       <noscript><p class="muted">{t.noScript}</p></noscript>
     </div>
     <div class="side">
@@ -198,7 +209,7 @@ const textVersion = {
   import { s, h, strings, fill, wait } from "../lib/svg";
   import { fletcher4, block, shortCksum, type Cksum } from "../lib/fletcher4";
 
-  type St = "live" | "new" | "old" | "snap" | "freed" | "prevub";
+  type St = "live" | "new" | "old" | "snap" | "freed" | "prevub" | "orphan";
   interface V {
     key: string;
     id: string;
@@ -210,7 +221,7 @@ const textVersion = {
     cksum: Cksum;
     state: St;
   }
-  type S = Record<string, string> & { refs: Record<string, string> };
+  type S = Record<string, string>;
 
   const POS: Record<string, [number, number]> = {
     ub: [152, 8], r: [152, 98], i0: [56, 188], i1: [248, 188],
@@ -236,6 +247,7 @@ const textVersion = {
     let leaf = 2;
     let nextAddr = 0x40000;
     let snapTxg = 0;
+    let pinned = new Set<string>();
     let busy = false;
 
     const get = (key: string) => vs.find((v) => v.key === key)!;
@@ -267,6 +279,7 @@ const textVersion = {
       step = 0;
       nextAddr = 0x40000;
       snapTxg = 0;
+      pinned = new Set();
       const births = [38, 40, 39, 41];
       const addrs = [0x12000, 0x2a000, 0x1c000, 0x31000];
       births.forEach((b, k) => make(`d${k}`, 1, b, addrs[k], [], "live"));
@@ -280,10 +293,12 @@ const textVersion = {
       txg, txg1: txg + 1, k: leaf, slot: (txg + 1) % 32, p: label(PARENT[`d${leaf}`]), ...extra,
     });
 
-    function say(text: string, ref?: string) {
-      narration.replaceChildren(text);
-      if (ref) narration.append(" ", h("a", { href: ref }, `(${t.see})`));
-    }
+    const say = (text: string) => narration.replaceChildren(text);
+
+    // Blocks written before a power cut stay drawn, in red, until the next action.
+    const dropOrphans = () => {
+      for (const v of vs) if (v.state === "orphan") v.state = "freed";
+    };
 
     function draw() {
       svg.replaceChildren();
@@ -314,7 +329,9 @@ const textVersion = {
         const tag = v.state === "snap" ? t.keptBySnap : v.state === "prevub" ? t.prevUb : `txg ${v.birth}`;
         const sub = v.id === "ub" ? `slot ${v.addr}` : hex(v.addr);
         // The opaque underlay hides the outline of the card behind (the new card's fill is translucent).
-        const g = s("g", { class: `card card--${v.state}`, transform: `translate(${x} ${y})` },
+        const picked = v.id === `d${leaf}` && (v.state === "live" || v.state === "new") && !(step > 0 && step < 5);
+        const pickable = v.id.startsWith("d") && v.state === "live" && !busy && !(step > 0 && step < 5);
+        const g = s("g", { class: `card card--${v.state}${picked ? " card--picked" : ""}${pickable ? " card--pickable" : ""}`, transform: `translate(${x} ${y})`, "data-leaf": pickable ? v.id.slice(1) : undefined },
           s("rect", { width: W, height: H, rx: 4, class: "under" }),
           s("rect", { width: W, height: H, rx: 4 }),
         );
@@ -325,6 +342,9 @@ const textVersion = {
             s("text", { x: W - 7, y: 18, class: "tag", "text-anchor": "end" }, tag),
             s("text", { x: 8, y: 36, class: "addr" }, sub),
           );
+        // A block the snapshot reaches carries an S until it is freed.
+        if (pinned.has(v.key) && !behind.has(v.key))
+          g.append(s("g", { class: "pin" }, s("rect", { x: W - 18, y: H - 18, width: 13, height: 13, rx: 3 }), s("text", { x: W - 11.5, y: H - 8, "text-anchor": "middle" }, "S")));
         cards.append(g);
       }
       svg.append(edges, cards);
@@ -372,21 +392,22 @@ const textVersion = {
 
     function advance() {
       const d = `d${leaf}`, p = PARENT[d];
+      dropOrphans();
       if (step === 0 || step === 5) {
         if (step === 5) step = 0;
         const { v, old } = rewrite(d, []);
         step = 1;
-        say(fill(t.s1, vars({ addr: hex(v.addr), old: hex(old.addr) })), t.refs.alloc);
+        say(fill(t.s1, vars({ addr: hex(v.addr), old: hex(old.addr) })));
       } else if (step === 1) {
         const kids = head(p).kids.map((k) => (get(k).id === d ? head(d).key : k));
         const { v } = rewrite(p, kids);
         step = 2;
-        say(fill(t.s2, vars({ addr: hex(v.addr) })), t.refs.cksum);
+        say(fill(t.s2, vars({ addr: hex(v.addr) })));
       } else if (step === 2) {
         const kids = head("r").kids.map((k) => (get(k).id === p ? head(p).key : k));
         const { v } = rewrite("r", kids);
         step = 3;
-        say(fill(t.s3, vars({ addr: hex(v.addr) })), t.refs.ripple);
+        say(fill(t.s3, vars({ addr: hex(v.addr) })));
       } else if (step === 3) {
         const old = head("ub");
         // Only the previous uberblock is drawn; older ones are still in the ring.
@@ -395,7 +416,7 @@ const textVersion = {
         const v = make("ub", old.ver + 1, txg + 1, (txg + 1) % 32, [head("r").key], "new");
         v.addr = (txg + 1) % 32;
         step = 4;
-        say(fill(t.s4, vars()), t.refs.commit);
+        say(fill(t.s4, vars()));
         txg += 1;
         for (const x of vs) if (x.state === "new") x.state = "live";
       } else if (step === 4) {
@@ -406,17 +427,17 @@ const textVersion = {
         freed.forEach((v) => (v.state = "freed"));
         const names = (l: V[]) => l.map((v) => label(v.id)).join(", ");
         step = 5;
-        if (kept.length && freed.length) say(fill(t.s5mixed, { kept: names(kept), freed: names(freed) }), t.refs.dead);
-        else if (kept.length) say(fill(t.s5dead, { list: names(kept) }), t.refs.dead);
-        else say(fill(t.s5free, { list: names(freed) }), t.refs.free);
+        if (kept.length && freed.length) say(fill(t.s5mixed, { kept: names(kept), freed: names(freed) }));
+        else if (kept.length) say(fill(t.s5dead, { list: names(kept) }));
+        else say(fill(t.s5free, { list: names(freed) }));
       }
       draw();
     }
 
     function crash() {
-      vs = vs.filter((v) => v.state !== "new");
+      for (const v of vs) if (v.state === "new") v.state = "orphan";
       for (const v of vs) if (v.state === "old") v.state = "live";
-      say(fill(t.crashed, vars()), t.refs.pick);
+      say(fill(t.crashed, vars()));
       step = 0;
       draw();
     }
@@ -424,7 +445,10 @@ const textVersion = {
     btn("next").addEventListener("click", advance);
     btn("crash").addEventListener("click", crash);
     btn("snap").addEventListener("click", () => {
+      dropOrphans();
       snapTxg = txg;
+      pinned = new Set(vs.filter((v) => v.state === "live").map((v) => v.key));
+      say(fill(t.snapped, { txg }));
       draw();
     });
     btn("reset").addEventListener("click", () => {
@@ -449,15 +473,26 @@ const textVersion = {
       r.addEventListener("change", () => {
         leaf = Number(r.value);
         if (step === 5) step = 0;
-        say(fill(t.idle, vars()));
+        dropOrphans();
+        say(fill(t.picked, vars()));
         draw();
       }),
     );
+
+    // A data block in the drawing can be picked with the pointer too; the radios are the keyboard path.
+    svg.addEventListener("click", (e) => {
+      const card = (e.target as Element).closest<SVGGElement>("[data-leaf]");
+      const radio = card && radios[Number(card.dataset.leaf)];
+      if (!radio || radio.disabled || radio.checked) return;
+      radio.checked = true;
+      radio.dispatchEvent(new Event("change"));
+    });
 
     init();
     say(fill(t.idle, vars()));
     root.querySelector<HTMLElement>(".controls")!.hidden = false;
     root.querySelector<HTMLElement>(".ptrs")!.hidden = false;
+    root.querySelector<HTMLElement>(".key")!.hidden = false;
     draw();
   }
 </script>
@@ -552,6 +587,77 @@ const textVersion = {
   svg :global(.card--snap text),
   svg :global(.card--prevub text) {
     fill: var(--fg-muted);
+  }
+  svg :global(.card--orphan rect) {
+    fill: var(--bad-soft);
+    stroke: var(--bad);
+    stroke-dasharray: 4 3;
+  }
+  svg :global(.edge--orphan) {
+    stroke: var(--bad);
+    stroke-dasharray: 3 3;
+  }
+  svg :global(.card--picked rect:not(.under)) {
+    stroke: var(--accent);
+    stroke-width: 3;
+  }
+  svg :global(.card--pickable) {
+    cursor: pointer;
+  }
+  svg :global(.card--pickable:hover rect:not(.under)) {
+    stroke: var(--accent);
+  }
+  svg :global(.pin rect) {
+    fill: var(--accent);
+    stroke: none;
+  }
+  svg :global(.card .pin text) {
+    font-size: 9px;
+    font-weight: 700;
+    fill: var(--bg);
+  }
+  .key {
+    list-style: none;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .key[hidden] {
+    display: none;
+  }
+  .key li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .swatch {
+    display: inline-grid;
+    place-items: center;
+    width: 1.1rem;
+    height: 0.8rem;
+    border-radius: 2px;
+    font-size: 0.6rem;
+    font-weight: 700;
+  }
+  .swatch--new {
+    background: var(--accent-soft);
+    border: 2px solid var(--accent);
+  }
+  .swatch--old {
+    border: 1.5px dashed var(--old);
+  }
+  .swatch--pin {
+    width: 0.8rem;
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .swatch--orphan {
+    background: var(--bad-soft);
+    border: 1.5px dashed var(--bad);
   }
   @keyframes appear {
     from {

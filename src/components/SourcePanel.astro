@@ -3,7 +3,9 @@
 // notes it serves. At 64rem (1024 px) and wider, opening a note moves its body
 // here, on the right, and the page makes room for it while the reader's line
 // stays where it was. Focus goes to the panel; Esc or the close button puts the
-// body back and returns focus to the note. Narrower, notes open inline.
+// body back and returns focus to the note; Tab off either end of the panel
+// also goes back to the note. Narrower, notes open inline. The script binds
+// every note on the page to the first panel, so a page carries one panel only.
 import { UI } from "../lib/ui";
 import type { Lang } from "../lib/rooms";
 
@@ -13,7 +15,7 @@ interface Props {
 const t = UI[Astro.props.lang];
 ---
 
-<div class="source-panel" data-source-panel role="dialog" aria-labelledby="source-panel-title" hidden>
+<div class="source-panel" id="source-panel" data-source-panel role="dialog" aria-labelledby="source-panel-title" hidden>
   <div class="head">
     <p class="title" id="source-panel-title" tabindex="-1">
       <span class="tag">{t.source}</span>
@@ -52,6 +54,7 @@ const t = UI[Astro.props.lang];
       const n = note;
       const b = noteBody;
       const summary = n.querySelector("summary")!;
+      summary.removeAttribute("aria-controls");
       keepPlace(summary, () => {
         n.append(b);
         n.open = false;
@@ -69,7 +72,9 @@ const t = UI[Astro.props.lang];
       const label = n.querySelector("[data-source-label]");
       if (!b || !label) return;
       titleText.replaceChildren(...[...label.childNodes].map((c) => c.cloneNode(true)));
-      keepPlace(n.querySelector("summary")!, () => {
+      const summary = n.querySelector("summary")!;
+      summary.setAttribute("aria-controls", panel.id);
+      keepPlace(summary, () => {
         body.replaceChildren(b);
         n.open = true;
         n.classList.add("in-panel");
@@ -84,18 +89,30 @@ const t = UI[Astro.props.lang];
 
     for (const n of document.querySelectorAll<HTMLDetailsElement>("[data-source-note]")) {
       n.querySelector("summary")!.addEventListener("click", (e) => {
-        if (!wide.matches) return;
+        // Opened inline by other means (find in page, a link): let it close inline.
+        if (!wide.matches || (n.open && note !== n)) return;
         e.preventDefault();
         if (note === n) close(true);
         else open(n);
       });
     }
     panel.querySelector("[data-source-panel-close]")!.addEventListener("click", () => close(true));
+    // Esc closes the panel; focus goes back to the note only if it was in the panel.
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && note) {
-        e.preventDefault();
-        close(true);
-      }
+      if (e.key !== "Escape" || !note || e.defaultPrevented) return;
+      const inside = panel.contains(document.activeElement);
+      if (inside) e.preventDefault();
+      close(inside);
+    });
+    // Tab past the last stop, or Shift+Tab before the first, returns to the note.
+    panel.addEventListener("keydown", (e) => {
+      if (e.key !== "Tab" || !note) return;
+      const stops = [...panel.querySelectorAll<HTMLElement>("a[href], button, [tabindex='0']")];
+      const edge = e.shiftKey ? stops[0] : stops[stops.length - 1];
+      const fromEdge = document.activeElement === edge || (e.shiftKey && document.activeElement === title);
+      if (!fromEdge) return;
+      e.preventDefault();
+      note.querySelector("summary")!.focus();
     });
     // Narrowed below 64rem with the panel open: the note goes back inline, still open.
     wide.addEventListener("change", () => {
@@ -192,7 +209,12 @@ const t = UI[Astro.props.lang];
     color: var(--fg);
     border-color: var(--accent);
   }
-  .body :global(.excerpt:first-child) {
-    margin-top: var(--space-5);
+  @media print {
+    .source-panel {
+      display: none;
+    }
+    :global(html.source-open body) {
+      padding-right: 0;
+    }
   }
 </style>

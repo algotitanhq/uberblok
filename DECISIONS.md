@@ -2380,3 +2380,54 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
 - **Rejected.** Delaying the client redirect until the beacon has sent (a visible pause, and
   `/` counted as a page). A `?ref=` parameter (Web Analytics reads `document.referrer`, not
   the URL). English unprefixed at `/` (rejected in D1.4).
+
+## v1.4 pilot (ALG-173): the copy-on-write room as a question
+
+### D21.1 The room format: a question, a plain answer, the figures, then Source notes
+
+- **Context.** Readers of the launch threads (r/zfs, Hacker News) found the rooms hard to follow
+  and the prose machine-like: « citing every line is not explanation or insight », « less AI-y
+  texts », « Make the code open to the right instead of a new window ». The English
+  copy-on-write room is the pilot; the other rooms follow it once it is approved.
+- **Choice.** A room is laid out in this order:
+  1. **One question as the `h1`**, asked as a reader would ("What happens when I change a
+     block?"). The room's catalogue title stays as the kicker (`Room 3 · Copy-on-write, …`), so
+     the Hall map, the room navigation and the other languages are unchanged.
+  2. **A plain answer**, before anything else: three short paragraphs at most, no code, no link,
+     for a ZFS operator who does not know the internals. The problem first, then the mechanism.
+     A term of the trade is glossed the first time it appears ("a root record called the
+     uberblock").
+  3. **The figures**, each with a short paragraph that says what to try in it.
+  4. **"In the code"**: one `h3` per place in the source, a short paragraph that may name a
+     function, then one **Source note**. Only the lines that carry the idea: in this room 4
+     excerpts and 34 lines instead of 3 and 93, and 14 links to GitHub instead of 32, none of
+     them in the prose (measured on the built page).
+  5. **What the figures leave out**, as before.
+- **Source notes.** `SourceNote` is a `<details>` (label slot, body slot with an `Excerpt` and its
+  notes); with no script it opens inline. `SourcePanel`, one per page, takes over at 64rem
+  (1024 px) and wider: the summary's click moves the note's body into a non-modal
+  `role="dialog"` panel fixed on the right, `body` gets the panel's width as right padding so
+  nothing is hidden under it, and the summary is scrolled back to the same height on screen, so
+  the reader keeps their line. Focus goes to the panel's title; Esc or the close button moves
+  the body back and returns focus to the summary, and Tab off either end of the panel goes back
+  there too. Opening another note swaps the panel's content. Narrowing below 64rem puts the
+  body back inline, still open. GitHub links live only in the notes, pinned to `zfs-2.4.4`. The
+  short excerpts are new entries of `ANALYSIS.md`, checked against the frozen commit like the
+  others.
+- **Scripts as files.** Astro inlines a component script under 4 KB, and an inline script needs
+  its own hash in the CSP (D19.2). `vite.build.assetsInlineLimit` is a function that refuses
+  `.js` chunks and returns `undefined` for anything else, so Astro and Vite keep their 4096-byte
+  default for stylesheets and assets. The only change in the build is the panel's script as a
+  file under `/_astro/` (checked: every other page's HTML is identical; a plain `0` would have
+  turned some 40 inlined stylesheets into requests).
+- **Style rules for room prose.** Written for the ear: short sentences, concrete words, one idea
+  per sentence. No grand adjectives, no "it's not X, it's Y", no list of three for rhythm (a real
+  sequence of events is fine), few dashes. Every claim stays as precise as the code (reads from
+  disk are checked, not reads served by the ARC; `ECKSUM` rejects one copy of a mirror, not the
+  read). The text goes past the `technical-writer` subagent, then is read aloud; if it sounds like
+  a brochure, it is rewritten.
+- **Rejected.** A modal dialog: it hides the text the reader wants to keep in view. Code
+  excerpts left in the prose and only collapsed: the prose would still be cut by links and line
+  ranges. A panel that overlays the text without padding: at 1024 px it would cover half of the
+  paragraph being read. Opening GitHub in a new tab: the feedback asked for the code beside the
+  text.

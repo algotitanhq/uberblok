@@ -2431,3 +2431,37 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   ranges. A panel that overlays the text without padding: at 1024 px it would cover half of the
   paragraph being read. Opening GitHub in a new tab: the feedback asked for the code beside the
   text.
+
+## v1.4 tree room (ALG-185)
+
+### D22.1 The tree room as a question, and a figure that climbs one level per step
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182))
+  starts with the tree and the uberblock room, the most visited after the Hall. It had 12
+  excerpts (255 lines of code) and 58 links to GitHub in each language, 27 of them in the
+  prose. The issue asks for a figure where the reader changes a block and follows the new
+  block pointers up to a new uberblock, one level per step.
+- **Question.** "What if the power fails while ZFS is writing?" (« Et si le courant coupe
+  pendant que ZFS écrit ? », « ¿Y si se va la luz mientras ZFS escribe? »). The answer does not
+  repeat the copy-on-write room's: it is about the txg as a whole, the one root pointer, the
+  flush before the uberblock, the ring of slots and what the import keeps.
+- **Figure.** `step()` in `src/lib/tree.ts` now writes the open txg's new blocks one height
+  per step, data first and the objset last (`HEIGHTS` = 5: data, L1, L2, the block of dnodes,
+  the objset); beat 0 is done when the objset is written, then the four beats as before. This
+  is the order of the code: a block's write I/O is the child of its parent's
+  (`dbuf_write`, dbuf.c L5411), and `zio_write_compress` holds the parent until every child is
+  ready, with its new address and checksum (zio.c L1932-L1939). In the drawing a new copy is an
+  outline while in memory and fills in when written; a pointer from a new copy to a child not
+  yet written is dotted and muted, and turns into the accent once the child is written. Only
+  what changed is animated, and nothing under reduced motion. A cut halfway up is a new case
+  (`during: 0`): the old tree wins, as with a cut during the flush. Writing a second block is
+  refused once the first level is written, as the code quiesces the txg before `spa_sync`.
+  The other controls, the 3D view, the text version and the no-script state are unchanged.
+- **Code.** Seven Source notes, 69 lines (`ANALYSIS.md` tree room, excerpts 7 and 12 to 17;
+  six are new short cuts of longer excerpts, checked against `zfs-2.4.4`). The "three depths"
+  section is gone: its one-paragraph summary repeated the answer, and its detail now lives in
+  the notes.
+- **Rejected.** A separate "climb" button beside Next step: two buttons that both advance the
+  sync would make the reader guess which one to press. Drawing the climb as an animation inside
+  one step: the issue asks for one level per step, and an animation cannot be paused or read
+  under reduced motion.

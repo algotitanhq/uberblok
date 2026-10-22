@@ -164,7 +164,9 @@ export function mount(host: HTMLElement, opts: { label: string; describedBy?: st
       for (const k of d.blk.kids) {
         const to = pos.get(k)?.v;
         if (!to) continue;
-        const arr = d.state === "live" || d.state === "old" || d.state === "dead" ? plain : d.state === "lost" ? lost : hot;
+        // A pointer in memory to a child not written yet stays muted, as in 2D.
+        const waiting = d.state === "mem" && pos.get(k)!.state === "mem";
+        const arr = d.state === "live" || d.state === "old" || d.state === "dead" || waiting ? plain : d.state === "lost" ? lost : hot;
         arr.push(from.x, from.y - 0.31, from.z, to.x, to.y + 0.31, to.z);
       }
     }

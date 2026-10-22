@@ -90,6 +90,11 @@
 .tr-tree .edge.e-unflushed {
   stroke-dasharray: 4 3;
 }
+.tr-tree .edge.e-wait {
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  stroke-dasharray: 1 3;
+}
 .tr-tree .edge.e-lost {
   stroke: var(--bad);
   stroke-dasharray: 2 3;
@@ -123,6 +128,10 @@
 .tr-tree .b.s-mem rect,
 .tr-tree .b.s-unflushed rect {
   stroke-dasharray: 4 3;
+}
+/* In memory, not written: an outline only; written, it fills in. */
+.tr-tree .b.s-mem rect {
+  fill: none;
 }
 .tr-tree .b.s-lost rect {
   stroke: var(--bad);
@@ -326,6 +335,8 @@
 .tr-legend .s-new .sw { border-color: var(--accent); background: var(--accent-soft); }
 .tr-legend .s-mem .sw,
 .tr-legend .s-unflushed .sw { border: 1.5px dashed var(--accent); background: var(--accent-soft); }
+.tr-legend .s-mem .sw { background: none; }
+.tr-legend .s-wait .sw { border: 0; border-top: 2px dotted var(--fg-muted); border-radius: 0; height: 0; vertical-align: 0.3em; }
 .tr-legend .s-lost .sw { border: 1.5px dashed var(--bad); background: var(--bad-soft); }
 .tr-legend .s-dead .sw { border: 1.5px dashed var(--old); }
 .tr .note {

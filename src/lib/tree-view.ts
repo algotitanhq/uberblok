@@ -5,7 +5,7 @@
 // same state.
 import { and, decimal } from "./l10n";
 import {
-  NLEVELS, PLACES, VDEV_LABELS, labelOffset, newestOnDisk, place, slotOf, ubOffset,
+  HEIGHTS, NLEVELS, PLACES, VDEV_LABELS, height, labelOffset, newestOnDisk, place, slotOf, ubOffset,
   type Blk, type ImportResult, type Pool, type Why,
 } from "./tree";
 
@@ -56,7 +56,7 @@ export function drawn(p: Pool): { blk: Blk; state: BlockState; pair: "solo" | "l
   const out: { blk: Blk; state: BlockState; pair: "solo" | "left" | "right" }[] = [];
   const t = p.open;
   const committed = t?.beat === 4;
-  const lost = p.cut && t && (p.cut.during === "open" || p.cut.during === 1);
+  const lost = p.cut && t && (p.cut.during === "open" || p.cut.during === 0 || p.cut.during === 1);
   const swung = !!t && newestOnDisk(p).root === t.version.OS;
   for (const pl of PLACES) {
     const oldId = p.version[pl.key];
@@ -66,7 +66,8 @@ export function drawn(p: Pool): { blk: Blk; state: BlockState; pair: "solo" | "l
       continue;
     }
     out.push({ blk: p.blocks[oldId], state: committed || swung ? "dead" : "old", pair: "left" });
-    const st: BlockState = lost ? "lost" : t!.beat === null ? "mem" : t!.beat === 0 ? "unflushed" : "new";
+    // spa_sync writes bottom up: below the height reached, written; above it, still in memory.
+    const st: BlockState = lost ? "lost" : t!.beat === null ? (height(pl.key) < t!.wrote ? "unflushed" : "mem") : t!.beat === 0 ? "unflushed" : "new";
     out.push({ blk: p.blocks[newId], state: st, pair: "right" });
   }
   return out;
@@ -100,8 +101,9 @@ export function treeSvg(S: TrStrings, p: Pool): string {
     for (const kid of d.blk.kids) {
       const to = where.get(kid);
       if (!to) continue;
-      const cls = d.state === "dead" || d.state === "old" ? "old" : d.state === "live" ? "live" : d.state;
-      edges += `<path class="edge e-${cls}" d="M${from.x} ${from.y + BH / 2}C${from.x} ${from.y + BH / 2 + 14} ${to.x} ${to.y - BH / 2 - 14} ${to.x} ${to.y - BH / 2}"/>`;
+      // A pointer in memory to a child not written yet: no address or checksum in it so far.
+      const cls = d.state === "dead" || d.state === "old" ? "old" : d.state === "live" ? "live" : d.state === "mem" && to.state === "mem" ? "wait" : d.state;
+      edges += `<path class="edge e-${cls}" data-edge="${esc(d.blk.id)}>${esc(kid)}" d="M${from.x} ${from.y + BH / 2}C${from.x} ${from.y + BH / 2 + 14} ${to.x} ${to.y - BH / 2 - 14} ${to.x} ${to.y - BH / 2}"/>`;
     }
   }
   let nodes = "";
@@ -121,9 +123,10 @@ export function treeSvg(S: TrStrings, p: Pool): string {
   const arrow = os ? `<path class="root" data-root="${esc(ub.root!)}" d="M${cx} 52C${cx} 70 ${os.x} 70 ${os.x} ${os.y - BH / 2 - 3}" marker-end="url(#tr-arrow)"/>` : "";
   const state = p.cut ? fill(S.sayCut, { where: cutWhere(S, p) }) : beatsSummary(S, p);
   const aria = fill(S.treeAria, { txg: ub.txg, os: (ub.root ?? "").split("@")[1] ?? "", state: spoken(state) });
-  const shown = new Set(ds.map((d) => d.state));
-  const legend = [["old", S.lg_old], ["new", S.lg_new], ["mem", S.lg_mem], ["unflushed", S.lg_unflushed], ["lost", S.lg_lost], ["dead", S.lg_dead]]
-    .filter(([k]) => shown.has(k as BlockState))
+  const shown = new Set<string>(ds.map((d) => d.state));
+  if (edges.includes("e-wait")) shown.add("wait");
+  const legend = [["old", S.lg_old], ["new", S.lg_new], ["mem", S.lg_mem], ["wait", S.lg_wait], ["unflushed", S.lg_unflushed], ["lost", S.lg_lost], ["dead", S.lg_dead]]
+    .filter(([k]) => shown.has(k))
     .map(([k, t]) => `<li class="s-${k}"><span class="sw" aria-hidden="true"></span>${esc(t)}</li>`)
     .join("");
   return `<svg class="tr-tree" viewBox="0 0 ${TW} 372" role="img" aria-label="${esc(aria)}">`
@@ -220,7 +223,8 @@ export function beatsHtml(S: TrStrings, p: Pool): string {
   ];
   const lis = items.map(([k, text], i) => {
     const st = i === cutAt ? "cut" : i <= done ? "done" : t && !p.cut && i === done + 1 ? "next" : "todo";
-    return `<li class="bt-${st}" data-beat="${i}"><span class="st">${S[`st_${st}`]}</span> ${fill(text, { txg, slot: slotOf(txg, p.ashift) })}${see(S, k === "beat0" ? "write" : items[i][2])}</li>`;
+    const say = i === 0 && t && t.beat === null && t.wrote > 0 ? S.beat0prog : text;
+    return `<li class="bt-${st}" data-beat="${i}"><span class="st">${S[`st_${st}`]}</span> ${fill(say, { txg, slot: slotOf(txg, p.ashift), w: t?.wrote ?? 0, h: HEIGHTS })}${see(S, k === "beat0" ? "write" : items[i][2])}</li>`;
   }).join("");
   return `<p class="muted">${beatsSummary(S, p)}</p><ol class="beats" start="0">${lis}</ol>`;
 }
@@ -228,7 +232,8 @@ export function beatsHtml(S: TrStrings, p: Pool): string {
 function beatsSummary(S: TrStrings, p: Pool): string {
   const t = p.open;
   if (!t || t.beat === 4) return fill(S.beatsIdle, { txg: t?.beat === 4 ? t.txg + 1 : workTxg(p) });
-  if (t.beat === null) return fill(S.beatsOpen, { txg: t.txg, n: plural(S, newBlocks(p).length, "block1", "blockN") });
+  if (t.beat === null && t.wrote === 0) return fill(S.beatsOpen, { txg: t.txg, n: plural(S, newBlocks(p).length, "block1", "blockN") });
+  if (t.beat === null) return fill(S.beat0prog, { txg: t.txg, w: t.wrote, h: HEIGHTS });
   return fill(S[`beat${t.beat}`], { txg: t.txg, slot: slotOf(t.txg, p.ashift) });
 }
 
@@ -263,6 +268,7 @@ export function importVerdict(S: TrStrings, r: ImportResult): string {
 function whyKey(r: ImportResult): string {
   const d = r.during;
   if (d === "open") return "why_open";
+  if (d === 0) return "why_0";
   if (d === 1) return "why_1";
   if (d === 2) return r.labelReads.some((x) => x.verdict === "tooNew" || x.verdict === "torn") ? "why_2" : "why_2none";
   // Did this txg write any label? Not when its vdev configuration did not change.
@@ -282,6 +288,13 @@ export function writeLine(S: TrStrings, p: Pool, blkid: number, rewritten: strin
 
 export function stepLine(S: TrStrings, p: Pool): string {
   const t = p.open!;
+  if (t.beat === null) {
+    // One height written: its blocks, and the parents that now hold their pointers.
+    const fresh = newBlocks(p);
+    const just = fresh.filter((k) => height(k) === t.wrote - 1);
+    const parents = fresh.filter((k) => height(k) === t.wrote);
+    return fill(just.length === 1 ? S.say0one : S.say0many, { list: list(S, just.map((k) => placeName(S, k))), parents: list(S, parents.map((k) => placeName(S, k))) }) + see(S, "bottomUp");
+  }
   const vars = { txg: t.txg, prev: p.synced, slot: slotOf(t.txg, p.ashift), n: plural(S, newBlocks(p).length, "block1", "blockN") };
   const k = t.beat === 0 ? "say0" : t.beat === 1 ? "say1" : t.beat === 2 ? (p.configDirty ? "say2" : "say2none") : t.beat === 3 ? "say3" : p.configDirty ? "say4" : "say4none";
   const ref = ["write", "flush", "even", "ubsync", "odd"][t.beat!];
@@ -292,6 +305,7 @@ function cutWhere(S: TrStrings, p: Pool): string {
   const c = p.cut!;
   if (c.during === "idle") return S.cut_idle;
   if (c.during === "open") return fill(S.cut_open, { txg: c.txg ?? "" });
+  if (c.during === 0) return fill(S.cut_0, { txg: c.txg ?? "" });
   if (c.during === 1) return S.cut_1;
   if (c.during === 2) return p.configDirty ? S.cut_2 : S.cut_2none;
   if (c.during === 3) return fill(S.cut_3, { n: plural(S, c.landed, "write1", "writeN"), l: L(c.landed) });

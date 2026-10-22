@@ -26,6 +26,7 @@ const refs = {
   offset: gh(VL, 158, 170),
   dirty: gh("module/zfs/dbuf.c", 2537, 2554),
   write: gh("module/zfs/zio.c", 2102, 2104),
+  bottomUp: gh("module/zfs/zio.c", 1932, 1939),
   flush: gh(VL, 2085, 2098),
   even: gh(VL, 2100, 2116),
   ubsync: gh(VL, 1782, 1796),
@@ -136,6 +137,9 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
     }
 
     function render(animate: boolean, swung = false) {
+      // What each block and pointer looked like before: only what changed is animated.
+      const before = new Map<string, string>();
+      for (const el of root.querySelectorAll<SVGElement>("[data-tree] [data-block], [data-tree] [data-edge]")) before.set(el.dataset.block ?? `e:${el.dataset.edge}`, el.getAttribute("class") ?? "");
       q("[data-tree]").innerHTML = treeSvg(S, pool);
       q("[data-disk]").innerHTML = diskSvg(S, pool);
       q("[data-beats]").innerHTML = beatsHtml(S, pool);
@@ -165,7 +169,8 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
       if (scene) scene.draw(pool, (animate || swung) && motion);
       if (motion && !is3d) {
         if (animate) {
-          const fresh = root.querySelectorAll<SVGGraphicsElement>("[data-tree] .b.s-mem, [data-tree] .b.s-unflushed, [data-tree] .e-mem");
+          const fresh = [...root.querySelectorAll<SVGGraphicsElement>("[data-tree] .b.s-mem, [data-tree] .b.s-unflushed, [data-tree] .e-mem, [data-tree] .e-unflushed")]
+            .filter((el) => before.get(el.dataset.block ?? `e:${el.dataset.edge}`) !== el.getAttribute("class"));
           for (const el of fresh) el.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
         }
         if (swung) q("[data-tree] .root")?.animate([{ opacity: 0.1 }, { opacity: 1 }], { duration: 480, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });

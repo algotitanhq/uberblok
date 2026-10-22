@@ -1,0 +1,220 @@
+---
+// The side panel for SourceNote (DECISIONS.md D21.1). One per page, after the
+// notes it serves. At 64rem (1024 px) and wider, opening a note moves its body
+// here, on the right, and the page makes room for it while the reader's line
+// stays where it was. Focus goes to the panel; Esc or the close button puts the
+// body back and returns focus to the note; Tab off either end of the panel
+// also goes back to the note. Narrower, notes open inline. The script binds
+// every note on the page to the first panel, so a page carries one panel only.
+import { UI } from "../lib/ui";
+import type { Lang } from "../lib/rooms";
+
+interface Props {
+  lang: Lang;
+}
+const t = UI[Astro.props.lang];
+---
+
+<div class="source-panel" id="source-panel" data-source-panel role="dialog" aria-labelledby="source-panel-title" hidden>
+  <div class="head">
+    <p class="title" id="source-panel-title" tabindex="-1">
+      <span class="tag">{t.source}</span>
+      <span data-source-panel-title></span>
+    </p>
+    <button type="button" class="close" data-source-panel-close aria-label={t.sourceClose} title={t.sourceClose}>
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.5" fill="none"></path>
+      </svg>
+    </button>
+  </div>
+  <div class="body" data-source-panel-body></div>
+</div>
+
+<script>
+  const panel = document.querySelector<HTMLElement>("[data-source-panel]");
+  if (panel) {
+    const wide = matchMedia("(min-width: 64rem)");
+    const root = document.documentElement;
+    const title = panel.querySelector<HTMLElement>("#source-panel-title")!;
+    const titleText = panel.querySelector<HTMLElement>("[data-source-panel-title]")!;
+    const body = panel.querySelector<HTMLElement>("[data-source-panel-body]")!;
+    let note: HTMLDetailsElement | null = null;
+    let noteBody: HTMLElement | null = null;
+
+    // The page narrows when the panel opens; keep the summary at the same height on screen.
+    const keepPlace = (anchor: Element, change: () => void) => {
+      const before = anchor.getBoundingClientRect().top;
+      change();
+      const delta = anchor.getBoundingClientRect().top - before;
+      if (delta) window.scrollBy({ top: delta, behavior: "instant" });
+    };
+
+    const close = (returnFocus: boolean) => {
+      if (!note || !noteBody) return;
+      const n = note;
+      const b = noteBody;
+      const summary = n.querySelector("summary")!;
+      summary.removeAttribute("aria-controls");
+      keepPlace(summary, () => {
+        n.append(b);
+        n.open = false;
+        n.classList.remove("in-panel");
+        panel.hidden = true;
+        root.classList.remove("source-open");
+      });
+      note = noteBody = null;
+      if (returnFocus) summary.focus({ preventScroll: true });
+    };
+
+    const open = (n: HTMLDetailsElement) => {
+      close(false);
+      const b = n.querySelector<HTMLElement>("[data-source-body]");
+      const label = n.querySelector("[data-source-label]");
+      if (!b || !label) return;
+      titleText.replaceChildren(...[...label.childNodes].map((c) => c.cloneNode(true)));
+      const summary = n.querySelector("summary")!;
+      summary.setAttribute("aria-controls", panel.id);
+      keepPlace(summary, () => {
+        body.replaceChildren(b);
+        n.open = true;
+        n.classList.add("in-panel");
+        panel.hidden = false;
+        root.classList.add("source-open");
+      });
+      panel.scrollTop = 0;
+      note = n;
+      noteBody = b;
+      title.focus({ preventScroll: true });
+    };
+
+    for (const n of document.querySelectorAll<HTMLDetailsElement>("[data-source-note]")) {
+      n.querySelector("summary")!.addEventListener("click", (e) => {
+        // Opened inline by other means (find in page, a link): let it close inline.
+        if (!wide.matches || (n.open && note !== n)) return;
+        e.preventDefault();
+        if (note === n) close(true);
+        else open(n);
+      });
+    }
+    panel.querySelector("[data-source-panel-close]")!.addEventListener("click", () => close(true));
+    // Esc closes the panel; focus goes back to the note only if it was in the panel.
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !note || e.defaultPrevented) return;
+      const inside = panel.contains(document.activeElement);
+      if (inside) e.preventDefault();
+      close(inside);
+    });
+    // Tab past the last stop, or Shift+Tab before the first, returns to the note.
+    panel.addEventListener("keydown", (e) => {
+      if (e.key !== "Tab" || !note) return;
+      const stops = [...panel.querySelectorAll<HTMLElement>("a[href], button, [tabindex='0']")];
+      const edge = e.shiftKey ? stops[0] : stops[stops.length - 1];
+      const fromEdge = document.activeElement === edge || (e.shiftKey && document.activeElement === title);
+      if (!fromEdge) return;
+      e.preventDefault();
+      note.querySelector("summary")!.focus();
+    });
+    // Narrowed below 64rem with the panel open: the note goes back inline, still open.
+    wide.addEventListener("change", () => {
+      if (wide.matches || !note) return;
+      const n = note;
+      const inside = panel.contains(document.activeElement);
+      close(false);
+      n.open = true;
+      if (inside) n.querySelector("summary")!.focus({ preventScroll: true });
+    });
+  }
+</script>
+
+<style>
+  :global(:root) {
+    --source-panel-w: min(44rem, 46vw);
+  }
+  @media (min-width: 64rem) {
+    :global(html.source-open body) {
+      padding-right: var(--source-panel-w);
+    }
+  }
+  .source-panel {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 20;
+    width: var(--source-panel-w);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 var(--space-5) var(--space-7);
+    background: var(--bg);
+    border-left: 1px solid var(--line-strong);
+    box-shadow: -16px 0 40px rgb(0 0 0 / 0.22);
+  }
+  .source-panel[hidden] {
+    display: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .source-panel {
+      animation: source-in 160ms ease-out;
+    }
+  }
+  @keyframes source-in {
+    from {
+      transform: translateX(1.5rem);
+      opacity: 0;
+    }
+  }
+  .head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding-block: var(--space-3);
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .title {
+    margin: 0;
+    font-size: var(--step--1);
+    color: var(--fg);
+  }
+  .title:focus {
+    outline: none;
+  }
+  .title:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+  }
+  .tag {
+    margin-right: var(--space-2);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-size: var(--step-0);
+    color: var(--accent);
+  }
+  .close {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .close:hover {
+    color: var(--fg);
+    border-color: var(--accent);
+  }
+  @media print {
+    .source-panel {
+      display: none;
+    }
+    :global(html.source-open body) {
+      padding-right: 0;
+    }
+  }
+</style>

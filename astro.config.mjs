@@ -21,4 +21,8 @@ export default defineConfig({
     service: { entrypoint: "astro/assets/services/sharp", config: { webp: { quality: 75, alphaQuality: 60 } } },
   },
   devToolbar: { enabled: false },
+  // Component scripts always ship as files: a small one (SourcePanel) would be
+  // inlined and need its own CSP hash, while 'self' covers a file (DECISIONS.md D21.1).
+  // Anything else keeps Vite's default limit, so small stylesheets stay inlined.
+  vite: { build: { assetsInlineLimit: (file) => (/\.m?js$/.test(file) ? false : undefined) } },
 });

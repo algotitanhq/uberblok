@@ -1120,6 +1120,70 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 
 Earlier in the function, if no child has returned good data yet, `vdev_mirror_child_select` chooses another untried child and a new read is issued ([`module/zfs/vdev_mirror.c#L793-L802`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_mirror.c#L793-L802)). Repair runs only with at least one good copy, a writeable pool, and unexpected errors, resilver, or a resilvering scrub ([`module/zfs/vdev_mirror.c#L883-L886`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_mirror.c#L883-L886)). L900-L904: children that returned good data are never rewritten (the comment just above explains that rewriting the only good copy during a power loss could lose it). L905-L924: a child that was not tried is repaired only in a scrub, for indirect or dRAID-spare vdevs, or when its DTL says this txg is missing. L927-L933: the good buffer `zio->io_abd` is written to each damaged child as a `ZIO_FLAG_IO_REPAIR` write, flagged `ZIO_FLAG_SELF_HEAL` when the cause was an unexpected error.
 
+**Short excerpts for the question-first room (v1.4, ALG-173).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 4. `blkptr_t`, the pointer that holds the checksum — include/sys/spa.h
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/spa.h#L374-L382
+
+```c
+typedef struct blkptr {
+	dva_t		blk_dva[SPA_DVAS_PER_BP]; /* Data Virtual Addresses */
+	uint64_t	blk_prop;	/* size, compression, type, etc	    */
+	uint64_t	blk_prop2;	/* additional properties	    */
+	uint64_t	blk_pad;	/* Extra space for the future	    */
+	uint64_t	blk_birth_word[2];
+	uint64_t	blk_fill;	/* fill count			    */
+	zio_cksum_t	blk_cksum;	/* 256-bit checksum		    */
+} blkptr_t;
+```
+
+### 5. `zio_write_compress`, overwrite or new address — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L2094-L2105
+
+```c
+	if (!BP_IS_HOLE(bp) && BP_GET_BIRTH(bp) == zio->io_txg &&
+	    BP_GET_PSIZE(bp) == psize &&
+	    pass >= zfs_sync_pass_rewrite) {
+		VERIFY3U(psize, !=, 0);
+		enum zio_stage gang_stages = zio->io_pipeline & ZIO_GANG_STAGES;
+
+		zio->io_pipeline = ZIO_REWRITE_PIPELINE | gang_stages;
+		zio->io_flags |= ZIO_FLAG_IO_REWRITE;
+	} else {
+		BP_ZERO(bp);
+		zio->io_pipeline = ZIO_WRITE_PIPELINE;
+	}
+```
+
+### 6. `zio_checksum_error_impl`, expected and actual — module/zfs/zio_checksum.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio_checksum.c#L501-L506
+
+```c
+	} else {
+		byteswap = BP_SHOULD_BYTESWAP(bp);
+		expected_cksum = bp->blk_cksum;
+		ci->ci_func[byteswap](abd, size,
+		    spa->spa_cksum_tmpls[checksum], &actual_cksum);
+	}
+```
+
+### 7. `vdev_mirror_io_done`, the repair write — module/zfs/vdev_mirror.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_mirror.c#L927-L933
+
+```c
+			zio_nowait(zio_vdev_child_io(zio, zio->io_bp,
+			    mc->mc_vd, mc->mc_offset,
+			    zio->io_abd, zio->io_size, ZIO_TYPE_WRITE,
+			    zio->io_priority == ZIO_PRIORITY_REBUILD ?
+			    ZIO_PRIORITY_REBUILD : ZIO_PRIORITY_ASYNC_WRITE,
+			    ZIO_FLAG_IO_REPAIR | (unexpected_errors ?
+			    ZIO_FLAG_SELF_HEAL : 0), NULL, NULL));
+```
+
 **What the animation shows.**
 - A leaf block is modified: a new block appears at a new address, and the old one stays until the pointer moves — `zio_write_compress` L2102-L2104, `zio_dva_allocate` L4345.
 - The parent's pointer is rewritten with the new address and the new checksum, so the parent itself changes and is copied too; the change ripples up to the uberblock — `zio_checksum_compute` L417; the parent is dirtied with the child, `dbuf_dirty(parent, tx)` dbuf.c L2552.

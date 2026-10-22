@@ -2441,8 +2441,8 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   excerpts (255 lines of code) and 58 links to GitHub in each language, 27 of them in the
   prose. The issue asks for a figure where the reader changes a block and follows the new
   block pointers up to a new uberblock, one level per step.
-- **Question.** "What if the power fails while ZFS is writing?" (« Et si le courant coupe
-  pendant que ZFS écrit ? », « ¿Y si se va la luz mientras ZFS escribe? »). The answer does not
+- **Question.** "What if the power fails while ZFS is writing?" (« Et s’il y a une coupure de
+  courant pendant que ZFS écrit ? », « ¿Qué pasa si se va la corriente mientras ZFS escribe? »). The answer does not
   repeat the copy-on-write room's: it is about the txg as a whole, the one root pointer, the
   flush before the uberblock, the ring of slots and what the import keeps.
 - **Figure.** `step()` in `src/lib/tree.ts` now writes the open txg's new blocks one height

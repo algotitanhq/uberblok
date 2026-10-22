@@ -35,16 +35,16 @@ const L = {
 <Base
   lang={lang}
   roomId="tree"
-  title="Et si le courant coupe pendant que ZFS écrit ? L’arbre et l’uberblock · Uberblok"
+  title="Et s’il y a une coupure de courant pendant que ZFS écrit ? L’arbre et l’uberblock · Uberblok"
   description="ZFS écrit un nouvel arbre de blocs à côté de l’ancien, puis y bascule par une seule écriture d’uberblock : une coupure de courant laisse l’ancien pool ou le nouveau, jamais un mélange. Interactif, avec le code d’OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
       <p class="kicker">Salle {roomNumber(r.id)} · {r.title.fr}</p>
-      <h1>Et si le courant coupe pendant que ZFS écrit ?</h1>
+      <h1>Et s’il y a une coupure de courant pendant que ZFS écrit ?</h1>
       <div class="prose answer">
         <p class="lead">
-          ZFS rassemble les modifications en mémoire et les écrit ensemble toutes les quelques secondes, sous la forme
+          ZFS rassemble les modifications en mémoire et les écrit ensemble à quelques secondes d’intervalle, sous la forme
           d’un groupe de transactions (txg). Un seul txg peut écrire des milliers de blocs sur plusieurs disques, et le
           courant peut couper à tout moment pendant ce temps. Un système de fichiers qui modifie ses blocs sur place peut
           alors rester à moitié ancien et à moitié nouveau, et un outil de réparation comme fsck doit parcourir le disque
@@ -52,19 +52,19 @@ const L = {
           txg ou tel qu’il est après, jamais dans un mélange des deux.
         </p>
         <p>
-          Tous les blocs d’un pool sont suspendus à un petit enregistrement, l’uberblock. Il contient un seul pointeur
+          Tous les blocs d’un pool dépendent d’un petit enregistrement, l’uberblock. Il contient un seul pointeur
           vers le sommet d’un arbre de pointeurs de bloc, et cet arbre descend jusqu’à chaque bloc de données. Quand un
           bloc change, ZFS écrit la nouvelle version ailleurs et laisse l’ancienne à sa place. Le bloc au-dessus contient
           son adresse, il reçoit donc lui aussi une nouvelle version, et ainsi de suite jusqu’au sommet. Jusqu’à la fin
           du txg, l’uberblock pointe toujours vers l’ancien arbre, auquel rien n’a touché.
         </p>
         <p>
-          Une fois le nouvel arbre écrit, ZFS demande aux disques qu’il a écrits de vider leur cache d’écriture, la
+          Une fois le nouvel arbre écrit, ZFS demande aux disques sur lesquels il a écrit de vider leur cache d’écriture, la
           mémoire où un disque garde les écritures avant qu’elles n’atteignent un support stable. Puis il écrit un nouvel
           uberblock qui pointe vers le nouvel arbre, et c’est l’écriture de cet uberblock qui fait basculer le pool. Le
-          nouvel uberblock va dans une autre case que celui en service, si bien qu’une écriture coupée en plein milieu ne
+          nouvel uberblock va dans une autre case que celle en service, si bien qu’une écriture coupée en plein milieu ne
           peut pas abîmer l’uberblock courant. Chaque disque garde quatre copies de cet anneau de cases. À l’import, ZFS
-          lit toutes les cases, écarte celles dont la somme de contrôle est fausse et prend la plus récente. Elle pointe
+          lit toutes les cases, écarte celles dont la somme de contrôle est fausse et prend la plus récente. Son uberblock pointe
           vers un arbre complet, l’ancien ou le nouveau.
         </p>
       </div>
@@ -83,7 +83,7 @@ const L = {
         <p>
           Appuyez sur Étape suivante. ZFS écrit les nouveaux blocs de bas en haut, un niveau par étape. Un bloc contient
           les nouvelles adresses et sommes de contrôle des blocs en dessous de lui, et elles ne sont connues qu’une fois
-          ces blocs placés. Les pointeurs en pointillés se remplissent un niveau à la fois, jusqu’à l’objset. Écrivez D3
+          ces blocs placés. Les pointeurs en pointillés se remplissent niveau par niveau, jusqu’à l’objset. Écrivez D3
           avant la première étape pour l’ajouter au même txg. Seul D3 est nouveau, car les blocs au-dessus de lui ont déjà
           été copiés pour D2.
         </p>
@@ -139,7 +139,7 @@ const L = {
       <div class="step">
         <h3>La racine</h3>
         <p class="prose">
-          L’uberblock est une petite structure. Parmi d’autres champs, il contient le txg qu’il valide, un horodatage et
+          L’uberblock est une petite structure. Entre autres champs, il contient le txg qu’il valide, un horodatage et
           un seul pointeur de bloc, <code>ub_rootbp</code>, vers le sommet de l’arbre.
         </p>
         <SourceNote lang={lang}>
@@ -177,7 +177,7 @@ const L = {
             notes={[
               { from: 2537, text: "Un bloc situé sous le niveau le plus haut de son objet a un bloc indirect parent." },
               { from: 2542, to: 2545, text: "Le parent est au niveau + 1, bloc <code>db_blkid &gt;&gt; epbs</code>, avec 2<sup>epbs</sup> pointeurs par bloc indirect (1024 pour 128 Kio). La figure en met 2, pour rester petite." },
-              { from: 2552, text: `Le parent est marqué à son tour, et ainsi de suite vers le haut. Le niveau le plus haut est tenu par le dnode, <a href="${L.setdirty}">marqué lui aussi</a> dans son propre bloc de dnodes. À la synchronisation, chaque bloc marqué est écrit à <a href="${L.newAddr}">un nouvel endroit</a>.` },
+              { from: 2552, text: `Le parent est marqué à son tour, et ainsi de suite vers le haut. Le niveau le plus haut est porté par le dnode, <a href="${L.setdirty}">marqué lui aussi</a> dans son propre bloc de dnodes. À la synchronisation, chaque bloc marqué est écrit à <a href="${L.newAddr}">un nouvel endroit</a>.` },
             ]}
           />
         </SourceNote>
@@ -200,7 +200,7 @@ const L = {
             to={1939}
             symbol="zio_write_compress"
             notes={[
-              { from: 1932, to: 1939, text: `L’écriture du parent s’arrête à cette étape jusqu’à ce que ses enfants soient prêts, puis la reprend. <code>dbuf_write</code> fait de l’écriture de chaque bloc <a href="${L.pio}">un enfant de celle de son parent</a>, et quand un enfant est prêt, <code>dbuf_write_ready</code> <a href="${L.ready}">copie son nouveau pointeur de bloc dans le parent</a>. L’arbre s’écrit en partant des données.` },
+              { from: 1932, to: 1939, text: `L’écriture du parent s’arrête à cette étape jusqu’à ce que ses enfants soient prêts, puis repasse par cette étape. <code>dbuf_write</code> fait de l’écriture de chaque bloc <a href="${L.pio}">un enfant de celle de son parent</a>, et quand un enfant est prêt, <code>dbuf_write_ready</code> <a href="${L.ready}">copie son nouveau pointeur de bloc dans le parent</a>. L’arbre s’écrit en partant des données.` },
             ]}
           />
         </SourceNote>
@@ -222,7 +222,7 @@ const L = {
             symbol="vdev_config_sync"
             notes={[
               { from: 2085, to: 2090, text: "Les blocs de ce txg doivent être sur un support stable « avant tout uberblock qui les référence » (notre traduction)." },
-              { from: 2093, to: 2098, text: `Chaque disque écrit dans ce txg est vidé, et l’attente les couvre tous. Viennent ensuite <a href="${L.even}">les labels pairs</a>, <a href="${L.ub}">les uberblocks</a> et <a href="${L.odd}">les labels impairs</a>. Les labels ne sont écrits que pour les <a href="${L.dirtyList}">vdevs dont la configuration a changé</a>.` },
+              { from: 2093, to: 2098, text: `Le cache de chaque disque écrit dans ce txg est vidé, et l’attente les couvre tous. Viennent ensuite <a href="${L.even}">les labels pairs</a>, <a href="${L.ub}">les uberblocks</a> et <a href="${L.odd}">les labels impairs</a>. Les labels ne sont écrits que pour les <a href="${L.dirtyList}">vdevs dont la configuration a changé</a>.` },
             ]}
           />
         </SourceNote>
@@ -232,7 +232,7 @@ const L = {
         <h3>Une nouvelle case à chaque txg</h3>
         <p class="prose">
           <code>vdev_uberblock_sync</code> choisit la case à partir du numéro de txg, si bien que le nouvel uberblock va
-          dans une autre case que celui que le pool utilise.
+          dans une autre case que celle que le pool utilise.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>vdev_uberblock_sync</code>, vdev_label.c</Fragment>
@@ -264,7 +264,7 @@ const L = {
             symbol="vdev_config_sync"
             notes={[
               { from: 2123, to: 2126, text: `Aucun nouvel uberblock n’est arrivé : le précédent gagne. Les labels pairs sont plus récents que lui, et l’import <a href="${L.readConfig}">lit le label le plus récent qui ne dépasse pas l’uberblock</a>, un label impair.` },
-              { from: 2128, to: 2131, text: "Un ou plusieurs sont arrivés : le nouvel uberblock gagne, et les labels pairs écrits juste avant lui correspondent." },
+              { from: 2128, to: 2131, text: "Un ou plusieurs sont arrivés : le nouvel uberblock gagne, et les labels pairs, écrits juste avant, lui correspondent." },
             ]}
           />
         </SourceNote>

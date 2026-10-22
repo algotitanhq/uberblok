@@ -62,10 +62,10 @@ const L = {
           Cuando el árbol nuevo está escrito, ZFS pide a los discos en los que ha escrito que vuelquen su caché de
           escritura, la memoria donde un disco guarda las escrituras antes de que lleguen a un almacenamiento estable.
           Después escribe un uberblock nuevo que apunta al árbol nuevo, y escribir ese uberblock es lo que hace pasar el
-          pool al árbol nuevo. El uberblock nuevo va a una ranura distinta de la del que está en uso, así que una
+          pool al árbol nuevo. El uberblock nuevo va a una ranura distinta de la que está en uso, así que una
           escritura cortada a medias no puede dañar el actual. Cada disco guarda cuatro copias de este anillo de ranuras.
           Al importar, ZFS lee todas las ranuras, descarta las que no pasan su suma de comprobación y se queda con la más
-          reciente. Esa apunta a un árbol completo, el antiguo o el nuevo.
+          reciente. Su uberblock apunta a un árbol completo, el antiguo o el nuevo.
         </p>
       </div>
     </header>
@@ -83,7 +83,7 @@ const L = {
         <p>
           Pulsa Paso siguiente. ZFS escribe los bloques nuevos de abajo arriba, un nivel por paso. Un bloque guarda las
           direcciones y sumas de comprobación nuevas de los bloques que tiene debajo, y solo se conocen cuando esos bloques
-          ya tienen sitio. Los punteros de puntos se rellenan nivel a nivel, hasta el objset. Escribe D3 antes del primer
+          ya tienen sitio. Los punteros punteados se rellenan nivel a nivel, hasta el objset. Escribe D3 antes del primer
           paso para añadirlo al mismo txg. Solo D3 es nuevo, porque los bloques que tiene encima ya se copiaron para D2.
         </p>
       </div>
@@ -98,15 +98,15 @@ const L = {
           pool y un anillo de ranuras de uberblock. Después del objset, sigue pulsando Paso siguiente: los cuatro pasos
           siguientes son la confirmación, y la figura los numera como fases 1 a 4. Primero, cada disco escrito en el txg
           vuelca su caché de escritura, para que el árbol nuevo esté en almacenamiento estable antes de que nada apunte a
-          él. Después las etiquetas pares, L0 y L2, reciben la configuración nueva. Después el uberblock va a la ranura
+          él. Después las etiquetas pares, L0 y L2, reciben la configuración nueva. Luego el uberblock va a la ranura
           siguiente de los cuatro anillos, y la flecha de arriba del árbol pasa al objset nuevo. Por último, las etiquetas
           impares, L1 y L3, reciben también la configuración nueva.
         </p>
         <p>
           Las etiquetas solo se reescriben en un txg que cambia la configuración, por ejemplo uno que añade un disco.
           Desactiva «La configuración de los vdevs cambia en este txg» antes del primer paso para ver un txg corriente, en
-          el que solo el uberblock es nuevo. Después de una importación la opción sigue activa para el txg siguiente,
-          porque ZFS reescribe todas las etiquetas cuando ha abierto el pool.
+          el que solo el uberblock es nuevo. Después de una importación, la opción sigue activa para el txg siguiente,
+          porque ZFS reescribe todas las etiquetas una vez abierto el pool.
         </p>
       </div>
     </section>
@@ -175,8 +175,8 @@ const L = {
             symbol="dbuf_dirty"
             notes={[
               { from: 2537, text: "Un bloque por debajo del nivel más alto de su objeto tiene un bloque indirecto padre." },
-              { from: 2542, to: 2545, text: "El padre está en el nivel + 1, bloque <code>db_blkid &gt;&gt; epbs</code>, con 2<sup>epbs</sup> punteros por bloque indirecto (1024 para 128 KiB). La figura usa 2, para seguir siendo pequeña." },
-              { from: 2552, text: `El padre se marca también, y así hacia arriba. El nivel más alto lo sostiene el dnode, que <a href="${L.setdirty}">se marca a su vez</a> en su propio bloque de dnodes. Al sincronizar, cada bloque marcado se escribe en <a href="${L.newAddr}">un lugar nuevo</a>.` },
+              { from: 2542, to: 2545, text: "El padre está en el nivel + 1, bloque <code>db_blkid &gt;&gt; epbs</code>, con 2<sup>epbs</sup> punteros por bloque indirecto (1024 para 128 KiB). La figura usa 2, para que siga siendo pequeña." },
+              { from: 2552, text: `El padre se marca también, y así hacia arriba. El nivel más alto está en el dnode, que <a href="${L.setdirty}">se marca a su vez</a> en su propio bloque de dnodes. Al sincronizar, cada bloque marcado se escribe en <a href="${L.newAddr}">un lugar nuevo</a>.` },
             ]}
           />
         </SourceNote>
@@ -199,7 +199,7 @@ const L = {
             to={1939}
             symbol="zio_write_compress"
             notes={[
-              { from: 1932, to: 1939, text: `La escritura del padre se detiene en esta etapa hasta que sus hijos están listos, y después la repite. <code>dbuf_write</code> hace de la escritura de cada bloque <a href="${L.pio}">una hija de la de su padre</a>, y cuando un hijo está listo, <code>dbuf_write_ready</code> <a href="${L.ready}">copia su puntero de bloque nuevo en el padre</a>. El árbol se escribe desde los datos hacia arriba.` },
+              { from: 1932, to: 1939, text: `La escritura del padre se detiene en esta etapa hasta que sus hijos están listos, y después la repite. <code>dbuf_write</code> convierte la escritura de cada bloque en <a href="${L.pio}">hija de la de su padre</a>, y cuando una escritura hija está lista, <code>dbuf_write_ready</code> <a href="${L.ready}">copia su puntero de bloque nuevo en el padre</a>. El árbol se escribe desde los datos hacia arriba.` },
             ]}
           />
         </SourceNote>
@@ -221,7 +221,7 @@ const L = {
             symbol="vdev_config_sync"
             notes={[
               { from: 2085, to: 2090, text: "Los bloques de este txg deben estar en almacenamiento estable «antes de cualquier uberblock que los referencie» (traducción nuestra)." },
-              { from: 2093, to: 2098, text: `Se vuelca cada disco escrito en este txg, y la espera los cubre a todos. Después vienen <a href="${L.even}">las etiquetas pares</a>, <a href="${L.ub}">los uberblocks</a> y <a href="${L.odd}">las etiquetas impares</a>. Las etiquetas solo se escriben para los <a href="${L.dirtyList}">vdevs cuya configuración ha cambiado</a>.` },
+              { from: 2093, to: 2098, text: `Se vuelca la caché de cada disco escrito en este txg, y la espera los cubre a todos. Después vienen <a href="${L.even}">las etiquetas pares</a>, <a href="${L.ub}">los uberblocks</a> y <a href="${L.odd}">las etiquetas impares</a>. Las etiquetas solo se escriben para los <a href="${L.dirtyList}">vdevs cuya configuración ha cambiado</a>.` },
             ]}
           />
         </SourceNote>
@@ -231,7 +231,7 @@ const L = {
         <h3>Una ranura nueva en cada txg</h3>
         <p class="prose">
           <code>vdev_uberblock_sync</code> elige la ranura a partir del número de txg, así que el uberblock nuevo va a una
-          ranura distinta de la del que usa el pool.
+          ranura distinta de la que usa el pool.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>vdev_uberblock_sync</code>, vdev_label.c</Fragment>
@@ -307,7 +307,7 @@ const L = {
         de primer nivel, un txg corriente escribe el uberblock en tres de ellos, elegidos al azar. El código lanza a la vez
         las escrituras de una misma fase de la confirmación. La figura las hace llegar en orden y rompe la que está en
         curso al desenchufar. Deja fuera el contenido de la configuración, los reintentos, multihost, la expansión de
-        RAID-Z, las varias pasadas de sincronización de un txg y la liberación de los bloques antiguos, que muestra la
+        RAID-Z, las múltiples pasadas de sincronización de un txg y la liberación de los bloques antiguos, que muestra la
         <a href={roomUrl(lang, "snapshots")}>sala de las instantáneas</a>. La vista 3D dibuja el mismo estado que la 2D.
       </p>
     </section>

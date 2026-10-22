@@ -97,12 +97,12 @@ const S0 = {
     rRepaired: "Written back with the good data: {cols}.",
     rParityChecked: "The parity read but not used is regenerated and compared: it is right.",
     rUndetected:
-      "Wrong parity remains in {cols}: this read did not need it and did not check it. A scrub reads every column and would.",
+      "Wrong parity remains in {cols}: this read did not need it and did not check it. A scrub reads every column and would find it.",
     rFail: "No combination verifies: the read fails with a checksum error.",
     rFailTooMany: "The read fails.",
     resilverYes: "Resilver of {list}: this block is rewritten, it touches a child that missed writes.",
     resilverAll: "Resilver of {list}: this block is rewritten, it spans every child.",
-    resilverNo: "Resilver of {list}: this block is skipped, none of the s + nparity children from f on missed writes.",
+    resilverNo: "Resilver of {list}: this block is skipped, since none of the children it covers (s + nparity of them, from column f on) missed writes.",
     attemptsMore: "… {n} more combinations …",
   },
   fr: {
@@ -163,8 +163,8 @@ const S0 = {
     rMissing: "{cols} : l’enfant ne peut pas être lu (ENXIO).",
     rFirst: "La lecture ne demande que les colonnes de données : {cols}. La parité n’est pas lue.",
     rFirstParity: "Une colonne de données manque, la lecture demande donc aussi la parité : {cols}.",
-    rKnownOk: "{cols} reconstruite à partir de {parity}.",
-    rKnownBad: "{cols} reconstruite à partir de {parity}, mais l’une des colonnes utilisées est fausse.",
+    rKnownOk: "Reconstruction de {cols} à partir de {parity}.",
+    rKnownBad: "Reconstruction de {cols} à partir de {parity}, mais l’une des colonnes utilisées est fausse.",
     rCksumOk: "La somme de contrôle du pointeur de bloc parent est vérifiée.",
     rCksumBad: "La somme de contrôle du pointeur de bloc parent échoue, et aucun enfant n’a signalé d’erreur qui l’explique.",
     rTooMany: "{n} enfants manquent ; raidz{np} en reconstruit au plus {np}.",
@@ -174,21 +174,21 @@ const S0 = {
     aTry: "{tgts} :",
     aNotInStripe: "aucune colonne de ce bloc là, rien à reconstruire,",
     aParityOnly: "seulement de la parité ({cols}), rien à reconstruire,",
-    aRebuilt: "{cols} reconstruite à partir de {parity},",
+    aRebuilt: "reconstruction de {cols} à partir de {parity},",
     aOk: "la somme de contrôle est vérifiée.",
     aCksum: "la somme de contrôle échoue.",
     aEinval: "{tgts} : avec les erreurs connues, {dead} colonnes mortes, plus que {np} : EINVAL, essayer une panne de plus.",
     rOk: "Le bloc est rendu.",
     rFound: "Trouvé à l’essai {k} : {tgts}. Le bloc est rendu.",
-    rRepaired: "Réécrites avec les bonnes données : {cols}.",
+    rRepaired: "Réécriture avec les bonnes données : {cols}.",
     rParityChecked: "La parité lue mais pas utilisée est régénérée et comparée : elle est juste.",
     rUndetected:
-      "{cols} contient toujours une parité fausse : cette lecture n’en avait pas besoin et ne l’a pas vérifiée. Un scrub lit toutes les colonnes et la trouverait.",
+      "Il reste une parité fausse dans {cols} : cette lecture n’en avait pas besoin et ne l’a pas vérifiée. Un scrub lit toutes les colonnes et la trouverait.",
     rFail: "Aucune combinaison n’est vérifiée : la lecture échoue sur une erreur de somme de contrôle.",
     rFailTooMany: "La lecture échoue.",
     resilverYes: "Resilver ({list}) : ce bloc est réécrit, il touche un enfant qui a manqué des écritures.",
     resilverAll: "Resilver ({list}) : ce bloc est réécrit, il couvre tous les enfants.",
-    resilverNo: "Resilver ({list}) : ce bloc est sauté, aucun des s + nparity enfants à partir de f n’a manqué d’écriture.",
+    resilverNo: "Resilver ({list}) : ce bloc est sauté, car aucun des enfants qu’il couvre (s + nparity, à partir de la colonne f) n’a manqué d’écriture.",
     attemptsMore: "… {n} autres combinaisons …",
   },
   es: {
@@ -274,7 +274,7 @@ const S0 = {
     rFailTooMany: "La lectura falla.",
     resilverYes: "Resilver de {list}: este bloque se reescribe, toca un hijo al que le faltan escrituras.",
     resilverAll: "Resilver de {list}: este bloque se reescribe, abarca todos los hijos.",
-    resilverNo: "Resilver de {list}: este bloque se omite, a ninguno de los s + nparity hijos a partir de f le faltan escrituras.",
+    resilverNo: "Resilver de {list}: este bloque se omite, porque a ninguno de los hijos que cubre (s + nparity, desde la columna f) le faltan escrituras.",
     attemptsMore: "… {n} combinaciones más …",
   },
 }[lang];
@@ -409,6 +409,7 @@ const SIZES = [4096, 8192, 32768, 131072];
 
     const val = (n: string) => Number((form.elements.namedItem(n) as HTMLInputElement | RadioNodeList).value);
     const input = (n: string) => form.elements.namedItem(n) as HTMLInputElement;
+    let startB = val("b"); // the reader's own first sector, restored by Clear
 
     function inputs() {
       const nparity = val("nparity");
@@ -548,6 +549,7 @@ const SIZES = [4096, 8192, 32768, 131072];
       e.innerHTML = s.html;
       e.className = [s.kind, s.tone ?? ""].join(" ").trim();
       steps.append(e);
+      e.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
       for (const old of steps.querySelectorAll("li.current")) old.classList.remove("current");
       e.classList.add("current");
       live.textContent = e.textContent ?? "";
@@ -577,8 +579,10 @@ const SIZES = [4096, 8192, 32768, 131072];
     form.addEventListener("input", draw);
     form.addEventListener("change", draw);
     for (const btn of root.querySelectorAll<HTMLButtonElement>("[data-size]")) btn.addEventListener("click", () => write(Number(btn.dataset.size)));
+    input("b").addEventListener("input", () => (startB = val("b")));
     q("[data-act=clear]").addEventListener("click", () => {
       olderSizes = [];
+      input("b").value = String(startB);
       draw();
     });
     readBtn.addEventListener("click", next);

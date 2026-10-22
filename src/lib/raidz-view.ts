@@ -75,7 +75,7 @@ export function summary(L: Layout, S: RzStrings, lang: string, name = "A"): stri
 }
 
 /** The rows the map shows at most: older blocks scroll off the top past this. */
-export const MAX_ROWS = 30;
+export const MAX_ROWS = 24;
 
 /**
  * The map: one column per child, one row per sector, a context row above and
@@ -92,7 +92,8 @@ export function grid(L: Layout, S: RzStrings, older: Layout[] = []): string {
   // The live block is always drawn whole; older blocks may be cut at the top.
   const first = Math.min(Math.max(0, L.o - 1), Math.max(lo, last - MAX_ROWS));
   const nrows = last - first;
-  const dense = nrows > 26;
+  // Labels go only when the live block alone is too tall; older blocks are cut instead.
+  const dense = last - Math.max(0, L.o - 1) > 26;
   type Cell = { cls: string; label: string; order?: number; c?: number; block?: string };
   const cells: (Cell | null)[][] = Array.from({ length: L.dcols }, () => Array(nrows).fill(null));
   const put = (dev: number, row: number, cell: Cell) => {

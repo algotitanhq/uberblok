@@ -36,7 +36,7 @@ const T = {
     rzrows: [
       "The block, A0 and A1 with their parity PA, has a stripe of its own.",
       "The new version, B0 and B1 with PB, goes to free space, with parity computed from it alone. The power fails before B1 is written.",
-      "The last committed uberblock still points to the old block, which nothing has touched. Nothing points to the half-written stripe, so its space is free again.",
+      "The last committed uberblock still points to the old block, which nothing has touched. Nothing points to the half-written stripe, and its space was never recorded as used, so it is still free.",
       "Disk 2 dies. A1 is rebuilt from PA and A0, and it is right, because PA was written with A0 and A1 and has not changed since.",
     ],
   },
@@ -52,18 +52,18 @@ const T = {
     r5rows: [
       "D1 partage une bande avec D0 et D2. P est la parité des trois.",
       "D1′ est écrit par-dessus D1. Il faudrait écrire P′ aussi, et le courant est coupé avant.",
-      "P contient toujours la parité de l’ancien D1 : elle ne correspond plus à D0, D1′ et D2. Rien sur le disque ne le note.",
+      "P contient toujours la parité de l’ancien D1 : elle ne correspond plus à D0, D1′ et D2. Rien sur le disque ne l’enregistre.",
       "Le disque 0 meurt. D0 est reconstruit à partir de P, D1′ et D2, et il est faux. Aucune erreur n’est signalée.",
     ],
     rzrows: [
       "Le bloc, A0 et A1 avec leur parité PA, a sa propre bande.",
       "La nouvelle version, B0 et B1 avec PB, va dans de l’espace libre, avec une parité calculée à partir d’elle seule. Le courant est coupé avant l’écriture de B1.",
-      "Le dernier uberblock validé désigne toujours l’ancien bloc, auquel rien n’a touché. Rien ne désigne la bande à moitié écrite : son espace redevient libre.",
+      "Le dernier uberblock validé désigne toujours l’ancien bloc, auquel rien n’a touché. Rien ne désigne la bande à moitié écrite, et son espace n’a jamais été noté comme occupé : il est toujours libre.",
       "Le disque 2 meurt. A1 est reconstruit à partir de PA et A0, et il est juste : PA a été écrite avec A0 et A1 et n’a pas changé depuis.",
     ],
   },
   es: {
-    figure: "El agujero de escritura («write hole») y por qué RAID-Z no lo tiene",
+    figure: "El agujero de escritura y por qué RAID-Z no lo tiene",
     r5: "RAID-5: la banda se actualiza en su sitio",
     rz: "RAID-Z: la versión nueva recibe una banda nueva",
     back: "Atrás",
@@ -80,7 +80,7 @@ const T = {
     rzrows: [
       "El bloque, A0 y A1 con su paridad PA, tiene su propia banda.",
       "La versión nueva, B0 y B1 con PB, va al espacio libre, con la paridad calculada solo a partir de ella. La corriente se va antes de que se escriba B1.",
-      "El último uberblock confirmado sigue apuntando al bloque antiguo, que nadie ha tocado. Nada apunta a la banda a medio escribir, así que su espacio vuelve a estar libre.",
+      "El último uberblock confirmado sigue apuntando al bloque antiguo, que nadie ha tocado. Nada apunta a la banda a medio escribir y su espacio nunca se registró como ocupado, así que sigue libre.",
       "Muere el disco 2. A1 se reconstruye a partir de PA y A0, y sale bien, porque PA se escribió con A0 y A1 y no ha cambiado desde entonces.",
     ],
   },
@@ -107,14 +107,15 @@ const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
   <div class="wh-nav" hidden>
     <button class="btn" type="button" data-act="back">{f(T.back)}</button>
     <button class="btn btn--primary" type="button" data-act="next">{f(T.next)}</button>
-    <p class="muted" data-at aria-live="polite"></p>
+    <p class="muted" data-at></p>
+    <p class="visually-hidden" data-said aria-live="polite"></p>
   </div>
   <div class="side">
     <h3>{f(T.r5)}</h3>
     <ol>
       {
         r5.map((row, i) => (
-          <li data-step={i}>
+          <li data-step={i} data-caption={`${f(T.r5)}. ${f(T.steps[i])}. ${f(row.caption)}`}>
             <div class="disks" aria-hidden="true">
               {row.cells.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
             </div>
@@ -129,7 +130,7 @@ const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
     <ol>
       {
         rz.map((row, i) => (
-          <li data-step={i}>
+          <li data-step={i} data-caption={`${f(T.rz)}. ${f(row.caption)}`}>
             <div class="disks two" aria-hidden="true">
               {row.old.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
               {row.neu.map(([l, k]) => <span class={`c ${k}`}>{l}</span>)}
@@ -152,24 +153,30 @@ const rz: { caption: string; old: Cell[]; neu: Cell[] }[] = [
     const back = fig.querySelector<HTMLButtonElement>("[data-act=back]")!;
     const next = fig.querySelector<HTMLButtonElement>("[data-act=next]")!;
     const at = fig.querySelector<HTMLElement>("[data-at]")!;
+    const said = fig.querySelector<HTMLElement>("[data-said]")!;
     let step = 0;
-    const draw = () => {
+    const draw = (announce = false) => {
       for (const r of rows) {
         const i = Number(r.dataset.step);
         r.hidden = i > step;
         r.classList.toggle("now", i === step);
       }
+      // Back would disable itself under the reader's focus on step 1: hand focus to Next first.
+      if (step === 0 && document.activeElement === back) next.focus();
       back.disabled = step === 0;
       next.textContent = step === n - 1 ? fig.dataset.again! : fig.dataset.next!;
-      at.textContent = fill(fig.dataset.stepOf!, { i: step + 1, n });
+      const where = fill(fig.dataset.stepOf!, { i: step + 1, n });
+      // The live region reads the two captions that just appeared, not only the step number.
+      at.textContent = where;
+      if (announce) said.textContent = `${where}. ${rows.filter((r) => r.classList.contains("now")).map((r) => r.dataset.caption).join(" ")}`;
     };
     back.addEventListener("click", () => {
       step = Math.max(0, step - 1);
-      draw();
+      draw(true);
     });
     next.addEventListener("click", () => {
       step = step === n - 1 ? 0 : step + 1;
-      draw();
+      draw(true);
     });
     draw();
     fig.querySelector<HTMLElement>(".wh-nav")!.hidden = false;

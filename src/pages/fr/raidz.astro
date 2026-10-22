@@ -51,28 +51,22 @@ const L = {
       <h1>Que se passe-t-il quand un disque de mon RAID-Z lâche ?</h1>
       <div class="prose answer">
         <p class="lead">
-          Une grappe RAID-5 découpe ses disques en bandes fixes. Chaque bande contient des données et leur parité, des
-          secteurs calculés à partir de ces données, qui permettent de reconstruire n’importe quel morceau manquant à
+          Une grappe RAID-5 découpe ses disques en bandes fixes, des rangées qui traversent tous les disques. Chaque bande contient des données et leur parité, des blocs calculés à partir de ces données, qui permettent de reconstruire n’importe quel morceau manquant à
           partir des autres. Pour modifier une partie d’une bande, la grappe écrit les nouvelles données, puis la nouvelle
-          parité, sur place. Si le courant tombe entre ces deux écritures, la parité ne correspond plus aux données, et
-          rien ne le note. Le dégât apparaît bien plus tard, quand un disque meurt et que son contenu est reconstruit à
+          parité, sur place. Si le courant tombe entre ces deux écritures, la parité ne correspond plus aux données, et rien ne l’enregistre. Les dégâts apparaissent bien plus tard, quand un disque meurt et que son contenu est reconstruit à
           partir de cette parité : les données reconstruites sont fausses, et aucune erreur n’est signalée. C’est ce
           qu’on appelle le trou d’écriture.
         </p>
         <p>
           Quand des données changent, RAID-Z ne met jamais une bande à jour sur place. Chaque bloc que ZFS écrit reçoit
           sa propre bande, répartie sur autant de disques que le bloc en a besoin, avec une parité calculée à partir de ce
-          seul bloc. Un petit bloc occupe deux ou trois disques, un gros les occupe tous. Comme toute écriture de ZFS, la
+          seul bloc. Le plus petit bloc occupe un disque pour ses données et un de plus par niveau de parité. Un gros bloc les occupe tous. Comme toute écriture de ZFS, la
           bande va dans l’espace libre, et l’ancienne version du bloc reste où elle était jusqu’à ce que le pool soit
           passé à la nouvelle. Une coupure de courant peut laisser une bande à moitié écrite, mais rien ne pointe vers
           elle.
         </p>
         <p>
-          Quand un disque meurt, ZFS lit la parité de chaque bloc et reconstruit la partie manquante. Un disque peut
-          aussi rendre des données fausses sans signaler d’erreur, et la parité seule ne dit pas lequel. La somme de
-          contrôle rangée avec le pointeur de chaque bloc, elle, le peut. ZFS suppose qu’un disque est faux, puis un
-          autre, reconstruit le bloc à chaque fois et garde la version qui correspond à la somme. Il réécrit ensuite la
-          bonne donnée sur le disque fautif.
+          Quand un disque meurt, ZFS reconstruit chaque bloc qui avait des données dessus : il lit la parité de ce bloc avec le reste et recalcule la partie manquante. Un disque peut aussi rendre des données fausses sans signaler d’erreur. La parité seule ne dit pas lequel, mais la somme de contrôle que ZFS range avec le pointeur de chaque bloc le dit. ZFS suppose qu’un disque est en tort, puis un autre, reconstruit le bloc à chaque fois et garde la version qui correspond à la somme. Il réécrit ensuite la bonne donnée sur le disque qui l’avait rendue fausse.
         </p>
       </div>
     </header>
@@ -89,15 +83,13 @@ const L = {
           disposés à nouveau.
         </p>
         <p>
-          Les secteurs hachurés sont du bourrage. RAID-Z arrondit chaque bloc à un multiple de parité + 1 secteurs, pour
-          ne laisser entre deux blocs aucun trou trop petit pour servir. C’est pourquoi un bloc de 8 Kio coûte autant de
-          place, sur ce groupe, que 16 Kio de données.
+          Les secteurs hachurés sont du bourrage. RAID-Z arrondit chaque bloc à un multiple de parité + 1 secteurs (3 en raidz2), pour
+          ne laisser entre deux blocs aucun trou trop petit pour servir. C’est pourquoi, sur ce groupe, un bloc de 8 Kio occupe 24 Kio sur les disques, autant qu’un bloc de 16 Kio.
         </p>
         <p>
-          Abîmez ensuite des disques à côté de la carte et relisez le dernier bloc, une étape à chaque clic. Avec un
-          disque absent, la lecture demande la parité et reconstruit cette colonne. Avec un disque qui rend des données
+          Abîmez ensuite des disques à côté de la carte et relisez le dernier bloc, une étape à chaque clic. Si le disque absent porte une colonne de données, la lecture demande la parité et reconstruit cette colonne. Avec un disque qui rend des données
           fausses, la première vérification échoue, ZFS lit toutes les colonnes, et la figure montre chaque hypothèse à
-          son tour jusqu’à ce que l’une d’elles soit vérifiée.
+          son tour jusqu’à ce que la somme de contrôle concorde.
         </p>
       </div>
       <RaidzMap lang={lang} />
@@ -113,8 +105,7 @@ const L = {
           redémarrage, l’ancien bloc est entier, et quand un disque meurt, sa part est reconstruite correctement.
         </p>
         <p>
-          Le code de RAID-Z ne fait que la moitié du travail : il écrit des bandes entières et ne relit ni ne réécrit
-          jamais une ancienne. L’autre moitié, c’est la <a href={roomUrl(lang, "copy-on-write")}>copie sur écriture</a>
+          Le code de RAID-Z ne fait que la moitié du travail. Quand un bloc change, il écrit la nouvelle version dans une bande entière et neuve, sans relire ni modifier l’ancienne. L’autre moitié, c’est la <a href={roomUrl(lang, "copy-on-write")}>copie sur écriture</a>
           et la validation du <a href={roomUrl(lang, "txg")}>groupe de transactions</a>, qui garantissent qu’aucun
           pointeur n’atteint une bande avant qu’elle soit entièrement sur le disque.
         </p>
@@ -192,8 +183,7 @@ const L = {
       <div class="step">
         <h3>Ne lire que les colonnes de données</h3>
         <p class="prose">
-          Une lecture normale d’un bloc sain demande ses colonnes de données et rien d’autre. La parité n’est lue que
-          s’il manque une colonne de données, ou par un scrub ou un resilver. Un disque qui porte une parité fausse passe
+          Une lecture normale d’un bloc sain demande ses colonnes de données et rien d’autre. La parité n’est lue que s’il manque une colonne de données, ou par un scrub (la vérification de tous les blocs du pool) ou un resilver (la remise à jour d’un disque qui a manqué des écritures). Un disque qui porte une parité fausse passe
           donc inaperçu jusqu’à ce que l’une de ces lectures la lise.
         </p>
         <SourceNote lang={lang}>
@@ -223,7 +213,7 @@ const L = {
       <div class="step">
         <h3>Trouver le disque qui ment</h3>
         <p class="prose">
-          Chaque lecture se termine par la somme de contrôle rangée dans le pointeur de bloc du parent. Quand elle
+          Chaque lecture se termine par la vérification du bloc avec la somme de contrôle rangée dans le pointeur de bloc de son parent. Quand elle
           échoue sans qu’aucun disque ait signalé d’erreur, ZFS lit toutes les colonnes et appelle
           <code>vdev_raidz_combrec</code>. La fonction suppose qu’un enfant est faux, puis deux, jusqu’au nombre de
           parités, et essaie chaque combinaison à son tour.
@@ -258,7 +248,7 @@ const L = {
       </div>
 
       <div class="step">
-        <h3>Ne resilvériser que le nécessaire</h3>
+        <h3>Un resilver limité au nécessaire</h3>
         <p class="prose">
           Quand un disque revient après avoir manqué des écritures, un resilver ne copie pas tout le disque. Il parcourt
           l’arbre des blocs, saute ceux écrits pendant que tous les disques étaient là, et demande au vdev si chacun des
@@ -300,8 +290,7 @@ const L = {
         faux de chaque colonne, pas ses octets. Elle laisse de côté les disques qui ont manqué des écritures (lus comme
         périmés, pas absents), les disques lents évités exprès, les blocs gang, le chemin du scrub et dRAID. Les blocs
         s’arrêtent à 128 Kio et les groupes à 16 disques, pour que la carte reste lisible. L’extension de RAID-Z, qui
-        ajoute un disque à un groupe existant et donne aux anciens blocs des cartes de plusieurs lignes, est gardée pour
-        une autre fois.
+        ajoute un disque à un groupe existant et donne aux anciens blocs des cartes de plusieurs lignes, est laissée pour une autre fois.
       </p>
     </section>
   </article>

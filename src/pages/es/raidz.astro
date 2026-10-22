@@ -51,8 +51,7 @@ const L = {
       <h1>¿Qué pasa cuando falla un disco de mi RAID-Z?</h1>
       <div class="prose answer">
         <p class="lead">
-          Un conjunto RAID-5 divide sus discos en bandas fijas. Cada banda guarda unos datos y su paridad, unos sectores
-          calculados a partir de esos datos que permiten reconstruir cualquier pieza que falte a partir de las demás.
+          Un conjunto RAID-5 divide sus discos en bandas fijas, filas que atraviesan todos los discos. Cada banda guarda unos datos y su paridad, unos bloques calculados a partir de esos datos que permiten reconstruir cualquier pieza que falte a partir de las demás.
           Para cambiar una parte de una banda, el conjunto escribe los datos nuevos y después la paridad nueva, en su
           sitio. Si la corriente se va entre esas dos escrituras, la paridad deja de coincidir con los datos y nada lo
           registra. El daño aparece mucho después, cuando muere un disco y su contenido se reconstruye a partir de esa
@@ -62,16 +61,13 @@ const L = {
         <p>
           Cuando los datos cambian, RAID-Z nunca actualiza una banda en su sitio. Cada bloque que ZFS escribe recibe su
           propia banda, repartida en tantos discos como necesite el bloque, con la paridad calculada solo a partir de ese
-          bloque. Un bloque pequeño ocupa dos o tres discos y uno grande los ocupa todos. Como toda escritura en ZFS, la
+          bloque. El bloque más pequeño ocupa un disco para sus datos y uno más por cada nivel de paridad. Uno grande los ocupa todos. Como toda escritura en ZFS, la
           banda va a espacio libre, y la versión antigua del bloque se queda donde estaba hasta que el pool ha pasado a
           la nueva. Un corte de corriente puede dejar una banda a medio escribir, pero nada apunta a ella.
         </p>
         <p>
-          Cuando muere un disco, ZFS lee la paridad de cada bloque y reconstruye la parte que falta. Un disco también
-          puede devolver datos erróneos sin informar de ningún error, y la paridad sola no dice cuál es. La suma de
-          comprobación guardada con el puntero a cada bloque sí puede. ZFS supone que un disco está mal, después otro,
-          reconstruye el bloque cada vez y se queda con la versión que coincide con la suma. Después escribe los datos
-          buenos en el disco que mintió.
+          Cuando muere un disco, ZFS reconstruye cada bloque que tenía datos en él: lee la paridad de ese bloque junto con el resto y recalcula la parte que falta. Un disco también puede devolver datos erróneos sin informar de ningún error. La paridad sola no dice cuál es, pero la suma de comprobación que ZFS guarda con el puntero a cada bloque sí lo dice. ZFS supone que un disco está mal, después otro,
+          reconstruye el bloque cada vez y se queda con la versión que coincide con la suma. Después escribe los datos buenos en el disco que los devolvió erróneos.
         </p>
       </div>
     </header>
@@ -88,15 +84,12 @@ const L = {
           nuevo.
         </p>
         <p>
-          Los sectores rayados son relleno. RAID-Z redondea cada bloque a un múltiplo de paridad + 1 sectores, para no
-          dejar entre dos bloques ningún hueco demasiado pequeño para usarse. Por eso, en este grupo, un bloque de 8 KiB
-          ocupa tanto espacio como 16 KiB de datos.
+          Los sectores rayados son relleno. RAID-Z redondea cada bloque a un múltiplo de paridad + 1 sectores (3 en raidz2), para no
+          dejar entre dos bloques ningún hueco demasiado pequeño para usarse. Por eso, en este grupo, un bloque de 8 KiB ocupa 24 KiB en disco, lo mismo que un bloque de 16 KiB.
         </p>
         <p>
-          Después daña discos junto al mapa y vuelve a leer el último bloque, un paso por cada clic. Con un disco ausente,
-          la lectura pide la paridad y reconstruye esa columna. Con un disco que devuelve datos erróneos, la primera
-          comprobación falla, ZFS lee todas las columnas y la figura muestra cada hipótesis por turno hasta que una se
-          verifica.
+          Después daña discos junto al mapa y vuelve a leer el último bloque, un paso por cada clic. Si el disco ausente tiene una columna de datos, la lectura pide la paridad y reconstruye esa columna. Con un disco que devuelve datos erróneos, la primera
+          comprobación falla, ZFS lee todas las columnas y la figura muestra cada hipótesis por turno hasta que una cuadra con la suma de comprobación.
         </p>
       </div>
       <RaidzMap lang={lang} />
@@ -108,12 +101,11 @@ const L = {
         <p>
           Avanza por los dos lados a la vez. A la izquierda, RAID-5 escribe D1′ sobre D1 y la corriente se va antes de
           que se escriba la paridad nueva. Nada parece ir mal hasta que muere el disco 0 y D0 se reconstruye a partir de
-          la paridad caducada. A la derecha, RAID-Z escribe la versión nueva en espacio libre. Tras el reinicio, el
+          la paridad obsoleta. A la derecha, RAID-Z escribe la versión nueva en espacio libre. Tras el reinicio, el
           bloque antiguo está entero, y cuando muere un disco su parte se reconstruye bien.
         </p>
         <p>
-          El código de RAID-Z solo hace la mitad del trabajo: escribe bandas enteras y nunca lee ni reescribe una
-          antigua. La otra mitad la hacen la <a href={roomUrl(lang, "copy-on-write")}>copia en escritura</a> y la
+          El código de RAID-Z solo hace la mitad del trabajo. Cuando un bloque cambia, escribe la versión nueva en una banda entera y nueva, sin leer ni modificar la antigua. La otra mitad la hacen la <a href={roomUrl(lang, "copy-on-write")}>copia en escritura</a> y la
           confirmación del <a href={roomUrl(lang, "txg")}>grupo de transacciones</a>, que garantizan que ningún puntero
           llega a una banda antes de que esté entera en el disco.
         </p>
@@ -191,8 +183,7 @@ const L = {
       <div class="step">
         <h3>Leer solo las columnas de datos</h3>
         <p class="prose">
-          Una lectura normal de un bloque sano pide sus columnas de datos y nada más. La paridad solo se lee si falta una
-          columna de datos, o en un scrub o un resilver. Así que un disco con paridad errónea pasa desapercibido hasta
+          Una lectura normal de un bloque sano pide sus columnas de datos y nada más. La paridad solo se lee si falta una columna de datos, o en un scrub (la comprobación de todos los bloques del pool) o un resilver (la puesta al día de un disco al que le faltan escrituras). Así que un disco con paridad errónea pasa desapercibido hasta
           que una de esas lecturas la lee.
         </p>
         <SourceNote lang={lang}>
@@ -222,7 +213,7 @@ const L = {
       <div class="step">
         <h3>Encontrar el disco que miente</h3>
         <p class="prose">
-          Toda lectura acaba con la suma de comprobación guardada en el puntero de bloque del padre. Cuando falla sin que
+          Toda lectura acaba verificando el bloque con la suma de comprobación guardada en el puntero de bloque de su padre. Cuando falla sin que
           ningún disco haya informado de un error, ZFS lee todas las columnas y llama a <code>vdev_raidz_combrec</code>.
           La función supone que un hijo está mal, después dos, hasta el número de paridades, y prueba cada combinación
           por turno.
@@ -296,8 +287,7 @@ const L = {
         paridad y la primera columna de datos intercambian sus discos en uno de cada dos megabytes del vdev. Pon el primer
         sector en 256 con sectores de 4 KiB para verlo. La lectura sigue las decisiones del código (qué columnas se leen,
         qué paridad reconstruye qué, el orden de las hipótesis, qué se reescribe), pero solo sigue si cada columna está
-        bien o mal, no sus bytes. Deja fuera los discos a los que les faltan escrituras (se leen como caducados, no como
-        ausentes), los discos lentos que se evitan a propósito, los bloques gang, el camino del scrub y dRAID. Los bloques
+        bien o mal, no sus bytes. Deja fuera los discos a los que les faltan escrituras (se leen como desfasados, no como ausentes), los discos lentos que se evitan a propósito, los bloques gang, el camino del scrub y dRAID. Los bloques
         llegan como mucho a 128 KiB y los grupos a 16 discos, para que el mapa siga siendo legible. La expansión de
         RAID-Z, que añade un disco a un grupo existente y da a los bloques antiguos mapas de varias filas, queda para otra
         ocasión.

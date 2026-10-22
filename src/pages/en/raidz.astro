@@ -51,8 +51,7 @@ const L = {
       <h1>What happens when a disk in my RAID-Z fails?</h1>
       <div class="prose answer">
         <p class="lead">
-          A RAID-5 array cuts its disks into fixed stripes. Each stripe holds some data and its parity, extra sectors
-          computed from that data, so that any one missing piece can be rebuilt from the others. To change part of a stripe, the
+          A RAID-5 array cuts its disks into fixed stripes, rows that run across all the disks. Each stripe holds some data and its parity, extra blocks computed from that data, so that any one missing piece can be rebuilt from the others. To change part of a stripe, the
           array writes the new data and then the new parity, in place. If the power fails between those two writes, the
           parity no longer matches the data, and nothing records that. The damage shows much later, when a disk dies
           and its contents are rebuilt from that parity: the rebuilt data is wrong, and no error is reported. This is
@@ -60,16 +59,13 @@ const L = {
         </p>
         <p>
           When data changes, RAID-Z never updates a stripe in place. Each block ZFS writes gets a stripe of its own, cut
-          across as many disks as the block needs, with parity computed from that block alone. A small block takes two or three
-          disks and a large one takes them all. Like every write in ZFS, the stripe goes to free space, and the old
+          across as many disks as the block needs, with parity computed from that block alone. The smallest block takes one disk for its data and one more for each level of parity. A large block takes them all. Like every write in ZFS, the stripe goes to free space, and the old
           version of the block stays where it was until the pool has switched to the new one. A power failure can leave
           a half-written stripe, but nothing points to it.
         </p>
         <p>
-          When a disk dies, ZFS reads the parity of each block and rebuilds the missing part. A disk can also return
-          wrong data without reporting an error, and parity alone cannot say which disk that is. The checksum stored
-          with the pointer to each block can. ZFS assumes one disk is wrong, then another, rebuilds the block each time,
-          and keeps the version that matches the checksum. Then it writes the good data back to the disk that lied.
+          When a disk dies, ZFS rebuilds each block that had data on it: it reads that block's parity along with the rest and recomputes the missing part. A disk can also return wrong data without reporting an error. Parity alone cannot say which disk that is, but the checksum that ZFS stores with the pointer to each block can. ZFS assumes one disk is wrong, then another, rebuilds the block each time,
+          and keeps the version that matches the checksum. Then it writes the good data back to the disk that returned the wrong data.
         </p>
       </div>
     </header>
@@ -85,13 +81,11 @@ const L = {
           disks or the parity, and every block is laid out again.
         </p>
         <p>
-          The hatched sectors are padding. RAID-Z rounds each block up to a multiple of parity + 1 sectors, so that no
-          gap too small to use is left between two blocks. That is why an 8 KiB block on this group costs as much space
-          as 16 KiB of data.
+          The hatched sectors are padding. RAID-Z rounds each block up to a multiple of parity + 1 sectors (3 on a raidz2), so that no
+          gap too small to use is left between two blocks. That is why an 8 KiB block on this group takes 24 KiB on disk, as much as a 16 KiB block.
         </p>
         <p>
-          Then damage the disks beside the map and read the last block back, one step per press. With a disk missing, the
-          read asks for parity and rebuilds that column. With a disk that returns bad data, the first checksum fails,
+          Then damage the disks beside the map and read the last block back, one step per press. If the missing disk holds a data column, the read asks for parity and rebuilds that column. With a disk that returns bad data, the first checksum fails,
           ZFS reads every column, and the figure shows each guess in turn until one verifies.
         </p>
       </div>
@@ -108,7 +102,7 @@ const L = {
           part is rebuilt correctly.
         </p>
         <p>
-          The RAID-Z code only does half of this: it writes whole stripes and never reads or rewrites an old one. The
+          The RAID-Z code only does half of this. When a block changes, it writes the new version as a whole new stripe and never reads or modifies the old one. The
           other half is <a href={roomUrl(lang, "copy-on-write")}>copy-on-write</a> and the
           <a href={roomUrl(lang, "txg")}>transaction group</a> commit, which make sure no pointer reaches a stripe before
           all of it is on disk.
@@ -187,8 +181,7 @@ const L = {
       <div class="step">
         <h3>Reading the data columns only</h3>
         <p class="prose">
-          A normal read of a healthy block asks for its data columns and nothing else. Parity is read only when a data
-          column is missing, or by a scrub or a resilver. So a disk that holds bad parity goes unnoticed until one of
+          A normal read of a healthy block asks for its data columns and nothing else. Parity is read only when a data column is missing, or by a scrub (a check of every block in the pool) or a resilver (the rebuild of a disk that missed writes). So a disk that holds bad parity goes unnoticed until one of
           those reads it.
         </p>
         <SourceNote lang={lang}>
@@ -218,7 +211,7 @@ const L = {
       <div class="step">
         <h3>Finding the disk that lies</h3>
         <p class="prose">
-          Every read ends with the checksum stored in the parent's block pointer. When it fails and no disk reported an
+          Every read ends by checking the block against the checksum stored in its parent's block pointer. When it fails and no disk reported an
           error, ZFS reads every column and calls <code>vdev_raidz_combrec</code>. The function
           assumes one child is wrong, then two, up to the parity count, and tries each combination in turn.
         </p>

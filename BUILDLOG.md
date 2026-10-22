@@ -1888,3 +1888,43 @@ beacon, otherwise 0/44, both exit 0; `check-csp` passes on both. Release build s
 `_headers`, 44 pages in Chromium: the CSP header on all 44, 0 `securitypolicyviolation`, the
 beacon loaded on 44 and its report sent on 44; the only console errors (88) are Cloudflare
 refusing the report's CORS for `localhost`, expected off the site's own host.
+
+## v1.4 pilot (ALG-173): the copy-on-write room as a question
+
+**What changed.** The English copy-on-write room asks one question, "What happens when I change
+a block?", answers it in three plain paragraphs, keeps its two figures, then shows the code in
+four Source notes (D21.1). `SourceNote` and `SourcePanel` are generic: at 1024 px and wider a
+note opens in a panel on the right; narrower, it opens inline. The French and Spanish rooms
+are byte-identical to `main`'s build; the only other page change is the Engine room's excerpt
+count (116 → 120, computed from `ANALYSIS.md`).
+
+**Measures** (built EN page, `<article>` only):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 32 | 14 |
+| of them in the prose | 20 | 0 |
+| Code excerpts | 3 | 4 |
+| Lines of code shown | 93 | 34 |
+
+**Proof.** `npm run build`, `npm test` (240 pass), `check-permalinks` (ANALYSIS.md 120 excerpts,
+built site 2430 references), `check-sources`, `check-csp` (44 pages, no new hash) and
+`check-plate`: all pass. `scripts/audit.mjs` over the whole visit: 42 pages, 0 problems (axe
+WCAG 2.2 AA in both themes, keyboard, no sideways scroll at 1440/390/320). `scripts/verify.mjs`:
+457 captures, 0 console errors. A panel check in Chromium (not committed, `shots/`) at 1440
+dark and light, 1024 and 390: the summary keeps its height on screen when the panel opens
+(drift 0 px), focus goes to the panel title, Esc and the close button return it to the
+summary, Tab off either end of the panel returns to the note, Esc from a figure's button closes
+the panel and leaves focus on the button, a second note swaps the panel and puts the first one
+back, narrowing from 1440 to 800 with the panel open puts the note back inline, open; axe finds
+nothing with the panel open or closed; no sideways scroll.
+
+**Reviews.** `technical-writer` on the room text: four claims were sharper than the code
+(every read checked, while the ARC's hits are not; `ECKSUM` failing the read, while on a mirror
+it rejects one copy; a crash leaving the pool "as before", without the ZIL; every write getting a
+new address, without dedup and nopwrite), one rhythmic triad, missing glosses for uberblock,
+txg and MOS: all fixed. `code-reviewer` on the diff: tab order out of the panel, Esc scope, a note
+opened by find-in-page, one panel per page, print: fixed or documented.
+
+**Debts.** The other rooms and the FR/ES copy of this one keep the old format until the pilot
+is approved. The figures' own "see the code" links stay inside the figures.

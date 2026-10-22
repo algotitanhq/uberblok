@@ -337,8 +337,9 @@ const textVersion = {
         const g = s("g", { class: `card card--${v.state}${picked ? " card--picked" : ""}${pickable ? " card--pickable" : ""}`, transform: `translate(${x} ${y})`, "data-leaf": pickable ? v.id.slice(1) : undefined },
           s("rect", { width: W, height: H, rx: 4, class: "under" }),
           s("rect", { width: W, height: H, rx: 4 }),
-        );
-        if (behind.has(v.key)) g.append(s("text", { x: 6, y: 12, class: "strip" }, `${label(v.id)} · ${tag}`));
+        );        // An unreachable card shows only its outline from under the live one; the legend names it.
+        if (v.state === "orphan") void 0;
+        else if (behind.has(v.key)) g.append(s("text", { x: 6, y: 12, class: "strip" }, `${label(v.id)} · ${tag}`));
         else
           g.append(
             s("text", { x: 8, y: 18, class: "name" }, label(v.id)),

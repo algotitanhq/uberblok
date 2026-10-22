@@ -295,9 +295,9 @@ const textVersion = {
 
     const say = (text: string) => narration.replaceChildren(text);
 
-    // Blocks written before a power cut stay drawn, in red, until the next action.
+    // Blocks written before a power cut stay drawn, in red, until the next action.    // They leave the list, so the next rewrite of the same block cannot reuse their key.
     const dropOrphans = () => {
-      for (const v of vs) if (v.state === "orphan") v.state = "freed";
+      vs = vs.filter((v) => v.state !== "orphan");
     };
 
     function draw() {
@@ -310,7 +310,8 @@ const textVersion = {
         offsets.set(v.key, Math.min(seen[v.id], 2) * OFF);
       }
       // A card with a newer version in front of it shows a one-line label in
-      // the strip that stays visible above the front card.      // After a power cut the unreachable blocks are drawn underneath, so the tree the pool
+      // the strip that stays visible above the front card.
+      // After a power cut the unreachable blocks are drawn underneath, so the tree the pool
       // came back to stays whole on top.
       const behind = new Set(shown.filter((v) => shown.some((w) => w.id === v.id && w !== v && w.state !== "orphan" && offsets.get(w.key)! > offsets.get(v.key)!)).map((v) => v.key));
       shown.sort((a, b) => Number(b.state === "orphan") - Number(a.state === "orphan"));
@@ -599,7 +600,7 @@ const textVersion = {
     stroke: var(--bad);
     stroke-dasharray: 3 3;
   }
-  svg :global(.card--picked rect:not(.under)) {
+  svg :global(.card--picked > rect:not(.under)) {
     stroke: var(--accent);
     stroke-width: 3;
   }

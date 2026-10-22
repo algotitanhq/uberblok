@@ -221,7 +221,7 @@ const textVersion = {
 
     function flipBit(d: number, i: number) {
       const b = disks[d][i];
-      b[4] ^= 0x20; // one bit: turns a letter of "version" to upper case
+      b[4] &= ~0x20; // one bit: turns a letter of "version" to upper case; pressing twice changes nothing more
       marks[d][i] = "";
       tags[d][i] = t.damaged;
     }
@@ -238,7 +238,7 @@ const textVersion = {
     });
     btn("both").addEventListener("click", () => {
       flipBit(0, 3);
-      disks[1][3][9] ^= 0x01;
+      disks[1][3][9] |= 0x01; // one bit, set rather than toggled for the same reason
       tags[1][3] = t.damaged;
       damaged(t.bothDone);
     });

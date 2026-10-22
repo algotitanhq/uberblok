@@ -81,9 +81,9 @@ const L = {
           l’uberblock pointe toujours vers l’ancien arbre.
         </p>
         <p>
-          Appuyez sur Étape suivante. ZFS écrit les nouveaux blocs de bas en haut, un niveau par étape. Un bloc contient
+          Appuyez sur Étape suivante. ZFS écrit les nouveaux blocs de bas en haut, une rangée de la figure par étape. Un bloc contient
           les nouvelles adresses et sommes de contrôle des blocs en dessous de lui, et elles ne sont connues qu’une fois
-          ces blocs placés. Les pointeurs en pointillés se remplissent niveau par niveau, jusqu’à l’objset. Écrivez D3
+          ces blocs placés. Les pointeurs en pointillés se remplissent rangée par rangée, jusqu’à l’objset. Écrivez D3
           avant la première étape pour l’ajouter au même txg. Seul D3 est nouveau, car les blocs au-dessus de lui ont déjà
           été copiés pour D2.
         </p>
@@ -301,7 +301,7 @@ const L = {
         La figure montre un seul fichier et très peu de blocs : deux pointeurs par bloc indirect au lieu de 1024 au plus.
         Elle replie en un seul bloc de dnodes le chemin qui va du MOS à l’objset propre d’un système de fichiers. Dans le
         code, les écritures d’un même niveau se chevauchent, et un enfant compte comme prêt dès qu’il a son adresse et sa
-        somme de contrôle, avant que ses données n’atteignent le disque. La figure termine un niveau par étape, et c’est le
+        somme de contrôle, avant que ses données n’atteignent le disque. La figure termine une rangée par étape, et c’est le
         vidage du cache qui met chaque bloc sur un support stable. Tout cela suppose qu’un disque écrit vraiment son cache
         sur un support stable quand ZFS le lui demande. Il n’y a qu’un disque, si bien que chaque uberblock et chaque label
         y arrivent, et ses anneaux ont les 128 cases des secteurs de 512 octets. Dans un pool de plus de trois vdevs de

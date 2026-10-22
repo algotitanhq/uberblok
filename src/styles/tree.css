@@ -258,8 +258,12 @@
 .tr .beats .bt-done .st {
   color: var(--accent);
 }
-.tr .beats .bt-next {
+.tr .beats .bt-next,
+.tr .beats .bt-now {
   font-weight: 600;
+}
+.tr .beats .bt-now .st {
+  color: var(--accent);
 }
 .tr .beats .bt-todo {
   color: var(--fg-muted);

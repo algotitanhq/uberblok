@@ -81,9 +81,9 @@ const L = {
           árbol antiguo.
         </p>
         <p>
-          Pulsa Paso siguiente. ZFS escribe los bloques nuevos de abajo arriba, un nivel por paso. Un bloque guarda las
+          Pulsa Paso siguiente. ZFS escribe los bloques nuevos de abajo arriba, una fila de la figura por paso. Un bloque guarda las
           direcciones y sumas de comprobación nuevas de los bloques que tiene debajo, y solo se conocen cuando esos bloques
-          ya tienen sitio. Los punteros punteados se rellenan nivel a nivel, hasta el objset. Escribe D3 antes del primer
+          ya tienen sitio. Los punteros punteados se rellenan fila a fila, hasta el objset. Escribe D3 antes del primer
           paso para añadirlo al mismo txg. Solo D3 es nuevo, porque los bloques que tiene encima ya se copiaron para D2.
         </p>
       </div>
@@ -300,7 +300,7 @@ const L = {
         La figura muestra un solo archivo y muy pocos bloques: dos punteros por bloque indirecto en lugar de hasta 1024.
         Pliega en un solo bloque de dnodes el camino que va del MOS al objset propio de un sistema de archivos. En el
         código, las escrituras de un mismo nivel se solapan, y un hijo cuenta como listo en cuanto tiene su dirección y su
-        suma de comprobación, antes de que sus datos lleguen al disco. La figura termina un nivel por paso, y es el volcado
+        suma de comprobación, antes de que sus datos lleguen al disco. La figura termina una fila por paso, y es el volcado
         de la caché lo que pone cada bloque en almacenamiento estable. Todo esto supone que un disco escribe de verdad su
         caché en almacenamiento estable cuando ZFS se lo pide. Hay un solo disco, así que cada uberblock y cada etiqueta
         llegan a él, y sus anillos tienen las 128 ranuras de los sectores de 512 bytes. En un pool con más de tres vdevs

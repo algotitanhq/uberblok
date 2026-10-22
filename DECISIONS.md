@@ -2452,11 +2452,14 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   (`dbuf_write`, dbuf.c L5411), and `zio_write_compress` holds the parent until every child is
   ready, with its new address and checksum (zio.c L1932-L1939). In the drawing a new copy is an
   outline while in memory and fills in when written; a pointer from a new copy to a child not
-  yet written is dotted and muted, and turns into the accent once the child is written. Only
-  what changed is animated, and nothing under reduced motion. A cut halfway up is a new case
+  yet written is dotted and muted, and turns into the accent once the child is written. The 3D
+  view draws the same states (an in-memory copy is a faint box, a waiting pointer a faint line).
+  Only what changed is animated, in 2D and 3D, and nothing under reduced motion. The commit
+  panel marks beat 0 "under way" while the rows are being written. A cut halfway up is a new case
   (`during: 0`): the old tree wins, as with a cut during the flush. Writing a second block is
   refused once the first level is written, as the code quiesces the txg before `spa_sync`.
-  The other controls, the 3D view, the text version and the no-script state are unchanged.
+  The other controls, the text version and the no-script state are unchanged. The figure counts
+  "rows" (data, L1, L2, dnodes, objset), not "levels", which the room keeps for indirect blocks.
 - **Code.** Seven Source notes, 69 lines (`ANALYSIS.md` tree room, excerpts 7 and 12 to 17;
   six are new short cuts of longer excerpts, checked against `zfs-2.4.4`). The "three depths"
   section is gone: its one-paragraph summary repeated the answer, and its detail now lives in

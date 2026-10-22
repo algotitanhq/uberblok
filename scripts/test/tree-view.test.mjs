@@ -137,7 +137,7 @@ test("the drawing agrees with the model", () => {
   assert.match(svg2, /class="edge e-mem" data-edge="L2-0@4211>L1-1@4211"/);
   assert.match(svg2, /class="edge e-wait" data-edge="DN@4211>L2-0@4211"/);
   assert.equal(text(V.stepLine(S, h2)), "L1 #1 is written to a new place. Its new address and checksum are now in L2 #0, which the next step writes. code");
-  assert.match(text(V.beatsHtml(S, h2)), /from the data up: 2 of 5 levels written/);
+  assert.match(text(V.beatsHtml(S, h2)), /under way spa_sync is writing the new blocks of txg 4211, from the data up\. Rows written: 2 of 5\./);
   h2 = M.step(M.step(M.step(h2)));
   assert.match(text(V.stepLine(S, h2)), /^The objset is written: the 5 blocks of txg 4211 are on the disk, not flushed yet\./);
   // Both data blocks in one step when two leaves share the txg.

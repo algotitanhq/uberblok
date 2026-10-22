@@ -79,9 +79,9 @@ const L = {
           the old tree.
         </p>
         <p>
-          Press Next step. ZFS writes the new blocks from the bottom up, one level per step. A block stores the new
+          Press Next step. ZFS writes the new blocks from the bottom up, one row of the figure per step. A block stores the new
           addresses and checksums of the blocks below it, and they are known only once those blocks are placed. The
-          dotted pointers fill in one level at a time, up to the objset. Write D3 before the first step to add it to the same txg. Only
+          dotted pointers fill in one row at a time, up to the objset. Write D3 before the first step to add it to the same txg. Only
           D3 itself is new, because the blocks above it were already copied for D2.
         </p>
       </div>
@@ -295,7 +295,7 @@ const L = {
         The figure shows one file and very few blocks: two pointers per indirect block instead of up to 1024. It folds
         the path from the MOS to a filesystem’s own objset into one block of dnodes. In the code, the writes of one level
         overlap, and a child counts as ready once it has its address and checksum, before its data reaches the disk. The
-        figure finishes one level per step, and the flush is what puts every block on stable storage. All of this assumes
+        figure finishes one row per step, and the flush is what puts every block on stable storage. All of this assumes
         that a disk really writes its cache to stable storage when ZFS asks it to. There is one disk, so every uberblock
         and every label lands on it, and its rings have the 128 slots of 512-byte sectors. In a pool with more than three
         top-level vdevs, an ordinary txg writes the uberblock to three of them, chosen at random. The writes

@@ -116,6 +116,8 @@ export function mount(host: HTMLElement, opts: { label: string; describedBy?: st
   let grows: { mesh: Mesh; t0: number }[] = [];
   let swing: { from: Vector3; to: Vector3; t0: number } | null = null;
   let lastRoot: Vector3 | null = null;
+  /** Each block's state at the last draw: only a block whose state changed grows in. */
+  let lastState = new Map<string, BlockState>();
   let arrowLine: LineSegments | null = null;
   let arrowHead: Mesh | null = null;
   const ubBottom = new Vector3(0, 6.05, 0);
@@ -159,24 +161,27 @@ export function mount(host: HTMLElement, opts: { label: string; describedBy?: st
     const plain: number[] = [];
     const hot: number[] = [];
     const lost: number[] = [];
+    const wait: number[] = [];
     for (const d of ds) {
       const from = pos.get(d.blk.id)!.v;
       for (const k of d.blk.kids) {
         const to = pos.get(k)?.v;
         if (!to) continue;
-        // A pointer in memory to a child not written yet stays muted, as in 2D.
+        // A pointer in memory to a child not written yet: faint, as the dotted edge in 2D.
         const waiting = d.state === "mem" && pos.get(k)!.state === "mem";
-        const arr = d.state === "live" || d.state === "old" || d.state === "dead" || waiting ? plain : d.state === "lost" ? lost : hot;
+        const arr = waiting ? wait : d.state === "live" || d.state === "old" || d.state === "dead" ? plain : d.state === "lost" ? lost : hot;
         arr.push(from.x, from.y - 0.31, from.z, to.x, to.y + 0.31, to.z);
       }
     }
-    world.add(seg(plain, pal.line, 0.9), seg(hot, pal.accent, 1), seg(lost, pal.bad, 0.8));
+    world.add(seg(plain, pal.line, 0.9), seg(hot, pal.accent, 1), seg(lost, pal.bad, 0.8), seg(wait, pal.accent, 0.3));
     for (const d of ds) {
       const v = pos.get(d.blk.id)!.v;
-      const m = new Mesh(boxGeo, new MeshLambertMaterial({ color: new Color(colorOf(d.state)), transparent: d.state === "dead" || d.state === "lost", opacity: d.state === "dead" || d.state === "lost" ? 0.45 : 1, emissive: new Color(d.state === "new" || d.state === "mem" || d.state === "unflushed" ? pal.accent : "#000000"), emissiveIntensity: d.state === "unflushed" || d.state === "mem" ? 0.15 : d.state === "new" ? 0.4 : 0 }));
+      // In memory, not written: a ghost of the box, as the outline in 2D; written, it turns solid.
+      const ghost = d.state === "dead" || d.state === "lost" || d.state === "mem";
+      const m = new Mesh(boxGeo, new MeshLambertMaterial({ color: new Color(colorOf(d.state)), transparent: ghost, opacity: d.state === "mem" ? 0.3 : ghost ? 0.45 : 1, emissive: new Color(d.state === "new" || d.state === "mem" || d.state === "unflushed" ? pal.accent : "#000000"), emissiveIntensity: d.state === "unflushed" ? 0.15 : d.state === "new" ? 0.4 : 0 }));
       m.position.copy(v);
       world.add(m);
-      if (animate && (d.state === "mem" || d.state === "unflushed")) grows.push({ mesh: m, t0: performance.now() });
+      if (animate && (d.state === "mem" || d.state === "unflushed") && lastState.get(d.blk.id) !== d.state) grows.push({ mesh: m, t0: performance.now() });
       const sp = label(placeName(S, d.blk.key), String(d.blk.birth), pal, 2);
       // The old copy of a rewritten block stands behind its new copy: its label goes on its
       // left, beside the box, so the two labels never overlap.
@@ -187,6 +192,7 @@ export function mount(host: HTMLElement, opts: { label: string; describedBy?: st
       else sp.position.set(v.x, v.y + 0.62, v.z);
       world.add(sp);
     }
+    lastState = new Map(ds.map((d) => [d.blk.id, d.state]));
     // The uberblock an import would pick, and its one pointer.
     const ub = newestOnDisk(p);
     const card = new Mesh(ubGeo, new MeshLambertMaterial({ color: new Color(pal.accent), emissive: new Color(pal.accent), emissiveIntensity: 0.25 }));

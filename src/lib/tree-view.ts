@@ -222,8 +222,9 @@ export function beatsHtml(S: TrStrings, p: Pool): string {
     ["beat4", p.configDirty ? S.beat4 : S.beat4none, "odd"],
   ];
   const lis = items.map(([k, text], i) => {
-    const st = i === cutAt ? "cut" : i <= done ? "done" : t && !p.cut && i === done + 1 ? "next" : "todo";
-    const say = i === 0 && t && t.beat === null && t.wrote > 0 ? S.beat0prog : text;
+    const writing = i === 0 && !!t && t.beat === null && t.wrote > 0;
+    const st = i === cutAt ? "cut" : i <= done ? "done" : writing ? "now" : t && !p.cut && i === done + 1 ? "next" : "todo";
+    const say = writing ? S.beat0prog : text;
     return `<li class="bt-${st}" data-beat="${i}"><span class="st">${S[`st_${st}`]}</span> ${fill(say, { txg, slot: slotOf(txg, p.ashift), w: t?.wrote ?? 0, h: HEIGHTS })}${see(S, k === "beat0" ? "write" : items[i][2])}</li>`;
   }).join("");
   return `<p class="muted">${beatsSummary(S, p)}</p><ol class="beats" start="0">${lis}</ol>`;

@@ -169,7 +169,7 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
       if (scene) scene.draw(pool, (animate || swung) && motion);
       if (motion && !is3d) {
         if (animate) {
-          const fresh = [...root.querySelectorAll<SVGGraphicsElement>("[data-tree] .b.s-mem, [data-tree] .b.s-unflushed, [data-tree] .e-mem, [data-tree] .e-unflushed")]
+          const fresh = [...root.querySelectorAll<SVGGraphicsElement>("[data-tree] .b.s-mem, [data-tree] .b.s-unflushed, [data-tree] .e-mem, [data-tree] .e-unflushed, [data-tree] .e-wait")]
             .filter((el) => before.get(el.dataset.block ?? `e:${el.dataset.edge}`) !== el.getAttribute("class"));
           for (const el of fresh) el.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
         }

@@ -59,8 +59,8 @@ const L = {
           called the write hole.
         </p>
         <p>
-          RAID-Z never changes a stripe that is on disk. Each block ZFS writes gets a stripe of its own, cut across as
-          many disks as the block needs, with parity computed from that block alone. A small block takes two or three
+          When data changes, RAID-Z never updates a stripe in place. Each block ZFS writes gets a stripe of its own, cut
+          across as many disks as the block needs, with parity computed from that block alone. A small block takes two or three
           disks and a large one takes them all. Like every write in ZFS, the stripe goes to free space, and the old
           version of the block stays where it was until the pool has switched to the new one. A power failure can leave
           a half-written stripe, but nothing points to it.
@@ -90,7 +90,7 @@ const L = {
           as 16 KiB of data.
         </p>
         <p>
-          Then damage the disks below the map and read the last block back, one step per press. With a disk missing, the
+          Then damage the disks beside the map and read the last block back, one step per press. With a disk missing, the
           read asks for parity and rebuilds that column. With a disk that returns bad data, the first checksum fails,
           ZFS reads every column, and the figure shows each guess in turn until one verifies.
         </p>

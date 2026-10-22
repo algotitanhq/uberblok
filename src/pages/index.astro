@@ -1,7 +1,9 @@
 ---
 // The root picks a language: the one chosen before (switch), else French or Spanish
-// when the browser lists it, else English. Static hosting has no Accept-Language, so
-// this is a few lines of inline script, with every link visible for no-JS visitors.
+// when the browser lists it, else English. In production the Worker answers `/` first
+// with a 302 (worker/index.js, DECISIONS.md D20.1), which keeps the Referer; this page
+// is the fallback (`astro preview`, a build served without the Worker), with every link
+// visible for no-JS visitors.
 import "../styles/global.css";
 import Analytics from "../components/Analytics.astro";
 ---

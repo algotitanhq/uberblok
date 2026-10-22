@@ -178,9 +178,11 @@ const canonical = new URL(roomUrl(lang, roomId), Astro.site).href;
           try { localStorage.setItem("theme", root.dataset.theme); } catch {}
           sync();
         });
-        // Remember the language picked with a switch, for the root page.
+        // Remember the language picked with a switch, for the root page: the cookie for the
+        // Worker's redirect (DECISIONS.md D20.1), localStorage for the no-Worker fallback.
         for (const a of document.querySelectorAll("a[data-lang]"))
           a.addEventListener("click", () => {
+            document.cookie = "lang=" + a.dataset.lang + "; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
             try { localStorage.setItem("lang", a.dataset.lang); } catch {}
           });
       })();

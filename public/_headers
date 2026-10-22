@@ -1,5 +1,5 @@
 # Response headers for every page and asset, applied by Cloudflare Workers static
-# assets (no Worker code). DECISIONS.md D19.2.
+# assets. DECISIONS.md D19.2. The Worker's redirect of `/` sets its own (D20.1).
 # script-src: the site's own files, the Cloudflare Web Analytics beacon (its
 # script host here, its report host in connect-src, DECISIONS.md D19.3) plus the
 # hash of each inline script
@@ -13,4 +13,4 @@
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com 'sha256-Hs/RY/v2n+d9X4n+GGZiWG4Qb0Ts1fPmZJ4ykpSL760=' 'sha256-ubQG1vYTiTC4zDqE/IhDP94+l+Jzv7v1MpB4ybf7m+4=' 'sha256-ceZvjtAQQclop+tGGLgD3VPQOknsb/TT2MCn9HM+Sgo='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://static.cloudflareinsights.com 'sha256-Hs/RY/v2n+d9X4n+GGZiWG4Qb0Ts1fPmZJ4ykpSL760=' 'sha256-DAUFvM3jw53U2CdGhwmrKUcdM+gaH6s5D0MUoLXWU/o=' 'sha256-ceZvjtAQQclop+tGGLgD3VPQOknsb/TT2MCn9HM+Sgo='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

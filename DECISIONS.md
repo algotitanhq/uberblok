@@ -2353,3 +2353,30 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
 - **Rejected.** `https://*.cloudflareinsights.com` or the bare scheme `https:`: wider than the
   two hosts the beacon uses. Serving `beacon.min.js` from the site: Cloudflare updates it,
   and the report would still go to `cloudflareinsights.com`.
+
+## Referrers (board, 2026-10-21)
+
+### D20.1 The root `/` redirects in a Worker, so Web Analytics sees where visits come from
+
+- **Context.** On the Show HN day every visit showed as "direct": `/` sent the visitor on with
+  `location.replace()` before the beacon could report, so the landing page saw `/` as its
+  referrer. The source (Hacker News, Reddit, a blog) was lost, and visits were undercounted,
+  since a page reached from the site itself is not a new visit. This amends D1.4 (root `/`),
+  D1.5 and D19.2 ("no Worker code, and stays so").
+- **Choice.** A Worker that runs for `/` only (`run_worker_first: ["/"]`, `worker/index.js`)
+  answers a 302 to `/en/`, `/fr/` or `/es/`, query string kept (UTM tags). The browser keeps
+  the original Referer across an HTTP redirect, so the room's beacon reports the real source.
+  The language rule is D1.4's: the one chosen with the switch, else French if the browser
+  lists French at all, else Spanish, else English (`worker/root-lang.js`, pure, covered by
+  `scripts/test/root-lang.test.mjs`; a language refused with `q=0` does not count). The switch
+  now also sets a first-party `lang` cookie (one year, `SameSite=Lax`, `Secure`), a preference
+  the visitor asked for, since a Worker cannot read `localStorage`; nothing else reads it. The
+  redirect is `private, no-store` with `Vary: Accept-Language, Cookie` and carries the
+  security headers that apply to a body-less response. Every other path is still static
+  assets with `public/_headers`. `src/pages/index.astro` stays as the fallback for
+  `astro preview` and any build served without the Worker. Checked with `wrangler dev`: the
+  three languages, the cookie, the query string, `/index.html` → `/`, the 404 page, and in
+  Chrome a cross-origin link to `/` lands on `/en/` with the linking page as `document.referrer`.
+- **Rejected.** Delaying the client redirect until the beacon has sent (a visible pause, and
+  `/` counted as a page). A `?ref=` parameter (Web Analytics reads `document.referrer`, not
+  the URL). English unprefixed at `/` (rejected in D1.4).

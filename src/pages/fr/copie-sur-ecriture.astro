@@ -39,16 +39,16 @@ const L = {
       <h1>Que se passe-t-il quand je modifie un bloc ?</h1>
       <div class="prose answer">
         <p class="lead">
-          Deux choses peuvent mal tourner sous un système de fichiers. Le courant peut tomber au milieu d’une écriture
-          et laisser un fichier moitié ancien, moitié nouveau. Et un disque peut rendre des données fausses sans
-          signaler d’erreur : un bit s’inverse, une écriture se perd ou atterrit au mauvais endroit.
+          Deux choses peuvent mal tourner sous les pieds d’un système de fichiers. Le courant peut tomber au milieu d’une écriture
+          et laisser un fichier moitié ancien, moitié nouveau. Un disque peut aussi rendre des données fausses sans signaler d’erreur : un bit s’inverse, ou une écriture se perd ou atterrit au mauvais endroit.
         </p>
         <p>
-          ZFS n’écrit jamais par-dessus un bloc en service. La nouvelle version d’un bloc va dans l’espace libre, et
-          l’ancienne reste où elle était. Les blocs qui pointent vers lui sont recopiés de la même façon, jusqu’au
-          sommet du pool. Une petite écriture, dans un enregistrement racine appelé l’uberblock, fait ensuite passer le
-          pool à la nouvelle version. Si le courant tombe avant cette écriture, le pool revient à la dernière version
-          terminée, sans rien d’écrit à moitié.
+          Quand un bloc change, ZFS n’écrit pas la nouvelle version par-dessus l’ancienne. La nouvelle version va dans
+          l’espace libre, et
+          l’ancienne reste où elle était. Les blocs qui pointent vers ce bloc sont recopiés de la même façon, jusqu’au
+          sommet du pool. Un petit enregistrement racine, l’uberblock, est écrit en dernier et fait passer le pool à la nouvelle version. Si le courant tombe avant cette écriture, le pool revient à la dernière version
+          terminée, sans rien d’écrit à moitié. Les écritures qu’une application a forcées sur le disque avec fsync sont aussi gardées
+          dans un journal, le ZIL, et rejouées au retour du pool.
         </p>
         <p>
           Chaque pointeur garde aussi une somme de contrôle du bloc vers lequel il pointe, et chaque bloc lu sur le
@@ -65,13 +65,13 @@ const L = {
         <p>
           Choisissez un bloc de données dans la figure et suivez sa modification pas à pas. Le nouveau bloc reçoit une
           nouvelle adresse. Son parent contient le pointeur vers lui, donc le parent change aussi et part à une
-          nouvelle adresse. Il en va de même pour le sommet de l’arbre du fichier.
+          nouvelle adresse. Il en va de même pour le sommet de l’arbre du fichier. Chaque version du pool porte le numéro de son groupe de
+          transactions (txg), le lot de modifications que ZFS écrit ensemble à intervalles de quelques secondes.
         </p>
         <p>
           Jusqu’à la dernière étape, le pool pointe toujours vers l’ancien arbre, et rien dans cet arbre n’a été
           touché. La dernière étape écrit l’uberblock, et c’est seulement alors que le pool utilise le nouvel arbre.
-          Coupez le courant avant cette étape pour voir ce que le pool retrouve au redémarrage. Prenez d’abord un
-          instantané, et les anciens blocs restent sur le disque.
+          Coupez le courant avant cette étape pour voir ce que le pool retrouve au redémarrage. Si vous prenez d’abord un instantané, les anciens blocs restent sur le disque.
         </p>
       </div>
       <CowTree lang={lang} />
@@ -106,9 +106,8 @@ const L = {
       <div class="step">
         <h3>Écrire un bloc</h3>
         <p class="prose">
-          <code>zio_write_compress</code> décide si une écriture peut aller par-dessus l’ancien bloc. Elle ne le peut
-          que si le bloc a été créé dans le groupe de transactions (txg) en cours, le lot de modifications que ZFS écrit
-          ensemble toutes les quelques secondes. Aucun uberblock validé ne pointe encore vers un tel bloc. Dans tous
+          <code>zio_write_compress</code> décide si une écriture peut aller par-dessus l’ancien bloc. Elle ne le peut que pour un bloc créé dans le txg en cours d’écriture : aucun uberblock validé ne pointe encore
+          vers un tel bloc. Dans tous
           les autres cas, le pointeur est effacé, et le bloc reçoit en général une nouvelle adresse.
         </p>
         <SourceNote lang={lang}>
@@ -154,7 +153,7 @@ const L = {
             notes={[
               {
                 from: 375,
-                text: `Jusqu’à trois adresses pour le même bloc (<a href="${L.dvas}"><code>SPA_DVAS_PER_BP</code></a>), toutes couvertes par la même somme.`,
+                text: `Jusqu’à trois adresses pour le même bloc (<a href="${L.dvas}"><code>SPA_DVAS_PER_BP</code></a>), toutes couvertes par la même somme. Pour un bloc chiffré, la troisième case contient à la place le sel et une partie du vecteur d’initialisation du chiffrement.`,
               },
               {
                 from: 381,
@@ -170,7 +169,7 @@ const L = {
         <p class="prose">
           À chaque lecture sur le disque, <code>zio_checksum_error_impl</code> prend la somme attendue dans le pointeur
           par lequel la lecture est passée. Il calcule la somme réelle sur les octets rendus par le disque. Si les deux
-          diffèrent, cette copie est rejetée avec <code>ECKSUM</code>, et l’erreur est comptée contre ce disque dans la
+          diffèrent, cette copie est rejetée avec <code>ECKSUM</code>, et l’erreur est imputée à ce disque dans la
           colonne CKSUM de <code>zpool status</code>.
         </p>
         <SourceNote lang={lang}>
@@ -228,8 +227,9 @@ const L = {
       <h2 id="simplified">Ce que les figures laissent de côté</h2>
       <p class="prose muted">
         Les figures montrent un seul fichier, donc l’arbre est court. Dans un vrai pool, il part de l’uberblock et
-        passe par le MOS (les métadonnées propres au pool), le dataset et le dnode du fichier. Elles laissent de côté
-        les passes de synchronisation, les blocs gang, la déduplication, le nopwrite et le chiffrement. Les écritures
+        passe par le MOS (les métadonnées propres au pool), le dataset et le dnode du fichier, l’enregistrement qui pointe vers son arbre de blocs. Elles laissent de côté
+        les passes de synchronisation, les blocs gang, la déduplication, le nopwrite (une écriture évitée quand la nouvelle donnée est identique au bloc
+        qu’elle remplace) et le chiffrement. Les écritures
         qu’une application a forcées sur le disque avec fsync passent aussi par le ZIL, le journal d’intention, et sont
         rejouées après une panne. La salle du ZIL le montre. Ici, le miroir lit toujours le disque A en premier, alors
         que ZFS choisit le côté selon la charge. L’anneau d’uberblocks a 32 cases, comme sur des disques à secteurs de

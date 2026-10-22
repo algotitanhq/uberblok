@@ -40,15 +40,16 @@ const L = {
       <div class="prose answer">
         <p class="lead">
           Por debajo de un sistema de archivos pueden fallar dos cosas. La corriente puede cortarse en mitad de una
-          escritura y dejar un archivo medio antiguo y medio nuevo. Y un disco puede devolver datos erróneos sin señalar
-          ningún error: un bit se invierte, una escritura se pierde o cae en el sitio equivocado.
+          escritura y dejar un archivo medio antiguo y medio nuevo. Un disco también puede devolver datos erróneos sin señalar ningún error: un bit se invierte, o una escritura se pierde o cae en el sitio equivocado.
         </p>
         <p>
-          ZFS nunca escribe encima de un bloque en uso. La nueva versión de un bloque va a espacio libre, y la antigua
+          Cuando un bloque cambia, ZFS no escribe la versión nueva encima de la antigua. La versión nueva va a espacio
+          libre, y la antigua
           se queda donde estaba. Los bloques que apuntan a él se copian de la misma manera, hasta la cima del pool.
-          Después, una pequeña escritura en un registro raíz llamado uberblock hace que el pool pase a la nueva versión.
-          Si la corriente se corta antes de esa escritura, el pool vuelve a la última versión terminada, sin nada
-          escrito a medias.
+          Después se escribe, en último lugar, un pequeño registro raíz llamado uberblock, que hace que el pool pase a la
+          nueva versión.
+          Si la corriente se corta antes de esa escritura, el pool vuelve a la última versión terminada, sin nada escrito a medias. Las escrituras que una aplicación forzó al disco con fsync se guardan además en un
+          registro, el ZIL, y se vuelven a aplicar cuando el pool arranca de nuevo.
         </p>
         <p>
           Cada puntero guarda además una suma de comprobación del bloque al que apunta, y cada bloque leído del disco se
@@ -63,8 +64,8 @@ const L = {
       <div class="prose">
         <p>
           Elige un bloque de datos en la figura y sigue su cambio paso a paso. El bloque nuevo recibe una dirección
-          nueva. Su padre guarda el puntero a él, así que el padre también cambia y pasa a una dirección nueva. Lo mismo
-          ocurre con la cima del árbol del archivo.
+          nueva. Su padre guarda el puntero a él, así que el padre también cambia y pasa a una dirección nueva. Lo mismo ocurre con la cima del árbol del archivo. Cada versión del pool lleva el número de su grupo de
+          transacciones (txg), el lote de cambios que ZFS escribe de una vez cada pocos segundos.
         </p>
         <p>
           Hasta el último paso, el pool sigue apuntando al árbol antiguo, y nada de ese árbol se ha tocado. El último
@@ -105,9 +106,8 @@ const L = {
       <div class="step">
         <h3>Escribir un bloque</h3>
         <p class="prose">
-          <code>zio_write_compress</code> decide si una escritura puede ir encima del bloque antiguo. Solo puede si el
-          bloque se creó en el grupo de transacciones (txg) actual, el lote de cambios que ZFS escribe de una vez cada
-          pocos segundos. Ningún uberblock confirmado apunta todavía a un bloque así. En todos los demás casos, el
+          <code>zio_write_compress</code> decide si una escritura puede ir encima del bloque antiguo. Solo puede hacerlo con un bloque creado en el txg que se está escribiendo: ningún uberblock confirmado apunta
+          todavía a un bloque así. En todos los demás casos, el
           puntero se borra y el bloque recibe en general una dirección nueva.
         </p>
         <SourceNote lang={lang}>
@@ -153,7 +153,7 @@ const L = {
             notes={[
               {
                 from: 375,
-                text: `Hasta tres direcciones para el mismo bloque (<a href="${L.dvas}"><code>SPA_DVAS_PER_BP</code></a>), todas cubiertas por la misma suma.`,
+                text: `Hasta tres direcciones para el mismo bloque (<a href="${L.dvas}"><code>SPA_DVAS_PER_BP</code></a>), todas cubiertas por la misma suma. En un bloque cifrado, la tercera ranura guarda en su lugar la sal y parte del vector de inicialización del cifrado.`,
               },
               {
                 from: 381,
@@ -226,10 +226,10 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Lo que las figuras dejan fuera</h2>
       <p class="prose muted">
-        Las figuras muestran un solo archivo, así que el árbol es corto. En un pool real va desde el uberblock, pasando
-        por el MOS (los metadatos propios del pool), el dataset y el dnode del archivo. Dejan fuera las pasadas de
-        sincronización, los bloques gang, la deduplicación, el nopwrite y el cifrado. Las escrituras que una aplicación
-        forzó al disco con fsync van también al ZIL, el registro de intenciones, y se reproducen tras una caída. La sala
+        Las figuras muestran un solo archivo, así que el árbol es corto. En un pool real parte del uberblock y pasa por el MOS (los metadatos propios del pool), el dataset y el dnode del archivo, el registro que apunta a su árbol de bloques. Dejan fuera las pasadas de
+        sincronización, los bloques gang, la deduplicación, el nopwrite (una escritura que se omite cuando los datos nuevos son iguales al bloque que
+        sustituyen) y el cifrado. Las escrituras que una aplicación
+        forzó al disco con fsync van también al ZIL, el registro de intenciones, y se vuelven a aplicar tras una caída. La sala
         del ZIL lo muestra. Aquí el espejo lee siempre primero el disco A, mientras que ZFS elige el lado según la carga.
         El anillo de uberblocks tiene 32 ranuras, como en los discos con sectores de 4K. Las sumas son valores fletcher4
         reales calculados sobre los bloques de demostración. Las direcciones y los números de txg son inventados.

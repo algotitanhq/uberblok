@@ -2460,6 +2460,6 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   symbol heading is hidden, since the note's label names it.
 - **Rejected.** Making `--line-strong` stronger for the pills, as the review suggested: every
   figure card and button on the site uses it, so the pill gets its own mix
-  (`--fg-faint` 65 % into `--line-strong`, about 3:1) and no other room changes. Removing the
+  (`--fg-faint` 65% into `--line-strong`, about 3:1) and no other room changes. Removing the
   power-cut blocks at once (as before): the reader could not see that they were written and
   are simply unreachable.

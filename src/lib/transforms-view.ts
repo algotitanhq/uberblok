@@ -1,7 +1,9 @@
 // HTML for the three figures of the compression, dedup and encryption room,
 // built from src/lib/transforms.ts. Plain strings, no DOM: the page renders a
 // first state at build time (readable without JavaScript) and the scripts
-// render every later state with the same functions.
+// render every later state with the same functions. The figures carry no code
+// links (D21.1): the room's Source notes show the code. What the last action
+// changed is outlined until the next one (D28.1).
 import { group } from "./l10n";
 import {
   BPE_PAYLOAD_SIZE, bpWords, compress, hex, maxCopies, readBlock,
@@ -9,14 +11,14 @@ import {
   type ReadResult, type WordRole,
 } from "./transforms";
 
-export type TrStrings = Record<string, string> & { refs: Record<string, string>; lang: string };
+export type TrStrings = Record<string, string> & { lang: string };
 
 export const fill = (tpl: string, vars: Record<string, string | number>) =>
   tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
-const see = (S: TrStrings, r: string) => ` <a class="see" href="${S.refs[r]}">${S.see}</a>`;
-const strip = (html: string) => html.replace(/ ?<a class="see"[^>]*>[^<]*<\/a>/g, "");
-/** What the live region reads: the line without its code links and tags. */
-export const spoken = (html: string) => strip(html).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+/** What the live region reads: the line without its tags. */
+export const spoken = (html: string) => html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+/** The class that outlines what the last action changed. */
+const chg = (on: boolean | undefined) => (on ? " chg" : "");
 
 /** A whole number in the page's language. */
 export const num = (S: TrStrings, x: number) =>
@@ -43,11 +45,31 @@ export function presetOut(p: Preset, lsize: number): number {
   return 0;
 }
 
+/** What an action changed in the compression figure: the rows of the bars, the branch that decided, the outcome. */
+export interface CompressChanges {
+  block: boolean;
+  out: boolean;
+  disk: boolean;
+  branch: boolean;
+  outcome: boolean;
+}
+export const NO_COMPRESS_CHANGES: CompressChanges = { block: false, out: false, disk: false, branch: false, outcome: false };
+
+export function compressChanges(a: CompressIn, ra: CompressOut, b: CompressIn, rb: CompressOut): CompressChanges {
+  return {
+    block: a.lsize !== b.lsize || a.ashift !== b.ashift || a.zero !== b.zero,
+    out: a.algo !== b.algo || a.zero !== b.zero || (!b.zero && a.out !== b.out) || ra.limit !== rb.limit,
+    disk: ra.sectors !== rb.sectors || ra.asize !== rb.asize || ra.outcome !== rb.outcome,
+    branch: ra.why !== rb.why,
+    outcome: ra.outcome !== rb.outcome || ra.psize !== rb.psize,
+  };
+}
+
 const algoName = (S: TrStrings, a: string) => (a === "off" ? S.algoOff : a === "lz4" ? "LZ4" : "ZLE");
 const pct = (x: number, l: number) => `${Math.min(100, (100 * x) / l).toFixed(3)}%`;
 
 /** The bars: the logical block with its sectors, the 7/8 line and the limit, the compressor output, the sectors allocated. */
-export function compressBars(S: TrStrings, x: CompressIn, r: CompressOut): string {
+export function compressBars(S: TrStrings, x: CompressIn, r: CompressOut, c: CompressChanges = NO_COMPRESS_CHANGES): string {
   const sector = 2 ** x.ashift;
   const n = x.lsize / sector;
   const ticks = n <= 64 ? Array.from({ length: n - 1 }, (_, i) => `<span class="tick" style="left:${pct((i + 1) * sector, x.lsize)}"></span>`).join("") : "";
@@ -64,32 +86,32 @@ export function compressBars(S: TrStrings, x: CompressIn, r: CompressOut): strin
     : `<div class="bar-note">${r.outcome === "embedded" ? S.diskEmbedded : S.diskNothing}</div>`;
   const limitLabel = r.limit === null ? "" : fill(S.limitLabel, { limit: size(S, r.limit), eighth: size(S, r.eighth) });
   const outLabel = r.limit === null || x.zero ? "" : fill(x.out > r.limit ? S.outOver : S.outFits, { out: size(S, x.out) });
-  return `<div class="bars" role="img" aria-label="${strip(compressLine(S, x, r)).replace(/<[^>]+>/g, "").replace(/"/g, "&quot;")}">
-<div class="row"><div class="rlabel">${fill(S.rowBlock, { lsize: size(S, x.lsize), n: plural(S, n, "sector1", "sectorN"), sector: size(S, sector) })}</div><div class="track">${lines}<span class="bar block${x.zero ? " zero" : ""}"></span>${ticks}</div></div>
-<div class="row"><div class="rlabel">${outLabel ? fill(S.rowOutVal, { val: outLabel }) : S.rowOut}${limitLabel ? `<span class="lim">${limitLabel}</span>` : ""}</div>${outRow}</div>
-<div class="row"><div class="rlabel">${fill(S.rowDisk, { n: plural(S, r.sectors, "sector1", "sectorN"), asize: size(S, r.asize) })}</div>${disk}</div>
+  return `<div class="bars" role="img" aria-label="${compressLine(S, x, r).replace(/<[^>]+>/g, "").replace(/"/g, "&quot;")}">
+<div class="row${chg(c.block)}"><div class="rlabel">${fill(S.rowBlock, { lsize: size(S, x.lsize), n: plural(S, n, "sector1", "sectorN"), sector: size(S, sector) })}</div><div class="track">${lines}<span class="bar block${x.zero ? " zero" : ""}"></span>${ticks}</div></div>
+<div class="row${chg(c.out)}"><div class="rlabel">${outLabel ? fill(S.rowOutVal, { val: outLabel }) : S.rowOut}${limitLabel ? `<span class="lim">${limitLabel}</span>` : ""}</div>${outRow}</div>
+<div class="row${chg(c.disk)}"><div class="rlabel">${fill(S.rowDisk, { n: plural(S, r.sectors, "sector1", "sectorN"), asize: size(S, r.asize) })}</div>${disk}</div>
 </div>`;
 }
 
 type PathState = "pass" | "taken" | "skip";
 
 /** The branches of zio_write_compress, in order, with the one that decided. */
-export function compressPath(S: TrStrings, x: CompressIn, r: CompressOut): string {
-  const steps: { text: string; st: PathState; ref: string }[] = [];
-  const add = (text: string, st: PathState, ref: string) => steps.push({ text, st, ref });
+export function compressPath(S: TrStrings, x: CompressIn, r: CompressOut, c: CompressChanges = NO_COMPRESS_CHANGES): string {
+  const steps: { text: string; st: PathState }[] = [];
+  const add = (text: string, st: PathState) => steps.push({ text, st });
   const done = () => steps.some((s) => s.st === "taken");
-  const next = (cond: boolean, yes: string, no: string, ref: string) => {
-    if (done()) add(no, "skip", ref);
-    else add(cond ? yes : no, cond ? "taken" : "pass", ref);
+  const next = (cond: boolean, yes: string, no: string) => {
+    if (done()) add(no, "skip");
+    else add(cond ? yes : no, cond ? "taken" : "pass");
   };
-  next(x.algo === "off", S.pOffYes, fill(S.pOffNo, { algo: algoName(S, x.algo) }), "compressOn");
-  next(x.zero, S.pZeroYes, S.pZeroNo, "zero");
+  next(x.algo === "off", S.pOffYes, fill(S.pOffNo, { algo: algoName(S, x.algo) }));
+  next(x.zero, S.pZeroYes, S.pZeroNo);
   const lim = r.limit ?? 0;
-  next(r.why === "over", fill(S.pOverYes, { out: size(S, x.out), limit: size(S, lim) }), fill(S.pOverNo, { out: size(S, Math.max(1, x.out)), limit: size(S, lim) }), "over");
-  next(r.why === "embed", fill(S.pEmbedYes, { out: size(S, r.returned ?? 0) }), r.why === "noembed-rounded" ? S.pEmbedEnc : S.pEmbedNo, "embed");
-  if (done()) add(S.pRound, "skip", "round");
-  else add(fill(r.outcome === "uncompressed" ? S.pRoundLsize : S.pRoundOk, { rounded: size(S, r.rounded ?? 0), lsize: size(S, x.lsize) }), "taken", "round");
-  return `<ol class="path" aria-label="${S.pathLabel}">${steps.map((s, i) => `<li class="${s.st}" data-i="${i}">${s.text}${s.st !== "skip" ? see(S, s.ref) : ""}${s.st === "taken" ? `<span class="visually-hidden"> ${S.srTaken}</span>` : ""}</li>`).join("")}</ol>`;
+  next(r.why === "over", fill(S.pOverYes, { out: size(S, x.out), limit: size(S, lim) }), fill(S.pOverNo, { out: size(S, Math.max(1, x.out)), limit: size(S, lim) }));
+  next(r.why === "embed", fill(S.pEmbedYes, { out: size(S, r.returned ?? 0) }), r.why === "noembed-rounded" ? S.pEmbedEnc : S.pEmbedNo);
+  if (done()) add(S.pRound, "skip");
+  else add(fill(r.outcome === "uncompressed" ? S.pRoundLsize : S.pRoundOk, { rounded: size(S, r.rounded ?? 0), lsize: size(S, x.lsize) }), "taken");
+  return `<ol class="path" aria-label="${S.pathLabel}">${steps.map((s, i) => `<li class="${s.st}${chg(c.branch && s.st === "taken")}" data-i="${i}">${s.text}${s.st === "taken" ? `<span class="visually-hidden"> ${S.srTaken}</span>` : ""}</li>`).join("")}</ol>`;
 }
 
 const outcomeName = (S: TrStrings, r: CompressOut) => S[`o_${r.outcome}`];
@@ -102,13 +124,13 @@ export function compressLine(S: TrStrings, x: CompressIn, r: CompressOut): strin
 }
 
 /** The outcome and the block pointer it leaves. */
-export function compressResult(S: TrStrings, x: CompressIn, r: CompressOut): string {
+export function compressResult(S: TrStrings, x: CompressIn, r: CompressOut, c: CompressChanges = NO_COMPRESS_CHANGES): string {
   const fields = r.outcome === "hole"
     ? fill(S.bpHole, { lsize: size(S, x.lsize) })
     : r.outcome === "embedded"
       ? fill(S.bpEmbedded, { psize: size(S, r.psize), lsize: size(S, x.lsize), algo: algoName(S, r.compress) })
       : fill(S.bpPlain, { psize: size(S, r.psize), lsize: size(S, x.lsize), algo: algoName(S, r.compress), asize: size(S, r.asize) });
-  return `<p class="outcome ${r.outcome}"><b>${outcomeName(S, r)}</b> ${compressLine(S, x, r)}</p><p class="bpfields">${fields}</p>${wordsGrid(S, kindOf(r), "plain", true)}`;
+  return `<p class="outcome ${r.outcome}${chg(c.outcome)}"><b>${outcomeName(S, r)}</b> ${compressLine(S, x, r)}</p><p class="bpfields">${fields}</p>${wordsGrid(S, kindOf(r), "plain", true)}`;
 }
 
 /** The same data at every ashift of the figure. */
@@ -137,15 +159,42 @@ export function wordsGrid(S: TrStrings, kind: BpKind, base: BpKind = "plain", co
   return `<table class="words${compact ? " compact" : ""}"><caption>${cap}</caption><thead><tr><th scope="col">${S.thWord}</th><th scope="col">${S.thHolds}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-/** What a kind of block pointer means, in a sentence, with its code reference. */
+/** What a kind of block pointer means, in a sentence. */
 export function kindLine(S: TrStrings, kind: BpKind): string {
   const copies = maxCopies(kind);
-  return `${S[`kd_${kind}`]}${copies ? ` ${fill(S.copiesLine, { n: copies })}` : ""}${see(S, `k_${kind}`)}`;
+  return `${S[`kd_${kind}`]}${copies ? ` ${fill(S.copiesLine, { n: copies })}` : ""}`;
 }
 
 // ---------------------------------------------------------------- dedup
 
 const contentChip = (c: string) => `<span class="ct ct-${c}">${c}</span>`;
+
+/** What an action changed in the dedup figure: the entry, the new block pointer, the new block on disk, the counters, the quota. */
+export interface DedupChanges {
+  entry: string | null;
+  bp: boolean;
+  disk: string | null;
+  counters: ("write" | "lookup" | "disk" | "entry")[];
+  quota: boolean;
+}
+export const NO_DEDUP_CHANGES: DedupChanges = { entry: null, bp: false, disk: null, counters: [], quota: false };
+
+export function dedupChanges(a: DedupState, b: DedupState, quotaA: boolean, quotaB: boolean): DedupChanges {
+  const before = new Map(a.entries.map((e) => [e.content, `${e.refcnt}|${e.dva}`]));
+  const entry = b.entries.find((e) => before.get(e.content) !== `${e.refcnt}|${e.dva}`)?.content ?? null;
+  const counters: DedupChanges["counters"] = [];
+  if (b.steps.length > a.steps.length) counters.push("write");
+  if (b.lookups > a.lookups) counters.push("lookup");
+  if (b.disk.length > a.disk.length) counters.push("disk");
+  if (b.entries.length > a.entries.length) counters.push("entry");
+  return {
+    entry,
+    bp: b.bps.length > a.bps.length,
+    disk: b.disk.length > a.disk.length ? b.disk[b.disk.length - 1].dva : null,
+    counters,
+    quota: quotaA !== quotaB,
+  };
+}
 
 /** The pipeline of the last write: checksum, lookup, outcome. */
 function dedupPath(S: TrStrings, st: DedupStep | undefined): string {
@@ -153,7 +202,7 @@ function dedupPath(S: TrStrings, st: DedupStep | undefined): string {
   const look = st.outcome === "hit" ? S.dFound : st.outcome === "overquota" ? S.dNull : S.dNew;
   const items = [
     fill(S.dStepCk, { c: contentChip(st.content), ck: st.cksum, txg: st.txg }),
-    `${look}${see(S, st.outcome === "overquota" ? "quota" : "lookup")}`,
+    look,
     `${dedupLine(S, st)}`,
   ];
   return `<ol class="path">${items.map((t, i) => `<li class="${i === 2 ? "taken" : "pass"}">${t}</li>`).join("")}</ol>`;
@@ -162,44 +211,43 @@ function dedupPath(S: TrStrings, st: DedupStep | undefined): string {
 /** What one write did. */
 export function dedupLine(S: TrStrings, st: DedupStep): string {
   const v = { c: contentChip(st.content), dva: st.bp.dva, n: st.refcnt ?? 0, txg: st.txg, birth: st.bp.physical };
-  const ref = st.outcome === "hit" ? "hit" : st.outcome === "miss" ? "miss" : "overquota";
-  return fill(S[`d_${st.outcome}`], v) + see(S, ref);
+  return fill(S[`d_${st.outcome}`], v);
 }
 
-/** The DDT, the block pointers, the disk and the counters. */
-export function dedupView(S: TrStrings, s: DedupState): string {
+/** The DDT, the block pointers, the disk and the counters; what the last action changed is outlined. */
+export function dedupView(S: TrStrings, s: DedupState, quota = false, c: DedupChanges = NO_DEDUP_CHANGES): string {
   const last = s.steps[s.steps.length - 1];
   const ddt = s.entries.length
     ? `<div class="ddt-scroll" tabindex="0" role="region" aria-label="${S.ddtCaption}"><table class="ddt"><caption>${S.ddtCaption}</caption><thead><tr><th scope="col">${S.thKey}</th><th scope="col">${S.thContent}</th><th scope="col">${S.thRef}</th><th scope="col">${S.thDva}</th><th scope="col">${S.thBirth}</th></tr></thead><tbody>${s.entries
-      .map((e) => `<tr${last && last.content === e.content && last.outcome !== "overquota" ? ' class="cur"' : ""}><td><code>${e.cksum}…</code></td><td>${contentChip(e.content)}</td><td class="num">${e.refcnt}</td><td><code>${e.dva}</code></td><td class="num">${e.birth}</td></tr>`)
+      .map((e) => `<tr${c.entry === e.content ? ' class="chg"' : ""}><td><code>${e.cksum}…</code></td><td>${contentChip(e.content)}</td><td class="num">${e.refcnt}</td><td><code>${e.dva}</code></td><td class="num">${e.birth}</td></tr>`)
       .join("")}</tbody></table></div>`
     : `<p class="muted">${S.ddtEmpty}</p>`;
   const bps = s.bps.length
     ? `<ol class="bps">${s.bps
-      .map((b, i) => `<li${i === s.bps.length - 1 ? ' class="cur"' : ""}><span class="bpn">bp${b.n}</span>${contentChip(b.content)}<span class="dbit ${b.dedup ? "on" : "off"}">D=${b.dedup ? 1 : 0}</span><span class="arrow" aria-hidden="true">→</span><code>${b.dva}</code><span class="births">${fill(S.births, { l: b.logical, p: b.physical })}</span></li>`)
+      .map((b, i) => `<li${c.bp && i === s.bps.length - 1 ? ' class="chg"' : ""}><span class="bpn">bp${b.n}</span>${contentChip(b.content)}<span class="dbit ${b.dedup ? "on" : "off"}">D=${b.dedup ? 1 : 0}</span><span class="arrow" aria-hidden="true">→</span><code>${b.dva}</code><span class="births">${fill(S.births, { l: b.logical, p: b.physical })}</span></li>`)
       .join("")}</ol>`
     : `<p class="muted">${S.bpsEmpty}</p>`;
   const disk = s.disk.length
     ? `<ol class="disk">${s.disk
       .map((d) => {
         const refs = s.bps.filter((b) => b.dva === d.dva).map((b) => `bp${b.n}`);
-        const isNew = last?.wrote === d.dva;
-        return `<li${isNew ? ' class="cur"' : ""}><code>${d.dva}</code>${contentChip(d.content)}<span class="refs">${fill(S.refsBy, { list: refs.join(", ") })}</span></li>`;
+        return `<li${c.disk === d.dva ? ' class="chg"' : ""}><code>${d.dva}</code>${contentChip(d.content)}<span class="refs">${fill(S.refsBy, { list: refs.join(", ") })}</span></li>`;
       })
       .join("")}</ol>`
     : `<p class="muted">${S.diskEmpty}</p>`;
-  const counters = [
-    plural(S, s.steps.length, "cWrite1", "cWriteN"),
-    plural(S, s.lookups, "cLookup1", "cLookupN"),
-    plural(S, s.disk.length, "cDisk1", "cDiskN"),
-    plural(S, s.entries.length, "cEntry1", "cEntryN"),
-  ].map((x) => `<span>${x}</span>`).join("");
-  return `<p class="counters">${counters}</p><div class="dd-grid"><section class="panel"><h3>${S.lastWrite}</h3>${dedupPath(S, last)}</section><section class="panel"><h3>${S.ddtLabel}</h3>${ddt}</section><section class="panel"><h3>${S.bpsLabel}</h3>${bps}</section><section class="panel"><h3>${S.diskLabel}</h3>${disk}</section></div>`;
+  const counters = ([
+    ["write", plural(S, s.steps.length, "cWrite1", "cWriteN")],
+    ["lookup", plural(S, s.lookups, "cLookup1", "cLookupN")],
+    ["disk", plural(S, s.disk.length, "cDisk1", "cDiskN")],
+    ["entry", plural(S, s.entries.length, "cEntry1", "cEntryN")],
+  ] as const).map(([k, x]) => `<span class="${k}${chg(c.counters.includes(k))}">${x}</span>`).join("");
+  const over = quota ? `<p class="quota-note${chg(c.quota)}">${S.quotaNote}</p>` : "";
+  return `<p class="counters">${counters}</p><div class="dd-grid"><section class="panel"><h3>${S.lastWrite}</h3>${dedupPath(S, last)}</section><section class="panel"><h3>${S.ddtLabel}</h3>${over}${ddt}</section><section class="panel"><h3>${S.bpsLabel}</h3>${bps}</section><section class="panel"><h3>${S.diskLabel}</h3>${disk}</section></div>`;
 }
 
 export function dedupDescribe(S: TrStrings, s: DedupState): string {
   if (!s.steps.length) return `<p>${S.dNoWrite}</p>`;
-  return `<ol>${s.steps.map((st) => `<li>${strip(dedupLine(S, st))}</li>`).join("")}</ol><p>${strip(dedupView(S, s).match(/<p class="counters">([\s\S]*?)<\/p>/)![1]).replace(/<\/span><span>/g, ", ").replace(/<[^>]+>/g, "")}.</p>`;
+  return `<ol>${s.steps.map((st) => `<li>${dedupLine(S, st)}</li>`).join("")}</ol><p>${dedupView(S, s).match(/<p class="counters">([\s\S]*?)<\/p>/)![1].replace(/<\/span><span[^>]*>/g, ", ").replace(/<[^>]+>/g, "")}.</p>`;
 }
 
 // ---------------------------------------------------------------- encryption
@@ -209,6 +257,23 @@ export interface CryptUi {
   flip: boolean;
   scrub: { id: string; ok: boolean }[] | null;
   read: ReadResult[] | null;
+}
+
+/** What an action changed in the encrypted file: the blocks whose look changed, the key line, the scrub verdicts, the read. */
+export interface CryptChanges {
+  blocks: string[];
+  key: boolean;
+  scrub: boolean;
+  read: boolean;
+}
+export const NO_CRYPT_CHANGES: CryptChanges = { blocks: [], key: false, scrub: false, read: false };
+
+export function cryptChanges(act: string): CryptChanges {
+  if (act === "key") return { blocks: ["dn", "d0", "d1", "d2"], key: true, scrub: false, read: false };
+  if (act === "flip") return { blocks: ["d1"], key: false, scrub: false, read: false };
+  if (act === "scrub") return { blocks: [], key: false, scrub: true, read: false };
+  if (act === "read") return { blocks: [], key: false, scrub: false, read: true };
+  return NO_CRYPT_CHANGES;
 }
 
 const blockName = (S: TrStrings, id: string) => (id === "dn" ? S.bDnode : id === "L1" ? S.bIndirect : fill(S.bData, { i: id.slice(1) }));
@@ -226,23 +291,23 @@ function contentOf(S: TrStrings, b: CBlock, key: boolean, flip: boolean): string
 }
 
 /** The encrypted file: dnode block, indirect block, data blocks, each as on disk and as the reader sees it. */
-export function cryptFileView(S: TrStrings, f: CryptFile, ui: CryptUi): string {
+export function cryptFileView(S: TrStrings, f: CryptFile, ui: CryptUi, c: CryptChanges = NO_CRYPT_CHANGES): string {
   const blocks = [f.dnode, f.indirect, ...f.data];
   const sc = new Map(ui.scrub?.map((x) => [x.id, x.ok]) ?? []);
   const li = (b: CBlock, cls: string) => {
     const kind = b.id === "L1" ? "indirect" : b.id === "dn" ? "dnode" : "encrypted";
-    const verdict = ui.scrub ? `<span class="sc ${sc.get(b.id) ? "ok" : "bad"}">${sc.get(b.id) ? S.scOk : S.scBad}</span>` : "";
+    const verdict = ui.scrub ? `<span class="sc ${sc.get(b.id) ? "ok" : "bad"}${chg(c.scrub)}">${sc.get(b.id) ? S.scOk : S.scBad}</span>` : "";
     const flipMark = ui.flip && b.id === "d1" ? `<span class="flip">${S.flipped}</span>` : "";
-    return `<li class="${cls}"><div class="bhead"><span class="bname">${blockName(S, b.id)}</span><span class="bkind">${S[`k_${kind}`]}</span>${flipMark}${verdict}</div><div class="bbody">${contentOf(S, b, ui.key, ui.flip)}</div></li>`;
+    return `<li class="${cls}${chg(c.blocks.includes(b.id))}"><div class="bhead"><span class="bname">${blockName(S, b.id)}</span><span class="bkind">${S[`k_${kind}`]}</span>${flipMark}${verdict}</div><div class="bbody">${contentOf(S, b, ui.key, ui.flip)}</div></li>`;
   };
   const fail = ui.read ? ui.read.findIndex((x) => !x.ok) : -1;
   const err = fail >= 0 ? (ui.read![fail] as { ok: false; err: string }).err : "";
   const read = !ui.read
     ? ""
     : fail < 0
-      ? `<p class="readout ok">${fill(S.readOk, { text: ui.read.map((x) => (x.ok ? x.text : "")).join(" ") })}${see(S, "eacces")}</p>`
-      : `<p class="readout bad">${fill(err === "ECKSUM" ? S.readEcksum : S.readEacces, { i: fail })}${see(S, err === "ECKSUM" ? "truncated" : "eacces")}</p>`;
-  return `<p class="keystate ${ui.key ? "on" : "off"}">${ui.key ? S.keyOn : S.keyOff}</p><ul class="ctree" aria-label="${S.treeLabel}">${li(blocks[0], "dn")}<li class="sub"><ul>${li(blocks[1], "ind")}<li class="sub"><ul class="leaves">${f.data.map((b) => li(b, "dat")).join("")}</ul></li></ul></li></ul>${read}`;
+      ? `<p class="readout ok${chg(c.read)}">${fill(S.readOk, { text: ui.read.map((x) => (x.ok ? x.text : "")).join(" ") })}</p>`
+      : `<p class="readout bad${chg(c.read)}">${fill(err === "ECKSUM" ? S.readEcksum : S.readEacces, { i: fail })}</p>`;
+  return `<p class="keystate ${ui.key ? "on" : "off"}${chg(c.key)}">${ui.key ? S.keyOn : S.keyOff}</p><ul class="ctree" aria-label="${S.treeLabel}">${li(blocks[0], "dn")}<li class="sub"><ul>${li(blocks[1], "ind")}<li class="sub"><ul class="leaves">${f.data.map((b) => li(b, "dat")).join("")}</ul></li></ul></li></ul>${read}`;
 }
 
 /** What the last action on the encrypted file did. */
@@ -250,15 +315,15 @@ export function cryptLine(S: TrStrings, act: string, ui: CryptUi): string {
   if (act === "scrub" && ui.scrub) {
     const bad = ui.scrub.filter((x) => !x.ok).length;
     const v = { n: plural(S, ui.scrub.length, "blk1", "blkN"), bad: plural(S, bad, "err1", "errN") };
-    return fill(ui.key ? S.scrubKey : S.scrubNoKey, v) + see(S, "scrub");
+    return fill(ui.key ? S.scrubKey : S.scrubNoKey, v);
   }
   if (act === "read" && ui.read) {
     const i = ui.read.findIndex((x) => !x.ok);
-    if (i < 0) return S.readOkLine + see(S, "eacces");
+    if (i < 0) return S.readOkLine;
     const e = ui.read[i] as { ok: false; err: string };
-    return fill(e.err === "ECKSUM" ? S.readEcksum : S.readEacces, { i }) + see(S, e.err === "ECKSUM" ? "truncated" : "eacces");
+    return fill(e.err === "ECKSUM" ? S.readEcksum : S.readEacces, { i });
   }
-  if (act === "key") return (ui.key ? S.keyOnLine : S.keyOffLine) + see(S, "clear");
+  if (act === "key") return ui.key ? S.keyOnLine : S.keyOffLine;
   if (act === "flip") return (ui.flip ? S.flipOnLine : S.flipOffLine);
   return "";
 }

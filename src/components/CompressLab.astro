@@ -6,11 +6,12 @@
 // zio_write_compress with the one that decides, and what is allocated.
 // src/lib/transforms.ts decides every outcome, src/lib/transforms-view.ts
 // draws it, at build time (readable without JavaScript) and in the browser.
+// Each action outlines what it changed, and the line under the controls says
+// it in plain words, with no code links (D28.1).
 // Refs: ANALYSIS.md, room "Compression, dedup, encryption", excerpts 1, 4, 5;
 // simplifications: DECISIONS.md D10.2.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { compress } from "../lib/transforms";
 import { compressBars, compressPath, compressResult, compressTable, compressLine, presetOut, size, LSIZES, ASHIFTS, ALGOS, PRESETS, type TrStrings } from "../lib/transforms-view";
@@ -21,19 +22,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const Z = "module/zfs/zio.c";
-const S_SPA = "include/sys/spa.h";
-const refs = {
-  compressOn: gh(Z, 1982, 1984),
-  zero: gh(Z, 1986, 1987),
-  over: gh(Z, 1991, 2001),
-  embed: gh(Z, 2002, 2017),
-  round: gh(Z, 2018, 2039),
-  k_plain: gh(S_SPA, 123, 186),
-  k_hole: gh(S_SPA, 365, 373),
-  k_embedded: gh(S_SPA, 265, 323),
-};
-const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as TrStrings;
 const t = UI[lang];
 const x0 = { lsize: 131072, ashift: 12, algo: "lz4" as const, zero: false, out: presetOut("text", 131072) };
 const r0 = compress(x0);
@@ -65,13 +54,13 @@ const id = `cl-out-${lang}`;
       {ALGOS.map((a) => <button class="btn" type="button" data-algo={a} aria-pressed={a === x0.algo ? "true" : "false"}>{a === "off" ? S.algoOff : a.toUpperCase()}</button>)}
     </div>
   </div>
+  <p class="cl-now" data-now aria-hidden="true" hidden></p>
 
   <div class="cl-grid">
     <div class="panel" data-bars set:html={compressBars(S, x0, r0)} />
     <div class="panel" data-path set:html={compressPath(S, x0, r0)} />
     <div class="panel result" data-result set:html={compressResult(S, x0, r0)} />
   </div>
-  <p class="cl-now" data-now aria-hidden="true" hidden></p>
   <p class="visually-hidden" data-live aria-live="polite"></p>
   <noscript><p class="muted">{S.cNoScript}</p></noscript>
   <div class="cl-table" data-table tabindex="0" role="region" aria-label={t.scrollTable} set:html={compressTable(S, x0)} />
@@ -84,7 +73,7 @@ const id = `cl-out-${lang}`;
 <script>
   import { strings, reducedMotion } from "../lib/svg";
   import { compress, type Algo } from "../lib/transforms";
-  import { compressBars, compressPath, compressResult, compressTable, compressLine, presetOut, spoken, type Preset, type TrStrings } from "../lib/transforms-view";
+  import { compressBars, compressPath, compressResult, compressTable, compressLine, compressChanges, presetOut, spoken, NO_COMPRESS_CHANGES, type Preset, type TrStrings } from "../lib/transforms-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-compress]")) {
     const S = strings<TrStrings>(root);
@@ -93,6 +82,8 @@ const id = `cl-out-${lang}`;
     const numIn = q<HTMLInputElement>("[data-out-num]");
     const x = { lsize: 131072, ashift: 12, algo: "lz4" as Algo, zero: false, out: Number(range.value) };
     let preset: Preset | null = "text";
+    // The state the last announced action started from: the outline compares with it.
+    let before = { ...x };
 
     function controls() {
       const pressed = (sel: string, key: string, v: string) => {
@@ -111,11 +102,14 @@ const id = `cl-out-${lang}`;
       }
     }
 
-    function render(announce: boolean) {
+    function render(announce: boolean, first = false) {
       const r = compress(x);
-      q("[data-bars]").innerHTML = compressBars(S, x, r);
-      q("[data-path]").innerHTML = compressPath(S, x, r);
-      q("[data-result]").innerHTML = compressResult(S, x, r);
+      // What the action changed is outlined until the next one; while the range is dragged, against where the drag began.
+      const c = first ? NO_COMPRESS_CHANGES : compressChanges(before, compress(before), x, r);
+      if (announce) before = { ...x };
+      q("[data-bars]").innerHTML = compressBars(S, x, r, c);
+      q("[data-path]").innerHTML = compressPath(S, x, r, c);
+      q("[data-result]").innerHTML = compressResult(S, x, r, c);
       q("[data-table]").innerHTML = compressTable(S, x);
       q("[data-describe]").innerHTML = compressLine(S, x, r);
       controls();
@@ -173,7 +167,7 @@ const id = `cl-out-${lang}`;
     range.addEventListener("change", () => fromInput(range, true));
     numIn.addEventListener("change", () => fromInput(numIn, true));
 
-    render(false);
+    render(false, true);
     q(".cl-bar").hidden = false;
   }
 </script>
@@ -343,13 +337,8 @@ const id = `cl-out-${lang}`;
     font-size: var(--step--1);
     color: var(--fg-muted);
   }
-  .cl :global(a.see) {
-    font-size: 0.85em;
-    color: var(--fg-muted);
-    font-weight: 400;
-  }
   .cl-now {
-    margin: var(--space-4) 0 0;
+    margin: 0 0 var(--space-4);
     font-size: var(--step--1);
     max-width: 52rem;
     min-height: 3em;

@@ -60,13 +60,9 @@
 :is(.dd, .cr) .path li.taken {
   font-weight: 600;
 }
-:is(.cl, .dd, .cr) a.see {
-  font-size: 0.85em;
-  color: var(--fg-muted);
-  font-weight: 400;
-}
+/* The line that says what the last action did sits just under the buttons. */
 :is(.dd, .cr) .tr-now {
-  margin: var(--space-4) 0 0;
+  margin: 0 0 var(--space-4);
   font-size: var(--step--1);
   max-width: 52rem;
   min-height: 3em;
@@ -163,6 +159,18 @@
   font-weight: 600;
 }
 
+/* What the last action changed: a dashed ink outline (focus rings are solid),
+   static, so it reads the same under reduced motion (D28.1, as D27.1). Rows and
+   list items are outlined inside their own box, so two neighbours do not draw
+   double lines. */
+:is(.cl, .dd, .cr) .chg {
+  outline: 2px dashed var(--fg);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+:is(.cl, .dd, .cr) :is(li, tr).chg {
+  outline-offset: -2px;
+}
 /* Dedup. */
 .dd .counters {
   display: flex;
@@ -218,9 +226,6 @@
   border-radius: 4px;
   padding: 0.2em 0.5em;
 }
-.dd :is(.bps, .disk) li.cur {
-  border-color: var(--accent);
-}
 .dd .bpn {
   font-family: var(--font-mono);
   color: var(--fg-muted);
@@ -239,6 +244,11 @@
 }
 .dd .arrow {
   color: var(--fg-faint);
+}
+.dd .quota-note {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-left: 3px solid var(--bad);
 }
 
 /* Encryption. */

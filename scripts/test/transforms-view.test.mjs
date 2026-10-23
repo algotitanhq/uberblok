@@ -3,7 +3,8 @@
 // ES have the same keys and placeholders; every state of the three figures is
 // drawn in every language with no placeholder left unfilled; counts are
 // singular for 1 in English and Spanish and for 0 and 1 in French (DECISIONS.md D7.4);
-// the drawing agrees with the model.
+// the drawing agrees with the model; the figures carry no link, and each
+// action outlines what it changed (D28.1).
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +25,6 @@ const { fr } = await import("../../src/lib/fr.ts");
 
 const strings = (lang) => ({
   ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])),
-  refs: new Proxy({}, { get: () => "#" }),
   lang,
 });
 const text = (html) => html.replace(/<[^>]+>/g, "").replace(/[  ]/g, " ");
@@ -157,4 +157,93 @@ test("sizes: whole KiB, else bytes, in the page's language", () => {
   assert.equal(V.size(strings("es"), 131072), "128\u00a0KiB");
   assert.equal(V.size(strings("es"), 4211), "4211\u00a0bytes");
   assert.equal(V.size(strings("es"), 49807), "49\u202f807\u00a0bytes");
+});
+
+test("the figures carry no link: the room's Source notes show the code (D21.1)", () => {
+  for (const lang of ["en", "fr", "es"]) {
+    const S = strings(lang);
+    const html = [];
+    for (const lsize of V.LSIZES)
+      for (const preset of V.PRESETS) {
+        const x = { lsize, ashift: 12, algo: "lz4", zero: preset === "zero", out: V.presetOut(preset, lsize) };
+        const r = M.compress(x);
+        html.push(V.compressBars(S, x, r), V.compressPath(S, x, r), V.compressResult(S, x, r), V.compressLine(S, x, r), V.compressTable(S, x));
+      }
+    let s = M.dedupStart();
+    for (const [c, q] of [["A", false], ["A", false], ["C", true], ["A", true]]) {
+      s = M.dedupWrite(s, c, q);
+      html.push(V.dedupView(S, s, q), V.dedupDescribe(S, s), V.dedupLine(S, s.steps[s.steps.length - 1]));
+    }
+    for (const k of ["plain", "encrypted", "authenticated", "indirect"]) html.push(V.kindLine(S, k), V.wordsGrid(S, k));
+    const f = M.cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusText);
+    for (const key of [true, false]) {
+      const ui = { key, flip: false, scrub: M.scrub(f), read: V.readAll(f, key) };
+      html.push(V.cryptFileView(S, f, ui), ...["scrub", "read", "key", "flip"].map((a) => V.cryptLine(S, a, ui)));
+    }
+    assert.doesNotMatch(html.join(""), /<a\b/, lang);
+  }
+});
+
+test("compression: each action outlines what it changed, and only that", () => {
+  const S = strings("en");
+  const x0 = { lsize: 131072, ashift: 12, algo: "lz4", zero: false, out: V.presetOut("text", 131072) };
+  const r0 = M.compress(x0);
+  const outlined = (x, c) => {
+    const r = M.compress(x);
+    return { bars: (V.compressBars(S, x, r, c).match(/class="row chg"/g) ?? []).length, path: (V.compressPath(S, x, r, c).match(/ chg"/g) ?? []).length, result: / chg"/.test(V.compressResult(S, x, r, c)) };
+  };
+  // All zeros: the block, the output row (no compressor), the disk (nothing), the branch and the outcome.
+  const z = { ...x0, zero: true };
+  const cz = V.compressChanges(x0, r0, z, M.compress(z));
+  assert.deepEqual(cz, { block: true, out: true, disk: true, branch: true, outcome: true });
+  assert.deepEqual(outlined(z, cz), { bars: 3, path: 1, result: true });
+  // A slightly bigger output that still rounds to the same sectors: only its row.
+  const y = { ...x0, out: x0.out + 10 };
+  const cy = V.compressChanges(x0, r0, y, M.compress(y));
+  assert.deepEqual(cy, { block: false, out: true, disk: false, branch: false, outcome: false });
+  assert.deepEqual(outlined(y, cy), { bars: 1, path: 0, result: false });
+  // The same state: nothing outlined.
+  assert.deepEqual(outlined(x0, V.compressChanges(x0, r0, x0, r0)), { bars: 0, path: 0, result: false });
+});
+
+test("dedup: a miss, a hit, the quota and an over-quota write each outline their own effect", () => {
+  const S = strings("en");
+  const w = (s, c, q) => M.dedupWrite(s, c, q);
+  const s0 = M.dedupStart();
+  const s1 = w(s0, "A", false);
+  // A miss: a new entry, a block pointer, a block on disk, every counter.
+  const c1 = V.dedupChanges(s0, s1, false, false);
+  assert.deepEqual(c1, { entry: "A", bp: true, disk: s1.disk[0].dva, counters: ["write", "lookup", "disk", "entry"], quota: false });
+  // A hit: the entry's refcount and a block pointer; nothing on disk; one more write and one more lookup.
+  const s2 = w(s1, "A", false);
+  const c2 = V.dedupChanges(s1, s2, false, false);
+  assert.deepEqual(c2, { entry: "A", bp: true, disk: null, counters: ["write", "lookup"], quota: false });
+  const h2 = V.dedupView(S, s2, false, c2);
+  assert.equal((h2.match(/<tr class="chg"/g) ?? []).length, 1);
+  assert.equal((h2.match(/<li class="chg"/g) ?? []).length, 1);
+  // The quota: only its note.
+  const c3 = V.dedupChanges(s2, s2, false, true);
+  assert.deepEqual(c3, { entry: null, bp: false, disk: null, counters: [], quota: true });
+  assert.match(V.dedupView(S, s2, true, c3), /class="quota-note chg"/);
+  assert.doesNotMatch(V.dedupView(S, s2, false), /quota-note/);
+  // Over quota, a block never seen: written with no entry.
+  const s4 = w(s2, "C", true);
+  const c4 = V.dedupChanges(s2, s4, true, true);
+  assert.deepEqual(c4, { entry: null, bp: true, disk: s4.disk[s4.disk.length - 1].dva, counters: ["write", "lookup", "disk"], quota: false });
+});
+
+test("encryption: each action on the file outlines what it changed", () => {
+  const S = strings("en");
+  const f = M.cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusText);
+  const n = (html, re) => (html.match(re) ?? []).length;
+  const key = V.cryptFileView(S, f, { key: false, flip: false, scrub: null, read: null }, V.cryptChanges("key"));
+  assert.equal(n(key, /<li class="(dn|dat) chg"/g), 4);
+  assert.match(key, /class="keystate off chg"/);
+  const flip = V.cryptFileView(S, f, { key: true, flip: true, scrub: null, read: null }, V.cryptChanges("flip"));
+  assert.equal(n(flip, / chg"/g), 1);
+  const sc = V.cryptFileView(S, f, { key: true, flip: false, scrub: M.scrub(f), read: null }, V.cryptChanges("scrub"));
+  assert.equal(n(sc, /class="sc ok chg"/g), 5);
+  const rd = V.cryptFileView(S, f, { key: false, flip: false, scrub: null, read: V.readAll(f, false) }, V.cryptChanges("read"));
+  assert.match(rd, /class="readout bad chg"/);
+  assert.equal(n(V.cryptFileView(S, f, { key: true, flip: false, scrub: null, read: null }), / chg"/g), 0);
 });

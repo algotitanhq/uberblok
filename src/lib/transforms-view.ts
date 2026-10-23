@@ -3,7 +3,7 @@
 // first state at build time (readable without JavaScript) and the scripts
 // render every later state with the same functions. The figures carry no code
 // links (D21.1): the room's Source notes show the code. What the last action
-// changed is outlined until the next one (D28.1).
+// changed is outlined until the next one (D31.1).
 import { group } from "./l10n";
 import {
   BPE_PAYLOAD_SIZE, bpWords, compress, hex, maxCopies, readBlock,

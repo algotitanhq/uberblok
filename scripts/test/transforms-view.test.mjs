@@ -4,7 +4,7 @@
 // drawn in every language with no placeholder left unfilled; counts are
 // singular for 1 in English and Spanish and for 0 and 1 in French (DECISIONS.md D7.4);
 // the drawing agrees with the model; the figures carry no link, and each
-// action outlines what it changed (D28.1).
+// action outlines what it changed (D31.1).
 // Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -117,6 +117,10 @@
 .dd .ddt-scroll {
   overflow-x: auto;
 }
+/* Room for the outline of a changed row, inside the table's first column. */
+.dd .ddt :is(th, td):first-child {
+  padding-left: 0.4em;
+}
 .cl .cmp-table {
   max-width: 40rem;
 }
@@ -160,7 +164,7 @@
 }
 
 /* What the last action changed: a dashed ink outline (focus rings are solid),
-   static, so it reads the same under reduced motion (D28.1, as D27.1). Rows and
+   static, so it reads the same under reduced motion (D31.1, as D27.1). Rows and
    list items are outlined inside their own box, so two neighbours do not draw
    double lines. */
 :is(.cl, .dd, .cr) .chg {

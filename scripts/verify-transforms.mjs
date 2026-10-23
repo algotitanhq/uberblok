@@ -6,7 +6,7 @@
 // embeddable blocks at ashift 9 and 12; a dedup miss, a hit, then over quota;
 // the encrypted block pointer, the key unloaded, scrub and read. After one
 // action in each figure, the outline of what it changed is checked, and the
-// figures carry no link (D28.1); a Source note opens in the side panel on
+// figures carry no link (D31.1); a Source note opens in the side panel on
 // desktop. Then reduced motion, no JavaScript, and a keyboard-only walk.
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";

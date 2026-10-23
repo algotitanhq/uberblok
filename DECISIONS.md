@@ -2463,3 +2463,9 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   (`--fg-faint` 65% into `--line-strong`, about 3:1) and no other room changes. Removing the
   power-cut blocks at once (as before): the reader could not see that they were written and
   are simply unreachable.
+- **After the design review (ALG-183).** The picked block wore the accent outline that the key
+  calls "new copy", so a picked old block looked new. The pick now has a ring of its own in the
+  ink colour, with its own line in the key; the accent outline means a new copy only. The ghost
+  labels of a stacked card ("R · snapshot") go from 10 to 11 units, 12 below 480 px (9.5 CSS px
+  on a 390 px phone, from 7.7). They may run over the front card's top edge, short of the next
+  card; a longer one is squeezed with `textLength` rather than made smaller.

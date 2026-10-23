@@ -46,6 +46,7 @@ const S = {
     changed: "changed",
     prevUb: "previous",
     keptBySnap: "snapshot",
+    keyPicked: "picked block",
     keyNew: "new copy",
     keyOld: "old copy, still on disk",
     keyPin: "kept by the snapshot",
@@ -83,6 +84,7 @@ const S = {
     changed: "modifié",
     prevUb: "précédent",
     keptBySnap: "instantané",
+    keyPicked: "bloc choisi",
     keyNew: "nouvelle copie",
     keyOld: "ancienne copie, encore sur le disque",
     keyPin: "gardé par l’instantané",
@@ -120,6 +122,7 @@ const S = {
     changed: "modificado",
     prevUb: "anterior",
     keptBySnap: "instantánea",
+    keyPicked: "bloque elegido",
     keyNew: "copia nueva",
     keyOld: "copia antigua, aún en el disco",
     keyPin: "conservado por la instantánea",
@@ -158,6 +161,7 @@ const textVersion = {
     <div class="canvas">
       <svg viewBox="0 0 420 356" role="img" aria-label={S.figure}></svg>
       <ul class="key" hidden>
+        <li><span class="swatch swatch--picked"></span>{S.keyPicked}</li>
         <li><span class="swatch swatch--new"></span>{S.keyNew}</li>
         <li><span class="swatch swatch--old"></span>{S.keyOld}</li>
         <li><span class="swatch swatch--pin">S</span>{S.keyPin}</li>
@@ -339,6 +343,8 @@ const textVersion = {
           s("rect", { width: W, height: H, rx: 4, class: "under" }),
           s("rect", { width: W, height: H, rx: 4 }),
         );
+        // The pick wears a ring of its own, so the accent outline keeps meaning "new copy".
+        if (picked) g.prepend(s("rect", { x: -3, y: -3, width: W + 6, height: H + 6, rx: 6, class: "ring" }));
         if (v.state === "orphan") {
           // An unreachable card shows only its outline from under the live one; the legend names it.
         } else if (behind.has(v.key)) g.append(s("text", { x: 6, y: 12, class: "strip" }, `${label(v.id)} · ${tag}`));
@@ -354,6 +360,9 @@ const textVersion = {
         cards.append(g);
       }
       svg.append(edges, cards);
+      // A strip label may run over the front card's top edge, short of the next card; a longer one is squeezed rather than shrunk.
+      for (const el of svg.querySelectorAll<SVGTextElement>(".strip"))
+        if (el.getComputedTextLength() > W + OFF - 10) el.setAttribute("textLength", String(W + OFF - 10)), el.setAttribute("lengthAdjust", "spacingAndGlyphs");
       svg.setAttribute("aria-label", fill(t.aria, vars()));
       table();
       const writing = step > 0 && step < 5;
@@ -566,8 +575,13 @@ const textVersion = {
     font-variant-numeric: tabular-nums;
   }
   svg :global(.card .strip) {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
+  }
+  @media (max-width: 480px) {
+    svg :global(.card .strip) {
+      font-size: 12px;
+    }
   }
   svg :global(.card .addr) {
     font-family: var(--font-mono);
@@ -603,15 +617,16 @@ const textVersion = {
     stroke: var(--bad);
     stroke-dasharray: 3 3;
   }
-  svg :global(.card--picked > rect:not(.under)) {
-    stroke: var(--accent);
-    stroke-width: 3;
+  svg :global(.card rect.ring) {
+    fill: none;
+    stroke: var(--fg);
+    stroke-width: 2;
   }
   svg :global(.card--pickable) {
     cursor: pointer;
   }
-  svg :global(.card--pickable:hover rect:not(.under)) {
-    stroke: var(--accent);
+  svg :global(.card--pickable:hover rect:not(.under, .ring)) {
+    stroke: var(--fg);
   }
   svg :global(.pin rect) {
     fill: var(--accent);
@@ -648,6 +663,9 @@ const textVersion = {
     border-radius: 2px;
     font-size: 0.6rem;
     font-weight: 700;
+  }
+  .swatch--picked {
+    border: 2px solid var(--fg);
   }
   .swatch--new {
     background: var(--accent-soft);

@@ -1965,4 +1965,10 @@ txg, where "a few seconds" stays, since a txg also closes on dirty data). `code-
 diff: a reused block key after a power cut, damage undone by a second press, the badge
 outlined with the picked block, a comment: fixed.
 
+**Design review (two SHOULDs, fixed).** The picked block has an ink ring and its own key line,
+so the accent outline means a new copy only: at the start and after a power cut no picked card
+has an accent stroke (measured on the computed style, EN, FR, ES). The stacked cards' labels
+measure 13.6 CSS px at 1440 and 9.5 px at 390 (from 7.7), unsqueezed at 1440 in the three
+languages. `npm run build` and `npm test` (240 tests) pass.
+
 **Debts.** None new. The other rooms follow in their own issues and rebase onto this one.

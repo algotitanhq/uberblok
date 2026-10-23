@@ -2227,3 +2227,22 @@ row; only the I/O path needs no special case for a replacement; a real pool with
 cannot remove a special vdev), `le txg`/`el txg` as on the rest of the site, calques in FR
 and ES. Not taken: "escritas" after "copias" in the Spanish narration (it refers to the
 block, and "1 copia" would need its own form).
+
+**Code review.** `code-reviewer` on the diff: the ring drawn before the node's box took the
+box's class, lit and selected looks (the box must stay the node's first rect); the key's
+count swatch showed the last block's look; the key stayed visible in 3D; a double colon in
+the key; strings left unused. All fixed, with a test that the ring comes after the box.
+
+**Verification** at `45c6648`: `npm test` 246 pass; `npm run build` 44 pages, typography
+check 0 failures; `check-permalinks` (ANALYSIS.md 150 excerpts, 957 line references; built
+site 1755), `check-sources` and `check-csp`: all pass. `scripts/verify-vdevs.mjs`: 136 runs
+against the model, 0 mismatches, keyboard walk with every stop visible. `scripts/audit.mjs`:
+42 pages, 0 problems. `scripts/verify.mjs` on the whole visit: 465 captures, 0 console errors,
+every mismatch list empty. axe (WCAG 2.2 AA) on the three vdevs pages with a block written, a
+read and a note open, dark and light at 1440 px, dark at 390 and 320 px: 0 violations but the
+debt below; no sideways scroll. Captures not committed (`shots/`).
+
+**Debts.** In the light theme, the "Source" tag of an open Source note's pill is 4.27:1 on
+its accent fill (axe `color-contrast`, needs 4.5:1). It is in the shared `SourceNote`, the
+same on `main` in every room (checked on the RAID-Z room), and the whole-visit audit does not
+open a note, so it never saw it. Left for the issue that owns `SourceNote`.

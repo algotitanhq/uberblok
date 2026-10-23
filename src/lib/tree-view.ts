@@ -37,6 +37,13 @@ export function placeName(S: TrStrings, key: string): string {
   return fill(p.kind === "data" ? S.n_data : S.n_ind, { level: p.level, blkid: p.blkid });
 }
 
+/** The name of a place in a caption sentence: "the objset", "the dnode block"; the drawing keeps the short labels. */
+function captionName(S: TrStrings, key: string): string {
+  const p = place(key);
+  return p.kind === "objset" ? S.c_OS : p.kind === "dnodes" ? S.c_DN : placeName(S, key);
+}
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 // ------------------------------------------------------------------ states
 
 /** The txg the figure is working on: the open one, else the next. */
@@ -91,7 +98,7 @@ export function centreX(key: string): number {
 const blockX = (key: string, pair: "solo" | "left" | "right") => centreX(key) + (pair === "left" ? -31 : pair === "right" ? 31 : 0);
 
 /** The tree as an SVG drawing: the uberblock card on top, its root arrow, old and new copies side by side. */
-export function treeSvg(S: TrStrings, p: Pool): string {
+export function treeSvg(S: TrStrings, p: Pool, just: ReadonlySet<string> = new Set()): string {
   const ub = newestOnDisk(p);
   const ds = drawn(p);
   const where = new Map(ds.map((d) => [d.blk.id, { x: blockX(d.blk.key, d.pair), y: rowY(d.blk.key), state: d.state }]));
@@ -109,7 +116,9 @@ export function treeSvg(S: TrStrings, p: Pool): string {
   let nodes = "";
   for (const d of ds) {
     const { x, y } = where.get(d.blk.id)!;
-    nodes += `<g class="b s-${d.state} k-${place(d.blk.key).kind}" data-block="${esc(d.blk.id)}" data-state="${d.state}">`
+    const mark = just.has(d.blk.id);
+    nodes += `<g class="b s-${d.state} k-${place(d.blk.key).kind}${mark ? " just" : ""}" data-block="${esc(d.blk.id)}" data-state="${d.state}">`
+      + (mark ? `<rect class="ring" x="${x - BW / 2 - 3}" y="${y - BH / 2 - 3}" width="${BW + 6}" height="${BH + 6}" rx="6"/>` : "")
       + `<rect x="${x - BW / 2}" y="${y - BH / 2}" width="${BW}" height="${BH}" rx="4"/>`
       + `<text class="nm" x="${x}" y="${y - 2}" text-anchor="middle">${esc(placeName(S, d.blk.key))}</text>`
       + `<text class="bt" x="${x}" y="${y + 12}" text-anchor="middle">${d.blk.birth}</text></g>`;
@@ -123,15 +132,13 @@ export function treeSvg(S: TrStrings, p: Pool): string {
   const arrow = os ? `<path class="root" data-root="${esc(ub.root!)}" d="M${cx} 52C${cx} 70 ${os.x} 70 ${os.x} ${os.y - BH / 2 - 3}" marker-end="url(#tr-arrow)"/>` : "";
   const state = p.cut ? fill(S.sayCut, { where: cutWhere(S, p) }) : beatsSummary(S, p);
   const aria = fill(S.treeAria, { txg: ub.txg, os: (ub.root ?? "").split("@")[1] ?? "", state: spoken(state) });
-  const shown = new Set<string>(ds.map((d) => d.state));
-  if (edges.includes("e-wait")) shown.add("wait");
-  const legend = [["old", S.lg_old], ["new", S.lg_new], ["mem", S.lg_mem], ["wait", S.lg_wait], ["unflushed", S.lg_unflushed], ["lost", S.lg_lost], ["dead", S.lg_dead]]
-    .filter(([k]) => shown.has(k))
+  // The whole legend from the start, so that a step changes the drawing, never the key under it.
+  const legend = [["mem", S.lg_mem], ["wait", S.lg_wait], ["unflushed", S.lg_unflushed], ["just", S.lg_just], ["new", S.lg_new], ["old", S.lg_old], ["dead", S.lg_dead], ["lost", S.lg_lost]]
     .map(([k, t]) => `<li class="s-${k}"><span class="sw" aria-hidden="true"></span>${esc(t)}</li>`)
     .join("");
   return `<svg class="tr-tree" viewBox="0 0 ${TW} 372" role="img" aria-label="${esc(aria)}">`
     + `<defs><marker id="tr-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>`
-    + `<g class="edges">${edges}</g>${arrow}${card}<g class="blocks">${nodes}</g></svg>${legend ? `<ul class="tr-legend">${legend}</ul>` : ""}`;
+    + `<g class="edges">${edges}</g>${arrow}${card}<g class="blocks">${nodes}</g></svg><ul class="tr-legend">${legend}</ul>`;
 }
 
 // ------------------------------------------------------------------ the 2D disk
@@ -294,7 +301,7 @@ export function stepLine(S: TrStrings, p: Pool): string {
     const fresh = newBlocks(p);
     const just = fresh.filter((k) => height(k) === t.wrote - 1);
     const parents = fresh.filter((k) => height(k) === t.wrote);
-    return fill(just.length === 1 ? S.say0one : S.say0many, { list: list(S, just.map((k) => placeName(S, k))), parents: list(S, parents.map((k) => placeName(S, k))) }) + see(S, "bottomUp");
+    return capital(fill(just.length === 1 ? S.say0one : S.say0many, { list: list(S, just.map((k) => captionName(S, k))), parents: list(S, parents.map((k) => captionName(S, k))) })) + see(S, "bottomUp");
   }
   const vars = { txg: t.txg, prev: p.synced, slot: slotOf(t.txg, p.ashift), n: plural(S, newBlocks(p).length, "block1", "blockN") };
   const k = t.beat === 0 ? "say0" : t.beat === 1 ? "say1" : t.beat === 2 ? (p.configDirty ? "say2" : "say2none") : t.beat === 3 ? "say3" : p.configDirty ? "say4" : "say4none";

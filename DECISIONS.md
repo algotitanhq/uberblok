@@ -2450,8 +2450,8 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   the objset); beat 0 is done when the objset is written, then the four beats as before. This
   is the order of the code: a block's write I/O is the child of its parent's
   (`dbuf_write`, dbuf.c L5411), and `zio_write_compress` holds the parent until every child is
-  ready, with its new address and checksum (zio.c L1932-L1939). In the drawing a new copy is an
-  outline while in memory and fills in when written; a pointer from a new copy to a child not
+  ready, with its new address and checksum (zio.c L1932-L1939). In the drawing a new copy has a
+  dashed outline while in memory, a solid one once written, and fills in at the flush; a pointer from a new copy to a child not
   yet written is dotted and muted, and turns into the accent once the child is written. The 3D
   view draws the same states (an in-memory copy is a faint box, a waiting pointer a faint line).
   Only what changed is animated, in 2D and 3D, and nothing under reduced motion. The commit
@@ -2468,3 +2468,11 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   sync would make the reader guess which one to press. Drawing the climb as an animation inside
   one step: the issue asks for one level per step, and an animation cannot be paused or read
   under reduced motion.
+- **After the design review.** The line that says what the last action did sits under the
+  controls, above the tree, and is there from the start ("D2 has changed in txg 4211…"); it
+  replaces the list of reasons why some buttons were disabled, which read as an instruction.
+  A disabled button gives its reason in the same line, on its press only. The blocks the last
+  step wrote carry a ring until the next action (a class, not an animation, so the same under
+  reduced motion), and the legend lists every state from the start, so a step changes the
+  drawing and never the key. Caption sentences say "the dnode block" and "the objset"; the
+  drawing keeps the short labels.

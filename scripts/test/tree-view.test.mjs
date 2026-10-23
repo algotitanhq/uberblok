@@ -138,7 +138,18 @@ test("the drawing agrees with the model", () => {
   assert.match(svg2, /class="edge e-wait" data-edge="DN@4211>L2-0@4211"/);
   assert.equal(text(V.stepLine(S, h2)), "L1 #1 is written to a new place. Its new address and checksum are now in L2 #0, which the next step writes. code");
   assert.match(text(V.beatsHtml(S, h2)), /under way spa_sync is writing the new blocks of txg 4211, from the data up\. Rows written: 2 of 5\./);
-  h2 = M.step(M.step(M.step(h2)));
+  // The ring marks only the blocks given as just written; the legend is whole from the start.
+  const ringed = V.treeSvg(S, h2, new Set(["L1-1@4211"]));
+  assert.deepEqual([...ringed.matchAll(/class="b [^"]* just" data-block="([^"]+)"/g)].map((m) => m[1]), ["L1-1@4211"]);
+  assert.equal((ringed.match(/class="ring"/g) ?? []).length, 1);
+  assert.equal((V.treeSvg(S, p).match(/<li class="s-/g) ?? []).length, 8);
+  // Caption sentences name the dnode block and the objset in full, a capital first.
+  h2 = M.step(h2);
+  assert.equal(text(V.stepLine(S, h2)), "L2 #0 is written to a new place. Its new address and checksum are now in the dnode block, which the next step writes. code");
+  h2 = M.step(h2);
+  assert.match(text(V.stepLine(S, h2)), /^The dnode block is written to a new place\. Its new address and checksum are now in the objset, /);
+  assert.match(text(V.stepLine(strings("fr"), h2)), /^Le bloc de dnodes est écrit à un nouvel endroit\..* dans l’objset, /);
+  h2 = M.step(h2);
   assert.match(text(V.stepLine(S, h2)), /^The objset is written: the 5 blocks of txg 4211 are on the disk, not flushed yet\./);
   // Both data blocks in one step when two leaves share the txg.
   const two = M.step(M.writeLeaf(M.writeLeaf(M.createPool(), 0).pool, 3).pool);

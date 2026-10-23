@@ -56,3 +56,16 @@ test("the first step of a damaged read names what each damaged child holds", () 
   const healthy = readPlan(L, readBlock(L, Array(6).fill("ok")), S, Array(6).fill("ok"), "A");
   assert.ok(!healthy[0].html.includes("holds"), "no holds line when nothing is damaged");
 });
+
+test("a block wider than one row, and the raidz1 parity swap", () => {
+  // raidz2, 6 children, 128K at 4K sectors: every child holds a column, parity still on 0 and 1.
+  const W = mapAlloc(128 * K, 12, 6, 2);
+  assert.equal(W.acols, 6);
+  assert.equal(roles(W, S, "E"), "Block E: data on children 2, 3, 4, 5; parity on children 0, 1.");
+  // raidz1, 5 children, 8K at 1 MiB: f = 256 % 5 = 1, then the odd-megabyte swap (vdev_raidz.c
+  // L725-L734) puts P on child 2 and D0 on child 1.
+  const X = mapAlloc(8 * K, 12, 5, 1, 2 ** 20);
+  assert.ok(X.swapped);
+  assert.equal(roles(X, S, "F"), "Block F: data on children 1, 3; parity on child 2.");
+  assert.equal(holds(X, S, 2, "F"), "Child 2 holds only parity of block F (P).");
+});

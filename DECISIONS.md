@@ -2479,3 +2479,10 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   the read on a timer, as before: the issue asks for one step per action, and a timer cannot be
   read at the reader's pace. Placing blocks where a real metaslab would: the allocator is
   another room; consecutive blocks show the widths without it.
+- **Design review fixes (2026-10-23).** The sentence that explains a write sits right under the
+  size buttons, where the eye already is. Below 45rem the read panel's parts are ordered around
+  the map (damage, map, read buttons, newest step, older steps, key), so one press and its effect
+  fit on a phone screen; the step list shows newest first there (`column-reverse`), while screen
+  readers keep the oldest-first order and the live region announces each new step. The key
+  gains the two damage states, and the first read step says what each damaged child holds of
+  the block, so damaging a parity-only or empty child explains why nothing is rebuilt.

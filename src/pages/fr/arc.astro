@@ -86,7 +86,13 @@ const L = {
         </p>
         <p>
           Commencez par Parcourir 12 nouveaux blocs, puis appuyez sur Lecture suivante pour chaque bloc du parcours. Après S10, le cache est plein. À partir de S11, chaque nouveau bloc fait sortir de MRU le plus ancien bloc du parcours, et
-          l’ensemble chaud reste dans MFU. Sélectionnez ensuite S2 dans la liste MRU fantôme. Il est relu sur le disque et passe dans MFU. La cible de MRU monte de 8 à 8,5 blocs, et MRU, toujours au-dessus, fait sortir S3. Relisez ensuite S12, S11 et S10, qui passent dans MFU, et appuyez encore une fois sur Lecture suivante : le nouveau bloc N1 fait céder H1 à MFU. Relisez H1 depuis la liste MFU fantôme, et la cible de MRU redescend à 8 blocs. Enfin, choisissez 10 ms, appuyez sur Lecture suivante, puis sélectionnez le nouveau bloc dans MRU pour le relire. La seconde lecture arrive trop tôt pour compter comme une deuxième utilisation, et le bloc reste dans MRU.
+          l’ensemble chaud reste dans MFU.
+        </p>
+        <p>
+          Sélectionnez ensuite S2 dans la liste MRU fantôme. Il est relu sur le disque et passe dans MFU. La cible de MRU monte de 8 à 8,5 blocs, et MRU, toujours au-dessus, fait sortir S3. Relisez ensuite S12, S11 et S10, qui passent dans MFU, et appuyez encore une fois sur Lecture suivante : le nouveau bloc N1 fait céder H1 à MFU. Relisez H1 depuis la liste MFU fantôme, et la cible de MRU redescend à 8 blocs.
+        </p>
+        <p>
+          Enfin, choisissez 10 ms, appuyez sur Lecture suivante, puis sélectionnez le nouveau bloc dans MRU pour le relire. La seconde lecture arrive trop tôt pour compter comme une deuxième utilisation, et le bloc reste dans MRU.
         </p>
       </div>
       <ArcLab lang={lang} />

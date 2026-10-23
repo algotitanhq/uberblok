@@ -84,8 +84,13 @@ const L = {
           moves one second before each read you make, or 10 ms if you choose.
         </p>
         <p>
-          Start with Scan 12 new blocks, then press Next read for each block of the scan. After S10 the cache is full. From S11 on, each new block pushes the oldest scan block out of MRU, and the hot set stays in MFU. Then select S2 on the MRU
-          ghost list. It is read from the disk again and goes to MFU. The MRU target rises from 8 to 8.5 blocks, and MRU, still over that target, pushes S3 out. Then read S12, S11 and S10 again, which moves them to MFU, and press Next read once more: the new block N1 makes MFU give up H1. Read H1 back from the MFU ghost list, and the MRU target goes back down to 8 blocks. Last, choose 10 ms, press Next read, then select the new block in MRU to read it again. The second read comes too soon to count as a second use, so the block stays in MRU.
+          Start with Scan 12 new blocks, then press Next read for each block of the scan. After S10 the cache is full. From S11 on, each new block pushes the oldest scan block out of MRU, and the hot set stays in MFU.
+        </p>
+        <p>
+          Then select S2 on the MRU ghost list. It is read from the disk again and goes to MFU. The MRU target rises from 8 to 8.5 blocks, and MRU, still over that target, pushes S3 out. Then read S12, S11 and S10 again, which moves them to MFU, and press Next read once more: the new block N1 makes MFU give up H1. Read H1 back from the MFU ghost list, and the MRU target goes back down to 8 blocks.
+        </p>
+        <p>
+          Last, choose 10 ms, press Next read, then select the new block in MRU to read it again. The second read comes too soon to count as a second use, so the block stays in MRU.
         </p>
       </div>
       <ArcLab lang={lang} />

@@ -370,20 +370,26 @@ const gapName = `arc-gap-${lang}`;
       return m;
     };
 
-    // On a phone the figure is taller than the screen: after a read, bring the
-    // block read into view if it is not, above the bar with Next read, which
-    // sticks to the bottom (as in the TXG room, D24.1). A chip may still be
-    // gliding from its old place: measure where it lands.
+    // After a read, bring the block read into view if it is not. On a phone
+    // the figure is taller than the screen: keep the chip above the bar with
+    // Next read, which sticks to the bottom (as in the TXG room, D24.1). On a
+    // wide screen the bar is not sticky and sits about 400 px above the board:
+    // scroll just enough to show the chip, but never past the bar, so that
+    // Next read stays in view (D25.1). A chip may still be gliding from its
+    // old place: measure where it lands.
     const phone = matchMedia("(max-width: 40rem)");
     function show(el: Element | null) {
-      if (!el || !phone.matches) return;
+      if (!el) return;
       const r = el.getBoundingClientRect();
       const dy = new DOMMatrix(getComputedStyle(el).transform).m42;
       const top = r.top - dy;
       const bottom = r.bottom - dy;
-      const room = Math.min(q(".stepbar").getBoundingClientRect().top, innerHeight) - 8;
+      const bar = q(".stepbar").getBoundingClientRect();
+      const room = (phone.matches ? Math.min(bar.top, innerHeight) : innerHeight) - 8;
       if (top >= 8 && bottom <= room) return;
-      window.scrollBy({ top: top < 8 ? top - 8 : bottom - room, behavior: reducedMotion() ? "auto" : "smooth" });
+      let by = top < 8 ? top - 8 : bottom - room;
+      if (!phone.matches && by > 0) by = Math.min(by, bar.top - 8);
+      window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
     /** Reads `ids` in order, the first after the chosen gap, the others 1 ms apart, as a scan does. */

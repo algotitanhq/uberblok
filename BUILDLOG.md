@@ -2082,5 +2082,12 @@ tested); a block reached with Tab could sit under the phone bar (scroll padding)
 block in the middle of a scan broke the 1 ms spacing (it now ends the scan); a repeated narration
 might not be announced; Next read is now described by the queue line.
 
+**Design review.** On desktop the block read sat 130 to 330 px below the fold when the reader
+pressed Next read just after it came into view. `show()` now scrolls on wide screens too, just
+enough to show the block read and never past the top of the bar: measured in EN, FR and ES at
+1280×720, 1366×768, 1440×900 and 1920×1080, three presses each, the block read ends 8 px above
+the bottom and Next read stays on screen; phones unchanged. The nine-step tour paragraph is split
+in three. `npm test` 245 pass, `verify-arc.mjs` 35 captures, 0 problems.
+
 **Debts.** None new. `scripts/verify.mjs` still checks this room in EN and FR only;
 `verify-arc.mjs` covers ES.

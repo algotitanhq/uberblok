@@ -2546,3 +2546,10 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   Play exists because time passes there between events; here nothing happens between reads.
   Putting the bar after the board in the DOM so it sticks on phones without `order`: on desktop
   Tab would reach Next read only after every block.
+- **After the Design review.** On desktop the bar sits about 400 px above the board, so a reader
+  who scrolled just far enough to see Next read did not see the block it read. `show()` now runs
+  on every width: on a wide screen it scrolls just enough to bring the block read into view, never
+  past the top of the bar, so Next read stays on screen (measured at 1280×720 to 1920×1080 in the
+  three languages). Rejected: moving the second button row and the gap choice below the board;
+  the controls would sit apart from the button they qualify. The nine-step tour paragraph is split
+  at its three phases: the scan, the ghost hits, the 10 ms re-read.

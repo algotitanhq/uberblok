@@ -87,7 +87,13 @@ const L = {
         </p>
         <p>
           Empieza con Recorrer 12 bloques nuevos y pulsa Lectura siguiente para cada bloque del recorrido. Después de S10 la caché está llena. A partir de S11, cada bloque nuevo saca de MRU el bloque más antiguo del recorrido, y el conjunto caliente se
-          queda en MFU. Después selecciona S2 en la lista MRU fantasma. Se vuelve a leer del disco y pasa a MFU. El objetivo de MRU sube de 8 a 8,5 bloques, y MRU, que sigue por encima, saca S3. Después vuelve a leer S12, S11 y S10, que pasan a MFU, y pulsa Lectura siguiente una vez más: el bloque nuevo N1 hace que MFU ceda H1. Vuelve a leer H1 desde la lista MFU fantasma, y el objetivo de MRU baja otra vez a 8 bloques. Por último, elige 10 ms, pulsa Lectura siguiente y luego selecciona el bloque nuevo en MRU para leerlo otra vez. La segunda
+          queda en MFU.
+        </p>
+        <p>
+          Después selecciona S2 en la lista MRU fantasma. Se vuelve a leer del disco y pasa a MFU. El objetivo de MRU sube de 8 a 8,5 bloques, y MRU, que sigue por encima, saca S3. Después vuelve a leer S12, S11 y S10, que pasan a MFU, y pulsa Lectura siguiente una vez más: el bloque nuevo N1 hace que MFU ceda H1. Vuelve a leer H1 desde la lista MFU fantasma, y el objetivo de MRU baja otra vez a 8 bloques.
+        </p>
+        <p>
+          Por último, elige 10 ms, pulsa Lectura siguiente y luego selecciona el bloque nuevo en MRU para leerlo otra vez. La segunda
           lectura llega demasiado pronto para contar como un segundo uso, así que el bloque se queda en MRU.
         </p>
       </div>

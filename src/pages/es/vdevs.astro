@@ -75,20 +75,16 @@ const L = {
           ZFS elige primero una clase según el tipo de bloque. Los vdevs que guardan los datos forman la clase normal, y
           cada tipo de dispositivo especializado forma su propia clase. Los metadatos van al dispositivo special cuando el
           pool tiene uno. Los datos de los archivos solo van allí si el bloque no pasa de un tamaño que fijas por dataset,
-          cero por defecto, y solo mientras el special esté lleno a menos de tres cuartas partes. La tabla de deduplicación
-          va al dispositivo de dedup, el registro de intenciones (el ZIL) al dispositivo de log o, si no lo hay, a un
-          espacio reservado en los demás vdevs, y todo lo demás a la clase normal. Cuando una clase está llena, ZFS vuelve a
-          elegir sin ella. Dentro de la clase, el asignador reparte los bloques entre los vdevs según el espacio libre y la
-          carga. Los metadatos se guardan en dos copias por defecto, y la segunda va al vdev siguiente de la clase.
+          cero por defecto, y solo mientras el special esté lleno a menos de tres cuartas partes. La tabla de deduplicación va al dispositivo de dedup, o al special si no hay dispositivo de dedup. El registro de intenciones, el ZIL, va al dispositivo de log. Si no lo hay, va a un espacio reservado en los vdevs special o normales. Todo lo demás va a la clase normal. Cuando la clase special o la de dedup está llena, ZFS vuelve a elegir sin ella y acaba en la clase normal. Dentro de la clase, ZFS reparte los bloques entre los vdevs según el espacio libre y la
+          carga. Los metadatos se guardan en dos copias por defecto, ZFS empieza la segunda en el vdev siguiente de la clase, así que las dos copias quedan en vdevs distintos cuando la clase tiene más de uno.
         </p>
         <p>
           Después, la escritura baja por un árbol. El pool es la raíz, los vdevs son sus hijos y los discos son los hijos
           de estos. Cada nodo tiene su pequeña tabla de funciones, que dice cómo pasa una E/S a sus hijos: un espejo manda
-          una escritura a todos sus discos y una lectura a uno solo, y un grupo RAID-Z corta el bloque en columnas, una por
-          disco. Sustituir un disco añade un nodo a ese árbol. El disco viejo y el nuevo pasan a ser los dos lados de un
+          una escritura a todos sus discos y una lectura a uno solo, y un grupo RAID-Z corta el bloque en columnas de datos y de paridad, cada una en un disco distinto. Sustituir un disco añade un nodo a ese árbol. El disco viejo y el nuevo pasan a ser los dos lados de un
           espejo provisional, así que las escrituras llegan a los dos y las lecturas evitan el disco nuevo para los bloques
           que todavía no tiene. Cuando termina el resilver, la copia al disco nuevo, el disco viejo y el nodo provisional
-          desaparecen, sin que ninguna otra parte de ZFS haya tenido que saberlo.
+          desaparecen, sin que el código que mueve las lecturas y escrituras necesite un caso especial.
         </p>
       </div>
     </header>
@@ -100,14 +96,13 @@ const L = {
           El árbol es un pool con tres vdevs de datos (un espejo, un grupo RAID-Z de tres discos y un dRAID de cinco) y,
           al principio, un espejo de log y un espejo special. Escribe cada tipo de bloque y mira dónde cae. La línea bajo
           los botones dice adónde fue, los vdevs que recibieron una copia quedan rodeados y su clase se marca en la tabla.
-          Luego quita el espejo special y vuelve a escribir metadatos, pon <code>special_small_blocks</code> a
+          Luego desactiva el espejo special, lo que rehace el pool sin él, y vuelve a escribir metadatos, pon <code>special_small_blocks</code> a
           16&nbsp;KiB y escribe un bloque pequeño de archivo, o llena la clase special y mira cómo el bloque pasa a la
           clase normal.
         </p>
         <p>
           El panel del último bloque muestra cada paso de la elección y el camino de la escritura por el árbol. Selecciona
-          un nodo para ver su tabla de funciones. Un espejo escribe en cada hijo y lee de uno. Un grupo RAID-Z o dRAID
-          escribe una columna por hijo. El dRAID reparte sus grupos entre sus cinco hijos con una tabla fija de
+          un nodo para ver su tabla de funciones. Un espejo escribe en cada hijo y lee de uno. Un grupo RAID-Z escribe una columna por hijo. Un grupo dRAID escribe tres columnas, cada una en un hijo distinto de los cinco. El dRAID reparte sus grupos entre sus cinco hijos con una tabla fija de
           permutaciones, así que dos bloques grandes seguidos caen en conjuntos de discos distintos.
         </p>
         <p>
@@ -151,7 +146,7 @@ const L = {
                 to: 111,
                 text: `Cómo pasa una E/S a los hijos y cómo vuelven sus resultados. El camino de las E/S solo <a href="${L.ioStart}">llama a este puntero</a>. La <a href="${L.rootOps}">raíz no tiene ninguna de las dos</a>: una E/S nunca empieza en la raíz.`,
               },
-              { from: 113, text: "Si un bloque toca un hijo que se perdió escrituras. Un resilver lo pregunta antes de leer el bloque." },
+              { from: 113, text: "Si un bloque toca un hijo al que le faltan escrituras. Un resilver lo pregunta antes de leer el bloque." },
             ]}
           />
         </SourceNote>
@@ -176,7 +171,7 @@ const L = {
               {
                 from: 656,
                 to: 660,
-                text: `Una lectura normal elige un hijo: no uno <a href="${L.skipMissing}">al que le falta la txg del bloque</a>, y entre los demás <a href="${L.load}">el menos cargado</a>.`,
+                text: `Una lectura normal elige un hijo: no uno <a href="${L.skipMissing}">al que le falta el txg del bloque</a>, y entre los demás <a href="${L.load}">el menos cargado</a>.`,
               },
               {
                 from: 662,
@@ -206,9 +201,9 @@ const L = {
               {
                 from: 2149,
                 to: 2156,
-                text: `Un bloque de la tabla de deduplicación va a dedup si el pool tiene un vdev de dedup, si no a special si el pool <a href="${L.hasDdt}">guarda ahí la tabla</a>, y si no a normal. Una clase ya probada se salta.`,
+                text: `Un bloque de la tabla de deduplicación va a dedup si el pool tiene un vdev de dedup, si no a special si el pool <a href="${L.hasDdt}">guarda ahí la tabla</a>, y si no a la clase normal. Una clase ya probada se salta.`,
               },
-              { from: 2158, to: 2159, text: "Sin vdev special, o con special ya probada: normal." },
+              { from: 2158, to: 2159, text: "Sin vdev special, o si ya se probó special: la clase normal." },
               {
                 from: 2161,
                 to: 2163,
@@ -221,7 +216,7 @@ const L = {
               },
               {
                 from: 2178,
-                text: `Todo lo demás: normal. Un bloque del ZIL nunca pasa por aquí: <code>zio_alloc_zil</code> sigue <a href="${L.zilOrder}">su propio orden</a>, log, log integrado del special, special, log integrado de los vdevs normales y, por último, normal.`,
+                text: `Todo lo demás: la clase normal. Un bloque del ZIL nunca pasa por aquí: <code>zio_alloc_zil</code> sigue <a href="${L.zilOrder}">su propio orden</a>, log, log integrado del special, special, log integrado de los vdevs normales y, por último, normal.`,
               },
             ]}
           />
@@ -245,7 +240,7 @@ const L = {
             notes={[
               {
                 from: 4407,
-                text: `Con <code>ENOSPC</code>, se vuelve a llamar a <code>spa_preferred_class</code>, que devuelve la clase siguiente. La E/S la anota y <a href="${L.again}">empieza de nuevo la asignación</a> en ella.`,
+                text: `Ante un <code>ENOSPC</code>, se vuelve a llamar a <code>spa_preferred_class</code>, que devuelve la clase siguiente. La E/S la anota y <a href="${L.again}">empieza de nuevo la asignación</a> en ella.`,
               },
             ]}
           />
@@ -255,8 +250,7 @@ const L = {
       <div class="step">
         <h3>La copia siguiente en el vdev siguiente</h3>
         <p class="prose">
-          Un bloque con varias copias tiene una dirección por copia, un DVA. <code>metaslab_alloc_dva_range</code> pone cada
-          copia después de la primera en el vdev que sigue, dentro de la clase, al de la copia anterior.
+          Un bloque con varias copias tiene una dirección por copia, un DVA. <code>metaslab_alloc_dva_range</code> empieza a buscar sitio para cada copia después de la primera en el vdev que, dentro de la clase, sigue al de la copia anterior.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>metaslab_alloc_dva_range</code>, metaslab.c</Fragment>
@@ -327,7 +321,7 @@ const L = {
               {
                 from: 1441,
                 to: 1442,
-                text: `El disco viejo pasa a ser el hijo 0. Después, <code>spa_vdev_attach</code> <a href="${L.attachLast}">añade el disco nuevo</a> como último hijo y <a href="${L.dtl}">lo marca como ausente</a> en todas las txg hasta ahora, así que una lectura de un bloque más antiguo lo evita hasta que termina el resilver.`,
+                text: `El disco viejo pasa a ser el hijo 0. Después, <code>spa_vdev_attach</code> <a href="${L.attachLast}">añade el disco nuevo</a> como último hijo y <a href="${L.dtl}">lo marca como ausente</a> en todos los txg hasta ahora, así que una lectura de un bloque más antiguo lo evita hasta que termina el resilver.`,
               },
               {
                 from: 1445,
@@ -387,7 +381,7 @@ const L = {
               { from: 1049, to: 1051, text: `Un grupo que pasa del final de una fila sigue en la siguiente, <a href="${L.rowHeight}">16&nbsp;MiB</a> más allá.` },
               {
                 from: 1053,
-                text: `El hijo es la entrada de la fila en esa posición, <a href="${L.getPerm}">desplazada en uno</a> cada vez que la fila vuelve a usarse. La tabla <a href="${L.maps}">se genera a partir de una semilla fija</a> y <a href="${L.verify}">se comprueba contra una suma de comprobación guardada</a>, porque los pools existentes dependen de ella. La figura calcula la misma tabla.`,
+                text: `El hijo es la entrada de la fila en esa posición, <a href="${L.getPerm}">más un desplazamiento</a> que crece en uno de una fila a la siguiente, así que cada permutación sirve para tantas filas como hijos tiene el dRAID antes de pasar a la siguiente. La tabla <a href="${L.maps}">se genera a partir de una semilla fija</a> y <a href="${L.verify}">se comprueba contra una suma de comprobación guardada</a>, porque los pools existentes dependen de ella. La figura calcula la misma tabla.`,
               },
             ]}
           />
@@ -406,7 +400,7 @@ const L = {
         128&nbsp;KiB para un bloque grande de archivo, tras la compresión. La lectura de un espejo toma el primer hijo
         admisible, donde el código toma el menos cargado. Solo la clase special se llena, y su espacio de log integrado
         sigue libre. Se supone que los vdevs normales y special son lo bastante grandes para contener un metaslab de log
-        integrado. Una sola sustitución por disco a la vez. El resilver en sí, su orden y la reconstrucción secuencial no
+        integrado. La figura admite una sola sustitución por disco a la vez. Un pool real con vdevs RAID-Z o dRAID no puede retirar un vdev special, cosa que la figura hace volviendo a montar el pool. El resilver en sí, su orden y la reconstrucción secuencial no
         se dibujan, solo su final. Los vdevs retirados (indirectos), los huecos, la expansión de RAID-Z, los bloques gang y
         los errores quedan fuera. La vista 3D dibuja el mismo estado que la 2D, y ninguna de las dos muestra los
         desplazamientos en el disco.

@@ -407,7 +407,7 @@ export const VDEVS_STRINGS = {
     c_log: "log",
     c_embedded_log: "log integrado",
     c_special: "special",
-    c_special_embedded_log: "log integrado de special",
+    c_special_embedded_log: "log integrado del special",
     c_dedup: "dedup",
     clsOf: "la clase {cls}",
     zilTake: "La clase {cls}: tiene espacio, el bloque va ahí.",

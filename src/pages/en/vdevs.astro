@@ -74,19 +74,15 @@ const L = {
           ZFS first chooses a class from the kind of block. The vdevs that hold data form the normal class, and each kind
           of special-purpose device forms a class of its own. Metadata goes to the special device when the pool has one.
           File data goes there only if the block is no larger than a size you set per dataset, zero by default, and only
-          while the special device is less than three-quarters full. The deduplication table goes to the dedup device, the
-          intent log (the ZIL) to the log device or, without one, to space set aside on the other vdevs, and everything
-          else to the normal class. When a class is full, ZFS chooses again without it. Within the class, the allocator
-          spreads blocks over the vdevs by free space and load. Metadata is stored twice by default, and the second copy
-          goes on the next vdev of the class.
+          while the special device is less than three-quarters full. The deduplication table goes to the dedup device, or to the special device when there is no dedup device. The intent log, the ZIL, goes to the log device. Without one, it goes to space set aside on the special or normal vdevs. Everything else goes to the normal class. When the special or dedup class is full, ZFS chooses again without it, and in the end uses the normal class. Within the class, ZFS spreads blocks over the vdevs by free space and load. Metadata is stored twice by default. ZFS starts the second copy on the next vdev of the class, so the two copies sit on different vdevs when the class has more than one.
         </p>
         <p>
           Then the write goes down a tree. The pool is the root, the vdevs are its children and the disks are theirs. Each
           node has its own small table of functions that says how an I/O passes on to its children: a mirror sends a write
-          to all its disks and a read to one, and a RAID-Z group cuts the block into columns, one per disk. Replacing a disk
+          to all its disks and a read to one, and a RAID-Z group cuts the block into data and parity columns, each on a different disk. Replacing a disk
           adds a node to that tree. The old disk and the new one become the two sides of a temporary mirror, so writes
           reach both, and reads skip the new disk for blocks it does not have yet. When the resilver, the copy onto the new
-          disk, is done, the old disk and the temporary node go away, and no other part of ZFS had to know.
+          disk, is done, the old disk and the temporary node go away, and the code that moves reads and writes needed no special case for it.
         </p>
       </div>
     </header>
@@ -98,13 +94,12 @@ const L = {
           The tree is a pool with three vdevs for data (a mirror, a RAID-Z group of three disks and a dRAID of five) and,
           to start with, a log mirror and a special mirror. Write each kind of block and see where it lands. The line
           under the buttons says where it went, the vdevs that got a copy are ringed, and its class is marked in the
-          table. Then take the special mirror out and write metadata again, set <code>special_small_blocks</code> to
+          table. Then switch the special mirror off, which rebuilds the pool without it, and write metadata again, set <code>special_small_blocks</code> to
           16 KiB and write a small file block, or fill the special class and see the block go to the normal class.
         </p>
         <p>
           The last block panel lists each step of the choice and the path of the write down the tree. Select a node to
-          see its table of functions. A mirror writes to every child and reads from one. A RAID-Z or dRAID group writes
-          one column per child. The dRAID spreads its groups over all five children through a fixed table of
+          see its table of functions. A mirror writes to every child and reads from one. A RAID-Z group writes one column per child. A dRAID group writes three columns, each on a different child of the five. The dRAID spreads its groups over all five children through a fixed table of
           permutations, so two large blocks in a row land on different sets of disks.
         </p>
         <p>
@@ -250,8 +245,7 @@ const L = {
       <div class="step">
         <h3>The next copy on the next vdev</h3>
         <p class="prose">
-          A block with several copies has one address per copy, a DVA. <code>metaslab_alloc_dva_range</code> puts each copy
-          after the first on the vdev that follows the previous copy's vdev in the class.
+          A block with several copies has one address per copy, a DVA. <code>metaslab_alloc_dva_range</code> starts the search for each copy after the first on the vdev that follows the previous copy's vdev in the class.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>metaslab_alloc_dva_range</code>, metaslab.c</Fragment>
@@ -382,7 +376,7 @@ const L = {
               { from: 1049, to: 1051, text: `A group that runs past the end of a row goes on in the next one, <a href="${L.rowHeight}">16 MiB</a> further.` },
               {
                 from: 1053,
-                text: `The child is the row's entry at that position, <a href="${L.getPerm}">rotated by one</a> each time the row comes round again. The table is <a href="${L.maps}">generated from a fixed seed</a> and <a href="${L.verify}">checked against a stored checksum</a>, since existing pools depend on it. The figure computes the same table.`,
+                text: `The child is the row's entry at that position, <a href="${L.getPerm}">plus an offset</a> that grows by one from each row to the next, so each permutation serves as many rows as the dRAID has children before the next one takes over. The table is <a href="${L.maps}">generated from a fixed seed</a> and <a href="${L.verify}">checked against a stored checksum</a>, since existing pools depend on it. The figure computes the same table.`,
               },
             ]}
           />
@@ -399,8 +393,7 @@ const L = {
         raidz copy after the last. Block sizes are fixed: 4 KiB for the ZIL and small file blocks, 16 KiB for metadata,
         8 KiB for the deduplication table and 128 KiB for a large file block, after compression. A mirror's read takes the
         first eligible child, where the code takes the least loaded. Only the special class fills up, and its embedded
-        log space stays free. Normal and special vdevs are taken to be large enough to hold an embedded log metaslab. One
-        replacement per disk at a time. The resilver itself, its order and the sequential rebuild are not drawn, only its
+        log space stays free. Normal and special vdevs are taken to be large enough to hold an embedded log metaslab. The figure allows one replacement per disk at a time. A real pool with RAID-Z or dRAID vdevs cannot remove a special vdev, which the figure does by building the pool again. The resilver itself, its order and the sequential rebuild are not drawn, only its
         end. Removed (indirect) vdevs, holes, RAID-Z expansion, gang blocks and errors are left out. The 3D view draws the
         same state as the 2D one, and neither shows disk offsets.
       </p>

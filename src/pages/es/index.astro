@@ -5,19 +5,22 @@ import VisitMap from "../../components/VisitMap.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import HallExhibit from "../../components/HallExhibit.astro";
 import Dedication from "../../components/Dedication.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import { gh, OPENZFS_SHA, OPENZFS_TAG } from "../../lib/openzfs";
 
 const lang = "es";
+// The Hall in the question-first format (DECISIONS.md D21.1, D21.2): the uberblock
+// section asks its question, answers it plainly, then the figure, then the code in
+// Source notes. Links to the code live in the notes only.
 const L = {
-  ub: gh("include/sys/uberblock_impl.h", 122, 128),
   magic: gh("include/sys/uberblock_impl.h", 46),
-  labels: gh("include/sys/vdev_impl.h", 560, 562),
-  ring: gh("include/sys/vdev_impl.h", 482),
   slot: gh("include/sys/vdev_impl.h", 491, 496),
-  sync: gh("module/zfs/vdev_label.c", 1782, 1784),
   mmp: gh("include/sys/vdev_impl.h", 488),
-  load: gh("module/zfs/vdev_label.c", 1547, 1562),
-  compare: gh("module/zfs/vdev_label.c", 1495, 1528),
+  labels: gh("include/sys/vdev_impl.h", 560, 562),
+  compare: gh("module/zfs/vdev_label.c", 1495, 1505),
+  loop: gh("module/zfs/vdev_label.c", 1578, 1585),
 };
 ---
 
@@ -34,16 +37,16 @@ const L = {
         <h1>Uberblok</h1>
         <div class="prose manifesto">
           <p class="lead">
-            El almacenamiento siempre ha tenido los mismos enemigos: discos que mienten, escrituras interrumpidas, una
-            caída en mitad de una actualización. ZFS les hace frente con un puñado de ideas. Este museo las muestra sala a
-            sala, a partir del código que las implementa.
+            Uberblok explica cómo ZFS mantiene los datos a salvo frente a las caídas, los discos que fallan y las
+            escrituras interrumpidas. Cada sala toma una idea, la muestra en una figura que se puede manejar y cita el
+            código de OpenZFS que la implementa.
           </p>
           <p class="muted">
-            Cada animación remite a líneas de OpenZFS <code>{OPENZFS_TAG}</code>, congelado en el commit
-            <a href={`https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`}><code>{OPENZFS_SHA.slice(0, 12)}</code></a>,
-            y cada extracto enlaza con ellas. Aquí no hay nada dibujado de memoria.
+            Las figuras y los extractos siguen OpenZFS <code>{OPENZFS_TAG}</code>, congelado en el commit
+            <code>{OPENZFS_SHA.slice(0, 12)}</code>. Cada extracto se comprueba contra ese commit, y ninguno está escrito
+            de memoria.
           </p>
-          <p class="why"><a href="#why">¿Por qué este museo? <span aria-hidden="true">↓</span></a></p>
+          <p class="why"><a href="#map">Todas las salas <span aria-hidden="true">↓</span></a> · <a href="#why">¿Por qué este museo? <span aria-hidden="true">↓</span></a></p>
         </div>
       </div>
       <div class="hero-art">
@@ -52,42 +55,158 @@ const L = {
     </header>
 
     <section class="section" aria-labelledby="object">
-      <h2 id="object">El objeto del Vestíbulo: el uberblock</h2>
-      <div class="prose">
+      <p class="kicker">El uberblock</p>
+      <h2 id="object">¿Cómo encuentra ZFS sus datos después de una caída?</h2>
+      <div class="prose answer">
         <p>
-          Un pool son millones de bloques repartidos en varios discos. Tras una caída, el sistema debe encontrar su estado
-          actual y coherente sin recorrer ninguno de ellos. Por eso un pequeño registro nombra la raíz de todo: el
-          <a href={L.ub}>uberblock</a>. Contiene un número de grupo de transacciones, <code>ub_txg</code>, y un puntero de
-          bloque, <code>ub_rootbp</code>; desde ese puntero se llega a todos los demás bloques del pool.
+          Un pool contiene millones de bloques repartidos entre varios discos. Después de una caída, ZFS tiene que
+          encontrar el último estado coherente del pool sin leerlos todos. Parte de un pequeño registro que hay en cada
+          disco, el uberblock. El uberblock guarda el número del último grupo de transacciones (txg), el lote de cambios
+          que ZFS escribe junto cada pocos segundos, y un puntero a la cima del árbol de bloques del pool. Desde ese
+          puntero se llega a todos los demás bloques.
         </p>
         <p>
-          Cada disco lleva <a href={L.labels}>cuatro etiquetas</a>, dos al principio y dos al final, y cada etiqueta
-          guarda un <a href={L.ring}>anillo de 128&nbsp;KiB</a> de uberblocks. Un uberblock nuevo nunca sobrescribe el
-          anterior: el uberblock del txg <var>N</var> va a <a href={L.sync}>la ranura <var>N</var> módulo el número de
-          ranuras</a> (con <code>multihost=on</code>, <a href={L.mmp}>la última ranura se reserva para MMP</a> y el anillo
-          gira sobre una ranura menos). Al importar, ZFS lee todas las ranuras de todas las etiquetas y
-          <a href={L.load}>se queda con el uberblock válido</a> con <a href={L.compare}>el txg más alto</a>.
+          ZFS nunca escribe un uberblock nuevo encima del actual. Cada disco tiene un anillo de ranuras para uberblocks,
+          y cada txg escribe su uberblock en la ranura siguiente. El uberblock anterior sigue intacto en su ranura, así
+          que, si se va la luz durante la escritura, queda uno bueno en el disco.
         </p>
         <p>
-          Se suele decir que el anillo contiene 128 uberblocks. Ocupa 128&nbsp;KiB: <a href={L.slot}>una ranura ocupa un
-          sector</a>, con un mínimo de 1&nbsp;KiB y un máximo de 8&nbsp;KiB, así que hay 128 ranuras con sectores
-          de 512 bytes, 64 con ashift 11, 32 en los discos actuales de sectores de 4K, 16 más allá. Cambia el tamaño del
-          sector y observa cómo los txg siguientes van ocupando sus ranuras uno tras otro.
+          Al importar el pool, ZFS lee todas las ranuras, descarta las que no pasan la comprobación y usa el uberblock
+          válido con el txg más alto.
+        </p>
+      </div>
+
+      <div class="prose try">
+        <p>
+          La figura muestra un anillo. Confirma un txg nuevo cada 1,3 segundos. Pulsa Pausar y después Siguiente txg
+          para confirmarlos de uno en uno: el uberblock nuevo ocupa la ranura que sigue a la anterior, y el anterior se
+          queda en la suya. Cambia el tamaño de sector de los discos. Una ranura ocupa un sector, así que el mismo
+          anillo de 128 KiB tiene 128 ranuras en discos con sectores de 512 bytes y 32 en discos con sectores de 4 KiB.
         </p>
       </div>
       <div class="figure">
         <UberblockRing lang={lang} />
       </div>
       <p class="caption aside">
-        Todo uberblock empieza por el mismo número mágico, <a href={L.magic}><code>0x00bab10c</code></a>: «oo-ba-bloc».
+        Todo uberblock empieza por el mismo número mágico, <code>0x00bab10c</code>, que se lee «oo-ba-bloc».
+      </p>
+
+      <h3 class="code-title">En el código</h3>
+      <p class="prose">
+        La figura sigue tres lugares del código de OpenZFS. Abre una nota Fuente para ver las líneas, tomadas de la
+        versión zfs-2.4.4.
+      </p>
+
+      <div class="step">
+        <h4>El registro</h4>
+        <p class="prose">
+          <code>struct uberblock</code> empieza por un número mágico y la versión del formato en disco. Después vienen
+          el txg, la hora de la sincronización y <code>ub_rootbp</code>, el puntero de bloque a los metadatos propios del
+          pool, del que cuelga el resto del árbol.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>struct uberblock</code>, uberblock_impl.h</Fragment>
+          <Excerpt
+            lang={lang}
+            path="include/sys/uberblock_impl.h"
+            from={122}
+            to={128}
+            symbol="uberblock"
+            notes={[
+              {
+                from: 123,
+                text: `<code>UBERBLOCK_MAGIC</code> vale <a href="${L.magic}"><code>0x00bab10c</code></a>. Una ranura sin él no contiene un uberblock.`,
+              },
+              {
+                from: 125,
+                text: "El txg de la última sincronización. Al importar, gana el más alto de los válidos.",
+              },
+              {
+                from: 128,
+                text: "El puntero de bloque al MOS, los metadatos propios del pool. Desde aquí se llega a todos los demás bloques del pool.",
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h4>La ranura de un txg</h4>
+        <p class="prose">
+          <code>vdev_uberblock_sync</code> elige la ranura: el txg módulo el número de ranuras. El txg aumenta en uno en
+          cada sincronización, así que los uberblocks dan la vuelta al anillo y el más reciente nunca cae sobre el
+          anterior.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_uberblock_sync</code>, vdev_label.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/vdev_label.c"
+            from={1782}
+            to={1784}
+            symbol="vdev_uberblock_sync"
+            notes={[
+              {
+                from: 1782,
+                text: `Con <code>multihost=on</code>, <a href="${L.mmp}">la última ranura se reserva para MMP</a> y el anillo gira sobre una ranura menos.`,
+              },
+              {
+                from: 1783,
+                to: 1784,
+                text: `<code>VDEV_UBERBLOCK_COUNT</code> es el anillo de 128&nbsp;KiB dividido por el <a href="${L.slot}">tamaño de una ranura</a>: un sector, como mínimo 1&nbsp;KiB y como máximo 8&nbsp;KiB. El término <code>RRSS_SCRATCH_VALID</code> solo cuenta durante una expansión de RAID-Z. Después se escribe la misma ranura en cada una de las <a href="${L.labels}">cuatro etiquetas</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h4>La elección al importar</h4>
+        <p class="prose">
+          Al importar, <code>vdev_uberblock_load_done</code> se ejecuta una vez por cada ranura leída. Ignora una ranura
+          cuya lectura ha fallado o cuyo número mágico es incorrecto, y se queda con el uberblock que queda más arriba en
+          la comparación.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_uberblock_load_done</code>, vdev_label.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/vdev_label.c"
+            from={1547}
+            to={1551}
+            symbol="vdev_uberblock_load_done"
+            notes={[
+              {
+                from: 1547,
+                text: `Se <a href="${L.loop}">lee</a> cada ranura de cada etiqueta de cada disco legible. Una ranura lleva su propia suma de comprobación, así que una ranura dañada hace fallar la lectura aquí.`,
+              },
+              {
+                from: 1549,
+                to: 1550,
+                text: `<a href="${L.compare}"><code>vdev_uberblock_compare</code></a> compara primero el txg y después la marca de tiempo.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
+
+      <h3 class="code-title">Lo que la figura deja fuera</h3>
+      <p class="prose muted">
+        La figura muestra un solo anillo. Un disco lleva cuatro etiquetas, dos al principio y dos al final, cada una con
+        su anillo, y cada txg escribe la misma ranura en las cuatro. Se suele decir que el anillo contiene 128
+        uberblocks. Solo es cierto con sectores de 512 bytes: ocupa 128&nbsp;KiB, así que tiene 64 ranuras con ashift 11,
+        32 con ashift 12 y 16 a partir de ashift 13. Con <code>multihost=on</code> se reserva una ranura para MMP. Los
+        números de txg son inventados.
       </p>
     </section>
 
     <section class="section" aria-labelledby="map">
-      <h2 id="map">Plano de la visita</h2>
+      <h2 id="map">Todas las salas</h2>
       <p class="prose muted">
-        Las salas siguen a los datos: la raíz y el árbol, cómo cambia el árbol, dónde caen los bloques, lo que el árbol
-        hace posible, después las funcionalidades construidas sobre él, y la sala de máquinas, donde el museo cuenta cómo se hizo.
+        Cada sala explica una parte de ZFS con una figura y el código que hay detrás. La lista sigue a los datos, desde
+        la raíz del pool hasta las funcionalidades construidas encima, pero cada sala se puede leer por separado. La
+        última, la sala de máquinas, cuenta cómo se hizo este sitio.
       </p>
       <div class="map">
         <VisitMap lang={lang} />
@@ -166,5 +285,24 @@ const L = {
   }
   .map {
     margin-top: var(--space-5);
+  }
+  .answer,
+  .try {
+    margin-top: var(--space-5);
+  }
+  .code-title {
+    margin-top: var(--space-7);
+  }
+  .step {
+    margin-top: var(--space-6);
+  }
+  .step h4 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
   }
 </style>

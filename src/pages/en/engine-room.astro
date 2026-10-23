@@ -14,16 +14,17 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
 <Base
   lang={lang}
   roomId="engine-room"
-  title="Engine room · Uberblok"
+  title="How was this museum made? Engine room · Uberblok"
   description="How Uberblok was built: the OpenZFS commit it reads, what the site is made of, the checks that keep every excerpt and source exact, and the repository."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Room {roomNumber(r.id)}</p>
-      <h1>{r.title.en}</h1>
+      <p class="kicker">Room {roomNumber(r.id)} · {r.title.en}</p>
+      <h1>How was this museum made?</h1>
       <div class="prose intro">
         <p class="lead">
-          The colophon of the museum: the code it reads, what the site is made of, and how it was built and checked.
+          This page says which OpenZFS code the rooms read, what the site is built with, and how it was written and
+          checked.
         </p>
       </div>
     </header>
@@ -99,8 +100,8 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
       <h2 id="built">How it was built</h2>
       <div class="prose">
         <p>
-          The site was written by AI agents, from a mission set by a human who validates the release.
-          The method was the point, so here it is.
+          The site was written by AI agents, from a mission set by a human who approves each release. The
+          steps below are how the work was organised.
         </p>
         <ul class="steps">
           <li>
@@ -145,8 +146,8 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
           Uberblok is not affiliated with the OpenZFS project.
         </p>
         <p class="muted">
-          The visit ends here. The <a href={`${roomUrl(lang, "hall")}#map`}>map of the visit</a> leads back to every
-          room.
+          This is the last room. The <a href={`${roomUrl(lang, "hall")}#map`}>list of all rooms</a> is in the
+          Hall.
         </p>
       </div>
     </section>

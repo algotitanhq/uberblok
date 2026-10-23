@@ -14,16 +14,17 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
 <Base
   lang={lang}
   roomId="engine-room"
-  title="Sala de máquinas · Uberblok"
+  title="¿Cómo se hizo este museo? Sala de máquinas · Uberblok"
   description="Cómo se construyó Uberblok: el commit de OpenZFS que lee, de qué está hecho el sitio, las comprobaciones que mantienen exactos cada extracto y cada fuente, y el repositorio."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Sala {roomNumber(r.id)}</p>
-      <h1>{r.title.es}</h1>
+      <p class="kicker">Sala {roomNumber(r.id)} · {r.title.es}</p>
+      <h1>¿Cómo se hizo este museo?</h1>
       <div class="prose intro">
         <p class="lead">
-          El colofón del museo: el código que lee, de qué está hecho el sitio, y cómo se construyó y se comprobó.
+          Esta página dice qué código de OpenZFS leen las salas, con qué está construido el sitio y cómo se escribió y
+          se comprobó.
         </p>
       </div>
     </header>
@@ -104,7 +105,7 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
       <div class="prose">
         <p>
           El sitio lo escribieron agentes de IA, a partir de una misión fijada por una persona que valida la publicación.
-          El método era lo esencial, así que aquí está.
+          Los pasos siguientes cuentan cómo se organizó el trabajo.
         </p>
         <ul class="steps">
           <li>
@@ -150,8 +151,8 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
           se indica arriba. Uberblok no está afiliado al proyecto OpenZFS.
         </p>
         <p class="muted">
-          La visita termina aquí. El <a href={`${roomUrl(lang, "hall")}#map`}>plano de la visita</a> lleva de vuelta a
-          todas las salas.
+          Esta es la última sala. La <a href={`${roomUrl(lang, "hall")}#map`}>lista de todas las salas</a> está
+          en el Vestíbulo.
         </p>
       </div>
     </section>

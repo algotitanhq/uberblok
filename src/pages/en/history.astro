@@ -12,22 +12,23 @@ const r = room("history");
 <Base
   lang={lang}
   roomId="history"
-  title="History wing · Uberblok"
+  title="Where does ZFS come from? The history of ZFS · Uberblok"
   description="The history of ZFS from Sun Microsystems to OpenZFS, as a timeline in which every fact, date and name links to its source."
 >
   <article class="wrap" data-sourced-page="history">
     <header class="room-head">
-      <p class="kicker">Wing {roomNumber(r.id)}</p>
-      <h1>{r.title.en}</h1>
+      <p class="kicker">Wing {roomNumber(r.id)} · {r.title.en}</p>
+      <h1>Where does ZFS come from?</h1>
       <div class="prose">
         <p class="lead">
-          The code quoted in the rooms of this museum has a history: a team, a company, a licence, forks and a
-          reunion. This wing tells it in dated milestones, and says nothing that a source does not say.
+          This page follows the code quoted in the rooms from Sun Microsystems to the OpenZFS project, as a
+          timeline of dated events. It states nothing that a
+          source does not state.
         </p>
         <p class="muted">
-          Every fact, date, name and quote below carries a numbered note that leads to its source, and every source is
-          listed with the claim it supports in <a href={SOURCES_URL}><code>SOURCES.md</code></a>. Where no source
-          could be found, the fact was left out.
+          Each fact, date, name and quote below has a numbered note that leads to its source. Every source is listed
+          with the claim it supports in <a href={SOURCES_URL}><code>SOURCES.md</code></a>. A fact with no source
+          was left out.
         </p>
       </div>
     </header>

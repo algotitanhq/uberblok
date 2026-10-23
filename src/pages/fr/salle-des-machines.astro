@@ -14,16 +14,17 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
 <Base
   lang={lang}
   roomId="engine-room"
-  title="Salle des machines · Uberblok"
+  title="Comment ce musée a-t-il été fait ? Salle des machines · Uberblok"
   description="Comment Uberblok a été construit : le commit d’OpenZFS qu’il lit, ce dont le site est fait, les vérifications qui gardent chaque extrait et chaque source exacts, et le dépôt."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Salle {roomNumber(r.id)}</p>
-      <h1>{r.title.fr}</h1>
+      <p class="kicker">Salle {roomNumber(r.id)} · {r.title.fr}</p>
+      <h1>Comment ce musée a-t-il été fait ?</h1>
       <div class="prose intro">
         <p class="lead">
-          Le colophon du musée : le code qu’il lit, ce dont le site est fait, et comment il a été construit et vérifié.
+          Cette page dit quel code d’OpenZFS les salles lisent, avec quoi le site est construit, et comment il a été
+          écrit et vérifié.
         </p>
       </div>
     </header>
@@ -103,7 +104,7 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
       <div class="prose">
         <p>
           Le site a été écrit par des agents d’IA, à partir d’une mission fixée par un humain qui en
-          valide la publication. La méthode était l’essentiel, la voici.
+          valide la publication. Les étapes ci-dessous disent comment le travail a été organisé.
         </p>
         <ul class="steps">
           <li>
@@ -149,8 +150,8 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
           extraits sous CDDL, comme plus haut. Uberblok n’a aucun lien avec le projet OpenZFS.
         </p>
         <p class="muted">
-          La visite s’arrête ici. Le <a href={`${roomUrl(lang, "hall")}#map`}>plan de la visite</a> ramène à chaque
-          salle.
+          C’est la dernière salle. La <a href={`${roomUrl(lang, "hall")}#map`}>liste de toutes les salles</a> est
+          dans le hall.
         </p>
       </div>
     </section>

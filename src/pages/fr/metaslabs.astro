@@ -97,13 +97,13 @@ const L = {
           sous les boutons dit ce qui s’est passé, et tout ce que l’action a changé est entouré.
         </p>
         <p>
-          Supprimez A. Sa plage passe au rouge : elle est libérée dans le groupe de transactions ouvert, mais encore allouée. Synchronisez : une entrée FREE rejoint la bande et A passe au vert, en attente. Deux synchronisations de plus la rendent libre.
+          Supprimez A. Sa plage passe au rouge : elle est libérée dans le groupe de transactions ouvert, mais encore allouée. Synchronisez : une entrée FREE rejoint la bande et A passe au vert, en attente. Deux synchronisations de plus la rendent libre.
         </p>
         <p>
           Écrivez ensuite 160 Mio. Ses blocs de 128 Kio se placent après B, pas dans le trou de A, parce que l’allocateur cherche vers l’avant à partir d’un curseur. Une plage aussi longue prend une entrée de deux mots sur la bande. Charger reconstruit l’arbre libre à partir de la bande seule et retrouve le même arbre.
         </p>
         <p>
-          Condenser est refusé tant que la map est courte. Réécrivez db une fois : db est un fichier de 64 Mio dont les blocs sont réécrits au hasard, et la réécriture s’arrête d’elle-même quand le test dit oui. Condensez ensuite.
+          Condenser est refusé tant que la map est courte. Réécrivez db une fois : db est un fichier de 64 Mio dont les blocs sont réécrits au hasard, et la réécriture s’arrête d’elle-même quand le test dit oui. Condensez ensuite.
         </p>
       </div>
       <MetaslabLab lang={lang} />

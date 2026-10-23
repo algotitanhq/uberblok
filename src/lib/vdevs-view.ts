@@ -165,7 +165,7 @@ export function classesHtml(S: VdStrings, p: Pool, hit: ClassName | null = null)
 /** What each look of the tree means; the same from the start, so an action changes the drawing, never the key. */
 export function legendHtml(S: VdStrings): string {
   const sw = (cls: string) => `<span class="lg-sw ${cls}" aria-hidden="true"></span>`;
-  const bias = (["normal", "log", "special", "dedup"] as ClassName[]).map((c) => `${sw(`lg-bias sw-${c}`)}${clsName(S, c)}`).join(" ");
+  const bias = (["normal", "log", "special", "dedup"] as ClassName[]).map((c) => `<span class="lg-item">${sw(`lg-bias sw-${c}`)}${clsName(S, c)}</span>`).join(" ");
   const items = [
     `${S.lg_bias}${S.colon}${bias}`,
     `${sw("lg-path")}${S.lg_path}`,

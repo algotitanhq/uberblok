@@ -76,7 +76,7 @@ const L = {
           cada tipo de dispositivo especializado forma su propia clase. Los metadatos van al dispositivo special cuando el
           pool tiene uno. Los datos de los archivos solo van allí si el bloque no pasa de un tamaño que fijas por dataset,
           cero por defecto, y solo mientras el special esté lleno a menos de tres cuartas partes. La tabla de deduplicación va al dispositivo de dedup, o al special si no hay dispositivo de dedup. El registro de intenciones, el ZIL, va al dispositivo de log. Si no lo hay, va a un espacio reservado en los vdevs special o normales. Todo lo demás va a la clase normal. Cuando la clase special o la de dedup está llena, ZFS vuelve a elegir sin ella y acaba en la clase normal. Dentro de la clase, ZFS reparte los bloques entre los vdevs según el espacio libre y la
-          carga. Los metadatos se guardan en dos copias por defecto, ZFS empieza la segunda en el vdev siguiente de la clase, así que las dos copias quedan en vdevs distintos cuando la clase tiene más de uno.
+          carga. Los metadatos se guardan en dos copias por defecto. ZFS empieza la segunda en el vdev siguiente de la clase, así que las dos copias quedan en vdevs distintos cuando la clase tiene más de uno.
         </p>
         <p>
           Después, la escritura baja por un árbol. El pool es la raíz, los vdevs son sus hijos y los discos son los hijos

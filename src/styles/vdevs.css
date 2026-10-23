@@ -393,3 +393,4 @@
 .vd .lg-sw.lg-bias.sw-log { background: var(--c-log); }
 .vd .lg-sw.lg-bias.sw-special { background: var(--c-special); }
 .vd .lg-sw.lg-bias.sw-dedup { background: var(--c-dedup); }
+.vd .lg-item { white-space: nowrap; }

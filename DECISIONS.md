@@ -2432,6 +2432,50 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   paragraph being read. Opening GitHub in a new tab: the feedback asked for the code beside the
   text.
 
+### D21.3 D21.1 on the Hall, the History wing and the Engine room
+
+- **Context.** [ALG-205](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-205) carries the
+  three pages that are not rooms about one mechanism. D21.1 was written for rooms that cite code;
+  each page was checked against it on its own. On Hacker News a reader wrote of the Hall: « I was
+  doing well until I got lost at Map of the Visit. I forgot I was pretending to be in a museum. »
+- **The Hall: D21.1 applies in full to the uberblock section.** The Hall is the only one of the
+  three that explains a mechanism. Its section asks "How does ZFS find its data after a crash?",
+  answers in three plain paragraphs (txg and uberblock glossed once), says what to try in the
+  ring, then shows the code in three Source notes (`struct uberblock`, the slot choice in
+  `vdev_uberblock_sync`, the choice on import in `vdev_uberblock_load_done`): 15 lines of code,
+  all new `ANALYSIS.md` entries. The page's `h1` stays the wordmark: the Hall is the home page,
+  and its question is the section's `h2`.
+- **The ring as a teaching figure.** A **Next txg** button commits one txg per press and stops
+  the clock, so the reader sees one effect per action: the live line says which slot the txg
+  takes and why (`txg mod slots`) and that the previous uberblock stays in its slot. It works
+  with reduced motion or without WebGL (where the clock never runs) and the pulse animation now runs only under
+  `prefers-reduced-motion: no-preference`. Without script the 2D ring stays as before. The ring
+  was improved, not rebuilt.
+- **Wayfinding in plain words.** The metaphor stays in the names of the rooms, not in the words
+  that guide the reader: "Map of the visit" becomes **All rooms** (Toutes les salles, Todas las
+  salas) as the Hall's section heading, the link under each room's navigation and the footer
+  link (the header already said "Rooms"); the footer group
+  "The visit" becomes **Contents**; "End of the visit." becomes "This is the last room.". The
+  Hall's first screen links to All rooms beside "Why this museum?", and the uberblock section's
+  kicker is "The uberblock" instead of "The object in the Hall". These labels live in
+  `src/lib/ui.ts`, shared by every page: changed here because the feedback was filed on this
+  issue, and only these strings.
+- **The History wing: a question, no Source notes.** `h1` "Where does ZFS come from?", the
+  catalogue title as the kicker, an intro without staged phrasing. The timeline cites sources,
+  not code, so there is no "In the code" section. Its 40 numbered notes stay as they are: each
+  points to a dated, named claim listed in `SOURCES.md`, and wrapping them in collapsible Source
+  notes would hide the dates and names the timeline is made of and add a click per fact.
+- **The Engine room: a question, nothing else of D21.1.** `h1` "How was this museum made?". It
+  has no figure and no mechanism to explain, so there is no plain-answer block, no figure text
+  and no "In the code"; its lead says in one sentence what the page covers.
+- **Links outside Source notes.** Three GitHub links on the Hall stay outside the notes: two in
+  the caption of Fig. 1 (where the plate's lines come from) and one in the Dedication (the
+  `AUTHORS` file). They attribute a figure and a fact, like the History citations; they do not
+  cut the prose that explains the uberblock.
+- **Rejected.** A question as the Hall's `h1`: the home page's title is the site's name, and
+  search results and shares show it. Dropping the museum vocabulary everywhere: the room names
+  are the catalogue, and the feedback was about the words that guide the reader.
+
 ## v1.4 copy-on-write follow-up (ALG-183): FR and ES, teaching figures, panel fixes
 
 ### D21.2 The figures teach by acting; the panel after its design review

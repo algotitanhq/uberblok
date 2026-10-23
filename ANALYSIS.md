@@ -586,9 +586,53 @@ vdev_uberblock_load_done(zio_t *zio)
 
 This callback runs once per uberblock slot read, for every slot of every label of every readable leaf (the loops are in `vdev_uberblock_load_impl`, [`module/zfs/vdev_label.c#L1570-L1588`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1570-L1588)). L1547: a slot counts only if the read succeeded and `uberblock_verify` accepts the magic; the read itself goes through `zio_read_phys` with `ZIO_CHECKSUM_LABEL` ([`module/zfs/vdev_label.c#L197-L200`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L197-L200)), so a torn or garbage slot fails with an I/O error and is skipped. L1549-L1551: track the newest uberblock seen at all. L1552-L1562: track the best one not newer than `spa_load_max_txg` (this is the hook for rewinding to an older txg), and remember which vdev it came from so the matching config can be read from that vdev ([`module/zfs/vdev_label.c#L1647`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1647)).
 
+**Short excerpts for the question-first Hall (v1.4, ALG-205).** The Hall's Source notes show only these lines; the longer excerpts above stay as the analysis.
+
+### 3. `struct uberblock`, the fields the Hall shows — include/sys/uberblock_impl.h
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/uberblock_impl.h#L122-L128
+
+```c
+struct uberblock {
+	uint64_t	ub_magic;	/* UBERBLOCK_MAGIC		*/
+	uint64_t	ub_version;	/* SPA_VERSION			*/
+	uint64_t	ub_txg;		/* txg of last sync		*/
+	uint64_t	ub_guid_sum;	/* sum of all vdev guids	*/
+	uint64_t	ub_timestamp;	/* UTC time of last sync	*/
+	blkptr_t	ub_rootbp;	/* MOS objset_phys_t		*/
+```
+
+L123 `ub_magic` holds `UBERBLOCK_MAGIC`, 0x00bab10c ([L46](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/uberblock_impl.h#L46)). L125 `ub_txg`, the txg of the last sync, decides which uberblock wins on import. L128 `ub_rootbp`, the block pointer to the MOS, is the root every other block of the pool hangs from. The fields after L128 (software version, MMP, checkpoint, RAID-Z expansion) are left to the longer excerpt above.
+
+### 4. `vdev_uberblock_sync`, the slot of a txg — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1782-L1784
+
+```c
+	int m = spa_multihost(vd->vdev_spa) ? MMP_BLOCKS_PER_LABEL : 0;
+	int n = (ub->ub_txg - (RRSS_GET_STATE(ub) == RRSS_SCRATCH_VALID)) %
+	    (VDEV_UBERBLOCK_COUNT(vd) - m);
+```
+
+The slot is the txg modulo the number of slots, `VDEV_UBERBLOCK_COUNT(vd)`, the 128 KiB ring shifted right by the slot size, one sector clamped between 1 KiB and 8 KiB ([`include/sys/vdev_impl.h#L491-L496`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L491-L496)). With `multihost=on`, `m` is `MMP_BLOCKS_PER_LABEL`, 1 ([L488](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L488)), and the ring turns on one slot fewer. The `RRSS_SCRATCH_VALID` term moves an uberblock that carries RAID-Z expansion state back one slot, so it does not overwrite the committed uberblock of the same txg (comment at L1768-L1781). The same slot is then written in each of the four labels (L1792-L1796).
+
+### 5. `vdev_uberblock_load_done`, a valid uberblock and the newest — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1547-L1551
+
+```c
+	if (zio->io_error == 0 && uberblock_verify(ub) == 0) {
+		mutex_enter(&rio->io_lock);
+		if (vdev_uberblock_compare(ub, &cbp->ubl_latest) > 0) {
+			cbp->ubl_latest = *ub;
+		}
+```
+
+Called once per slot read on import. A slot counts only if the read succeeded and `uberblock_verify` finds the magic number, byte-swapping the record first if it was written on a machine of the other byte order (`module/zfs/uberblock.c` L33-L42). A slot whose checksum fails never gets this far: label reads use `ZIO_CHECKSUM_LABEL` (L199), a checksum embedded in the slot itself, so the read returns an error. `vdev_uberblock_compare` ([L1495-L1505](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1495-L1505)) orders uberblocks by `ub_txg`, then `ub_timestamp`, then the MMP sequence number when both carry one (L1506-L1527); the newest valid one is kept in `ubl_latest`.
+
 **What the animation shows.**
 - A disk opens to show its four labels; one label opens to show the ring of slots, each holding a small card with a txg number — `vl_uberblock` [`include/sys/vdev_impl.h#L539`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L539) and `VDEV_UBERBLOCK_COUNT` [`include/sys/vdev_impl.h#L495-L496`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L495-L496).
-- Import: every slot on every label lights up as it is read — loops in `vdev_uberblock_load_impl` L1578-L1585.
+- Import: every slot on every label lights up as it is read — loops in `vdev_uberblock_load_impl` L1577-L1585.
 - Cards with bad magic or a failed read fade out — `vdev_uberblock_load_done` L1547.
 - The card with the highest txg rises to the top; on a txg tie the timestamp decides — `vdev_uberblock_compare` L1498-L1505.
 - From the winning card a single arrow (`ub_rootbp`, L128) leads off-screen into the pool: the doorway to the next room.

@@ -12,22 +12,22 @@ const r = room("history");
 <Base
   lang={lang}
   roomId="history"
-  title="Ala de la historia · Uberblok"
+  title="¿De dónde viene ZFS? La historia de ZFS · Uberblok"
   description="La historia de ZFS, de Sun Microsystems a OpenZFS, en una cronología en la que cada hecho, cada fecha y cada nombre enlaza con su fuente."
 >
   <article class="wrap" data-sourced-page="history">
     <header class="room-head">
-      <p class="kicker">Ala {roomNumber(r.id)}</p>
-      <h1>{r.title.es}</h1>
+      <p class="kicker">Ala {roomNumber(r.id)} · {r.title.es}</p>
+      <h1>¿De dónde viene ZFS?</h1>
       <div class="prose">
         <p class="lead">
-          El código citado en las salas de este museo tiene una historia: un equipo, una empresa, una licencia,
-          bifurcaciones y un reencuentro. Esta ala la cuenta en hitos fechados, y no dice nada que no diga una fuente.
+          Esta página sigue el código citado en las salas, de Sun Microsystems al proyecto OpenZFS, en una
+          cronología con fechas.
         </p>
         <p class="muted">
-          Cada hecho, fecha, nombre y cita que aparece a continuación lleva una nota numerada que conduce a su fuente, y cada fuente
-          figura, con la afirmación que respalda, en <a href={SOURCES_URL}><code>SOURCES.md</code></a>. Cuando no se
-          ha encontrado ninguna fuente, el hecho se ha omitido. Las citas se mantienen en su idioma original; las traducciones son
+          Cada hecho, fecha, nombre y cita que aparece a continuación lleva una nota numerada que conduce a su fuente. Cada fuente
+          figura, con la afirmación que respalda, en <a href={SOURCES_URL}><code>SOURCES.md</code></a>. Un hecho sin
+          fuente se ha omitido. Las citas se mantienen en su idioma original; las traducciones son
           nuestras.
         </p>
       </div>

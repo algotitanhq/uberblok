@@ -1,7 +1,8 @@
 ---
 // The Hall's object: one label's 128 KiB uberblock ring. It opens in 3D after
 // the first paint of the 2D ring and commits a txg every few seconds by itself,
-// with a pause button (src/lib/hall-3d.ts, DECISIONS.md D12.5 and D14.2).
+// with a pause button (src/lib/hall-3d.ts, DECISIONS.md D12.5 and D14.2), and a
+// Next txg button that commits one txg per press, with or without motion (D21.3).
 // Under reduced motion or without WebGL, the 2D ring stays, still.
 // Slot size is 1 << clamp(ashift, 10, 13) (vdev_impl.h L491-L496), so the slot
 // count follows the sector size (DECISIONS.md D0.7). The uberblock of txg N goes
@@ -18,6 +19,8 @@ const S = {
     ashift: "Sector size of the disks (ashift)",
     pause: "Pause",
     play: "Resume",
+    step: "Next txg",
+    stepped: "Txg {txg} goes to slot {n}, because {txg} mod {count} = {n}. The uberblock of txg {prev} stays intact in slot {pn}.",
     paused: "Paused at txg {txg}.",
     playing: "Running: one txg every 1.3 seconds.",
     slotOf: "slot {n} of {count}",
@@ -41,6 +44,8 @@ const S = {
     ashift: "Taille de secteur des disques (ashift)",
     pause: "Pause",
     play: "Reprendre",
+    step: "Txg suivant",
+    stepped: "Le txg {txg} va dans la case {n}, car {txg} mod {count} = {n}. L’uberblock du txg {prev} reste intact dans la case {pn}.",
     paused: "En pause au txg {txg}.",
     playing: "En marche : un txg toutes les 1,3 seconde.",
     slotOf: "case {n} sur {count}",
@@ -64,6 +69,8 @@ const S = {
     ashift: "Tamaño de sector de los discos (ashift)",
     pause: "Pausar",
     play: "Reanudar",
+    step: "Siguiente txg",
+    stepped: "El txg {txg} va a la ranura {n}, porque {txg} mod {count} = {n}. El uberblock del txg {prev} sigue intacto en la ranura {pn}.",
     paused: "En pausa en el txg {txg}.",
     playing: "En marcha: un txg cada 1,3 segundos.",
     slotOf: "ranura {n} de {count}",
@@ -122,6 +129,7 @@ const choices = [
       }
     </fieldset>
     <button class="btn" type="button" data-pause>{S.pause}</button>
+    <button class="btn" type="button" data-step>{S.step}</button>
     <button class="btn" type="button" data-ring3d-btn aria-pressed="false">{S.view3d}</button>
     <p class="why" id={`ring-why-${lang}`} data-ring3d-why hidden></p>
   </div>
@@ -171,6 +179,7 @@ const choices = [
     const live = q("[data-live]");
     const btn3d = q("[data-ring3d-btn]");
     const pauseBtn = q("[data-pause]");
+    const stepBtn = q("[data-step]");
     const host = q("[data-ring3d]");
     const help = q("[data-ring3d-help]");
     let txg = 4211;
@@ -269,6 +278,16 @@ const choices = [
       clock();
       say(paused ? fill(t.paused, { txg }) : t.playing);
     });
+    // One txg per press (D21.3): the clock stops, so the reader sees each step.
+    stepBtn.addEventListener("click", () => {
+      if (!paused && moving) {
+        paused = true;
+        pauseBtn.textContent = t.play;
+        clock();
+      }
+      txg += 1;
+      say(fill(t.stepped, draw(true)));
+    });
     btn3d.addEventListener("click", () => {
       if (btn3d.getAttribute("aria-disabled")) return say(q("[data-ring3d-why]").textContent ?? "");
       void set3d(!on3d);
@@ -366,8 +385,10 @@ const choices = [
   svg :global(.slot--new) {
     stroke: var(--accent);
   }
-  svg :global(.pulse) {
-    animation: pulse var(--dur-3) var(--ease);
+  @media (prefers-reduced-motion: no-preference) {
+    svg :global(.pulse) {
+      animation: pulse var(--dur-3) var(--ease);
+    }
   }
   @keyframes pulse {
     from {

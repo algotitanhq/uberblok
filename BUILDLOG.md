@@ -1969,4 +1969,17 @@ disables itself, labels hidden as soon as older blocks made the map tall, the wr
 region read only the step number, Clear kept a start sector moved by scrolling, new steps
 below the fold: all fixed.
 
-**Debts.** `scripts/verify.mjs` now drives the new RAID-Z controls (size buttons, Clear, the read step by step or skipped to the result). Its run on this branch went through the RAID-Z room (35 captures in EN, FR and ES, reduced motion, no script, the keyboard drive to the result) and stopped at 317 captures, at the end of the working session; the full run is left to the final pass before merge.
+**Design review fixes (2026-10-23).** Four SHOULDs from the design review, all in the map
+figure: the sentence explaining a write now sits under the size buttons; below 45rem the read
+panel is ordered around the map (damage, map, read buttons, newest step first, then the key),
+so one press and its effect on the map fit on a 390 px screen; the key gains "missing child"
+and "child returning bad data"; the read's first step says what each damaged child holds of
+the block, so damaging a parity-only child or a child with nothing of it explains why nothing
+is rebuilt. A line under the damage heading names the data and parity children. New unit
+tests: `scripts/test/raidz-view.test.mjs` (4 tests, including a full-width block and the
+raidz1 swap). `code-reviewer` on the fixes: no defect; its two suggestions taken (tests, the
+reversed step list noted in D23.1).
+
+**Verification.** `npm test` 244 pass; `npm run build` 44 pages, typography check 0 failures;
+`scripts/verify.mjs` on the whole visit at `b3ef3b5`: 457 captures, 0 console errors, every
+mismatch list empty.

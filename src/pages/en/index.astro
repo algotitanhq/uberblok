@@ -5,19 +5,22 @@ import VisitMap from "../../components/VisitMap.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import HallExhibit from "../../components/HallExhibit.astro";
 import Dedication from "../../components/Dedication.astro";
+import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import { gh, OPENZFS_SHA, OPENZFS_TAG } from "../../lib/openzfs";
 
 const lang = "en";
+// The Hall in the question-first format (DECISIONS.md D21.1, D21.2): the uberblock
+// section asks its question, answers it plainly, then the figure, then the code in
+// Source notes. Links to the code live in the notes only.
 const L = {
-  ub: gh("include/sys/uberblock_impl.h", 122, 128),
   magic: gh("include/sys/uberblock_impl.h", 46),
-  labels: gh("include/sys/vdev_impl.h", 560, 562),
-  ring: gh("include/sys/vdev_impl.h", 482),
   slot: gh("include/sys/vdev_impl.h", 491, 496),
-  sync: gh("module/zfs/vdev_label.c", 1782, 1784),
   mmp: gh("include/sys/vdev_impl.h", 488),
-  load: gh("module/zfs/vdev_label.c", 1547, 1562),
-  compare: gh("module/zfs/vdev_label.c", 1495, 1528),
+  labels: gh("include/sys/vdev_impl.h", 560, 562),
+  compare: gh("module/zfs/vdev_label.c", 1495, 1505),
+  loop: gh("module/zfs/vdev_label.c", 1578, 1585),
 };
 ---
 
@@ -34,14 +37,13 @@ const L = {
         <h1>Uberblok</h1>
         <div class="prose manifesto">
           <p class="lead">
-            Storage has always had the same enemies: disks that lie, writes cut short, a crash in the middle of an
-            update. ZFS answers them with a handful of ideas. This museum shows them one room at a time, from the code
-            that implements them.
+            Uberblok explains how ZFS keeps data safe through crashes, failing disks and interrupted writes. Each room
+            takes one idea, shows it in a figure you can operate, and quotes the OpenZFS code that implements it.
           </p>
           <p class="muted">
-            Every animation maps to lines of OpenZFS <code>{OPENZFS_TAG}</code>, frozen at commit
-            <a href={`https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`}><code>{OPENZFS_SHA.slice(0, 12)}</code></a>,
-            and every excerpt links to them. Nothing here is drawn from memory.
+            The figures and excerpts follow OpenZFS <code>{OPENZFS_TAG}</code>, frozen at commit
+            <code>{OPENZFS_SHA.slice(0, 12)}</code>. Every excerpt is checked against that commit, and none is written
+            from memory.
           </p>
           <p class="why"><a href="#why">Why this museum? <span aria-hidden="true">↓</span></a></p>
         </div>
@@ -52,42 +54,155 @@ const L = {
     </header>
 
     <section class="section" aria-labelledby="object">
-      <h2 id="object">The object in the Hall: the uberblock</h2>
-      <div class="prose">
+      <p class="kicker">The object in the Hall: the uberblock</p>
+      <h2 id="object">How does ZFS find its data after a crash?</h2>
+      <div class="prose answer">
         <p>
-          A pool is millions of blocks spread over several disks. After a crash, the system must find its current,
-          consistent state without scanning any of them. So one small record names the root of everything: the
-          <a href={L.ub}>uberblock</a>. It holds a transaction group number, <code>ub_txg</code>, and one block pointer,
-          <code>ub_rootbp</code>; every other block of the pool is reachable from that pointer.
+          A pool holds millions of blocks spread over several disks. After a crash, ZFS has to find the last consistent
+          state of the pool without reading all of them. It starts from one small record on each disk, the uberblock.
+          The uberblock holds the number of the last transaction group (txg), the batch of changes ZFS writes out
+          together every few seconds, and a pointer to the top of the pool’s tree of blocks. Every other block can be
+          reached from that pointer.
         </p>
         <p>
-          Each disk carries <a href={L.labels}>four labels</a>, two at its start and two at its end, and each label keeps
-          a <a href={L.ring}>128 KiB ring</a> of uberblocks. A new uberblock never overwrites the previous one: the
-          uberblock of txg <var>N</var> goes to <a href={L.sync}>slot <var>N</var> mod the number of slots</a> (with <code>multihost=on</code>,
-          <a href={L.mmp}>the last slot is kept for MMP</a> and the ring turns on one slot fewer). On import,
-          ZFS reads every slot of every label and <a href={L.load}>keeps the valid uberblock</a> with
-          <a href={L.compare}>the highest txg</a>.
+          ZFS never writes a new uberblock over the current one. Each disk keeps a ring of slots for uberblocks, and
+          each txg writes its uberblock to the next slot. The previous uberblock stays intact in its own slot, so a
+          power failure during the write still leaves a good one on disk.
         </p>
         <p>
-          The ring is often said to hold 128 uberblocks. It holds 128 KiB: <a href={L.slot}>a slot takes one sector</a>,
-          rounded up to 1 KiB and capped at 8 KiB, so 128 slots on 512-byte sectors, 64 at ashift 11, 32 on the 4K-sector
-          disks of today, 16 beyond. Change the sector size and watch the next txgs
-          take their slots in turn.
+          When the pool is imported, ZFS reads every slot, sets aside the ones that fail their check, and uses the
+          valid uberblock with the highest txg.
+        </p>
+      </div>
+
+      <div class="prose try">
+        <p>
+          The figure shows one ring. It commits a new txg every 1.3 seconds. Press Pause, then Next txg to commit
+          one at a time: the new uberblock takes the slot after the previous one, and the previous one stays in its
+          slot. Change the sector size of the disks. A slot takes one sector, so the same 128 KiB ring holds 128 slots
+          on disks with 512-byte sectors and 32 on disks with 4 KiB sectors.
         </p>
       </div>
       <div class="figure">
         <UberblockRing lang={lang} />
       </div>
       <p class="caption aside">
-        Every uberblock starts with the same magic number, <a href={L.magic}><code>0x00bab10c</code></a>: “oo-ba-bloc”.
+        Every uberblock starts with the same magic number, <code>0x00bab10c</code>, read aloud as “oo-ba-bloc”.
+      </p>
+
+      <h3 class="code-title">In the code</h3>
+      <p class="prose">
+        The figure follows three places in the OpenZFS source. Open a Source note to see the lines, taken from release
+        zfs-2.4.4.
+      </p>
+
+      <div class="step">
+        <h4>The record</h4>
+        <p class="prose">
+          <code>struct uberblock</code> starts with a magic number and the on-disk version. Then come the txg, the time
+          of the sync and <code>ub_rootbp</code>, the block pointer to the pool’s own metadata, from which the rest of
+          the tree hangs.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>struct uberblock</code>, uberblock_impl.h</Fragment>
+          <Excerpt
+            lang={lang}
+            path="include/sys/uberblock_impl.h"
+            from={122}
+            to={128}
+            symbol="uberblock"
+            notes={[
+              {
+                from: 123,
+                text: `<code>UBERBLOCK_MAGIC</code> is <a href="${L.magic}"><code>0x00bab10c</code></a>. A slot without it is not an uberblock.`,
+              },
+              {
+                from: 125,
+                text: "The txg of the last sync. On import, the highest valid one wins.",
+              },
+              {
+                from: 128,
+                text: "The block pointer to the MOS, the pool’s own metadata. Every other block of the pool is reached from here.",
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h4>The slot of a txg</h4>
+        <p class="prose">
+          <code>vdev_uberblock_sync</code> picks the slot: the txg modulo the number of slots. The txg grows by one at
+          each sync, so the uberblocks go round the ring and the newest one never lands on the one before it.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_uberblock_sync</code>, vdev_label.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/vdev_label.c"
+            from={1782}
+            to={1784}
+            symbol="vdev_uberblock_sync"
+            notes={[
+              {
+                from: 1782,
+                text: `With <code>multihost=on</code>, the <a href="${L.mmp}">last slot is kept for MMP</a> and the ring turns on one slot fewer.`,
+              },
+              {
+                from: 1783,
+                to: 1784,
+                text: `<code>VDEV_UBERBLOCK_COUNT</code> is the 128 KiB ring divided by the <a href="${L.slot}">slot size</a>: one sector, at least 1 KiB and at most 8 KiB. The <code>RRSS_SCRATCH_VALID</code> term only matters during a RAID-Z expansion. The same slot is then written in each of the <a href="${L.labels}">four labels</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h4>The choice on import</h4>
+        <p class="prose">
+          On import, <code>vdev_uberblock_load_done</code> runs once for every slot read. It ignores a slot whose read
+          failed or whose magic number is wrong, and keeps the uberblock that compares highest.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_uberblock_load_done</code>, vdev_label.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/vdev_label.c"
+            from={1547}
+            to={1551}
+            symbol="vdev_uberblock_load_done"
+            notes={[
+              {
+                from: 1547,
+                text: `Every slot of every label of every readable disk <a href="${L.loop}">is read</a>. A slot carries its own checksum, so a damaged one fails the read here.`,
+              },
+              {
+                from: 1549,
+                to: 1550,
+                text: `<a href="${L.compare}"><code>vdev_uberblock_compare</code></a> compares the txg first, then the timestamp.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
+
+      <h3 class="code-title">What the figure leaves out</h3>
+      <p class="prose muted">
+        The figure shows one ring. A disk carries four labels, two at its start and two at its
+        end, each with its own ring, and every txg writes the same slot in all four. The ring is often said to hold 128
+        uberblocks. That is true only for 512-byte sectors: it holds 128 KiB, so 64 slots at ashift 11, 32 at ashift 12
+        and 16 from ashift 13. With <code>multihost=on</code> one slot is kept for MMP. The txg numbers are made up.
       </p>
     </section>
 
     <section class="section" aria-labelledby="map">
-      <h2 id="map">Map of the visit</h2>
+      <h2 id="map">All rooms</h2>
       <p class="prose muted">
-        The rooms follow the data: the root and the tree, how the tree changes, where blocks land, what the tree makes
-        possible, then the features built on top, and the engine room, where the museum says how it was made.
+        Each room explains one part of ZFS with a figure and the code behind it. The list follows the data, from the
+        root of the pool to the features built on it, but each room can be read on its own. The last one, the engine
+        room, says how this site was made.
       </p>
       <div class="map">
         <VisitMap lang={lang} />
@@ -166,5 +281,24 @@ const L = {
   }
   .map {
     margin-top: var(--space-5);
+  }
+  .answer,
+  .try {
+    margin-top: var(--space-5);
+  }
+  .code-title {
+    margin-top: var(--space-7);
+  }
+  .step {
+    margin-top: var(--space-6);
+  }
+  .step h4 {
+    margin-bottom: var(--space-3);
+    font-family: var(--font-caption);
+    font-style: italic;
+    font-weight: 400;
+    font-size: var(--step-2);
+    color: var(--accent);
+    letter-spacing: 0;
   }
 </style>

@@ -8,10 +8,11 @@
 // receive checks) decides every outcome, and src/lib/send-view.ts draws it, at
 // build time for the finished stream (readable without JavaScript) and in the
 // browser frame by frame. Refs: ANALYSIS.md, room "send / receive";
-// simplifications: DECISIONS.md D9.2.
+// simplifications: DECISIONS.md D9.2. One step per press of Next step, and
+// what it did stays outlined until the next one (D29.1); the narration is
+// plain and carries no code links, which live in the room's Source notes.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { snapshots, send, receive, streamBytes, contentOf } from "../lib/send";
 import { tree, strip, receiver, counters, table, history, describe, summary, lastFrame, type SrStrings } from "../lib/send-view";
@@ -21,21 +22,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const SEND = "module/zfs/dmu_send.c";
-const RECV = "module/zfs/dmu_recv.c";
-const refs = {
-  visitbp: gh("module/zfs/dmu_traverse.c", 277, 278),
-  sendCbDnode: gh(SEND, 1098, 1108),
-  sendCbMeta: gh(SEND, 1109, 1120),
-  sendCbData: gh(SEND, 1140, 1146),
-  dumpDnode: gh(SEND, 732, 742),
-  end: gh(SEND, 2619, 2626),
-  recvBegin: gh(RECV, 1304, 1306),
-  recvEnd: gh(RECV, 3000, 3007),
-  recvCheck: gh(RECV, 2861, 2866),
-  dispatch: gh(RECV, 3188, 3213),
-};
-const S = { ...Object.fromEntries(Object.entries(SEND_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as SrStrings;
+const S = { ...Object.fromEntries(Object.entries(SEND_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as SrStrings;
 const t = UI[lang];
 const snaps = snapshots();
 const to = snaps[3];
@@ -60,8 +47,7 @@ const t0 = lastFrame(snd, rcv);
       }
     </div>
     <div class="buttons actions">
-      <button class="btn btn--primary" type="button" data-act="play">{S.play}</button>
-      <button class="btn" type="button" data-act="step">{S.step}</button>
+      <button class="btn" type="button" data-act="play">{S.play}</button>
       <button class="btn" type="button" data-act="end">{S.showAll}</button>
       <button class="btn" type="button" data-act="restart">{S.restart}</button>
       <button class="btn btn--danger" type="button" data-flip aria-pressed="false">{S.flip}</button>
@@ -84,11 +70,17 @@ const t0 = lastFrame(snd, rcv);
         <li><span class="bp data skip"><span class="t">a0</span><sub>10</sub></span>{S.legendSkip}</li>
         <li><span class="bp data pruned"><span class="t">a1</span><sub>10</sub></span>{S.legendPruned}</li>
         <li><span class="bp data hole visit"><span class="t">{S.hole}</span><sub>30</sub></span>{S.legendHole}</li>
+        <li data-js-key hidden><span class="bp data visit just"><span class="t">a2′</span><sub>20</sub></span>{S.legendJust}</li>
       </ul>
     </section>
     <section class="panel stream" aria-labelledby={`sr-str-${lang}`}>
       <h3 id={`sr-str-${lang}`}>{S.streamLabel}</h3>
-      <div data-strip set:html={strip(S, snd, rcv, t0)} />
+      <div data-strip set:html={strip(S, snd, rcv, t0, false)} />
+      <ul class="legend" aria-hidden="true">
+        <li class="kline"><span class="kck">57970fd7</span> {S.keyCk}</li>
+        <li><span class="krec done">✓</span>{S.keyDone}</li>
+        <li><span class="krec bad"></span>{S.keyBad}</li>
+      </ul>
     </section>
     <section class="panel recv" aria-labelledby={`sr-rcv-${lang}`}>
       <h3 id={`sr-rcv-${lang}`}>{S.receiverLabel}</h3>
@@ -96,7 +88,11 @@ const t0 = lastFrame(snd, rcv);
     </section>
   </div>
 
-  <p class="sr-now" data-now aria-live="polite" hidden></p>
+  <div class="sr-stepbar" hidden>
+    <div class="sr-echo stream" data-echo aria-hidden="true" inert hidden></div>
+    <button class="btn btn--primary" type="button" data-act="step">{S.step}</button>
+    <p class="sr-now" data-now aria-live="polite"></p>
+  </div>
   <noscript><p class="muted">{S.noScript}</p></noscript>
 
   <div class="sr-table" data-table tabindex="0" role="region" aria-label={t.scrollTable} set:html={table(S, sends, FROM0)} />
@@ -134,6 +130,8 @@ const t0 = lastFrame(snd, rcv);
     let snd: Send = sends[fi];
     let rcv: Received = receiveIt(snd);
     let t = lastFrame(snd, rcv);
+    // Outlines mean "what the last step did": none until a step is taken.
+    let marked = false;
 
     function compute() {
       snd = sends[fi];
@@ -141,9 +139,55 @@ const t0 = lastFrame(snd, rcv);
     }
 
     function say(text: string) {
-      const el = q("[data-now]");
-      el.hidden = false;
-      el.innerHTML = text;
+      q("[data-now]").innerHTML = text;
+    }
+
+    // The figure is often taller than the screen: after a press of Next step,
+    // bring what the step outlined into view above the bar, which sticks to the
+    // bottom of the screen (as in the TXG and ARC rooms, D24.1, D25.1).
+    /** What frame t outlined: the pointer or dnode it tested, else what the receiver changed, else the records. */
+    function target(): Element | null {
+      const pick = (...sel: string[]) => sel.map((s) => root.querySelector(s)).find(Boolean) ?? null;
+      if (t > 0 && t <= snd.steps.length) return pick("[data-tree] .cur", "[data-strip] .rec.just");
+      return pick("[data-receiver] .verdict", "[data-receiver] .blk.new", "[data-receiver] li.new", "[data-receiver] li.gone", "[data-strip] .rec.just");
+    }
+    // The records a step wrote or checked and the part show() brings into view
+    // are often not on screen together (the panels stack on a phone, the stream
+    // grows long on a desktop): then the bar repeats those records above its
+    // line (Design/UX review of ALG-201).
+    const echoBox = q("[data-echo]");
+    // A rotation or a new width moves the panels: the copy may no longer be needed.
+    // Height alone changes when a phone's address bar hides on scroll; keep it then.
+    let echoWidth = innerWidth;
+    addEventListener("resize", () => {
+      if (innerWidth !== echoWidth) echoBox.hidden = true;
+      echoWidth = innerWidth;
+    });
+    /** How far to scroll so that el sits between the top of the screen and the bar; 0 if it does. */
+    function scrollFor(el: Element): number {
+      const r = el.getBoundingClientRect();
+      // Stop above the bar, whose height follows the line; a part taller than
+      // the room above the bar is aligned on its top.
+      const room = Math.min(q(".sr-stepbar").getBoundingClientRect().top, innerHeight) - 8;
+      if (r.top >= 8 && r.bottom <= room) return 0;
+      return r.top < 8 || r.bottom - r.top > room - 8 ? r.top - 8 : r.bottom - room;
+    }
+    function show() {
+      echoBox.hidden = true;
+      const el = target();
+      if (!el) return;
+      let by = scrollFor(el);
+      const recs = [...root.querySelectorAll("[data-strip] .rec.just")];
+      const room = Math.min(q(".sr-stepbar").getBoundingClientRect().top, innerHeight) - 8;
+      if (recs.some((r) => r.getBoundingClientRect().top - by < 8 || r.getBoundingClientRect().bottom - by > room)) {
+        const ol = document.createElement("ol");
+        ol.className = "strip";
+        ol.append(...recs.map((r) => r.cloneNode(true)));
+        echoBox.replaceChildren(ol);
+        echoBox.hidden = false;
+        by = scrollFor(el);
+      }
+      if (by) window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
     function controls() {
@@ -154,7 +198,7 @@ const t0 = lastFrame(snd, rcv);
       // the focus: every control but Start again while the stream plays, Show the end once it is shown.
       // Next step at the end starts the stream again from BEGIN. With reduced motion, Play shows the end
       // at once, so it does not apply once the end is shown either.
-      for (const b of root.querySelectorAll<HTMLButtonElement>(".sr-bar button:not([data-act=restart])")) {
+      for (const b of root.querySelectorAll<HTMLButtonElement>(".sr-bar button:not([data-act=restart]), .sr-stepbar button")) {
         if (busy || ((b.dataset.act === "end" || (b.dataset.act === "play" && reducedMotion())) && t >= last)) b.setAttribute("aria-disabled", "true");
         else b.removeAttribute("aria-disabled");
       }
@@ -162,13 +206,14 @@ const t0 = lastFrame(snd, rcv);
 
     function draw() {
       q("[data-tree]").innerHTML = tree(S, snd, t);
-      q("[data-strip]").innerHTML = strip(S, snd, rcv, t);
+      q("[data-strip]").innerHTML = strip(S, snd, rcv, t, marked);
       q("[data-receiver]").innerHTML = receiver(S, snd, rcv, t);
       q("[data-counters]").innerHTML = counters(S, snd, t);
       controls();
     }
 
     function render() {
+      marked = false;
       draw();
       q("[data-table]").innerHTML = table(S, sends, fi);
       q("[data-summary]").textContent = summary(S, snd);
@@ -188,6 +233,7 @@ const t0 = lastFrame(snd, rcv);
     function stepTo(n: number, quiet = false) {
       const before = root.querySelectorAll("[data-strip] .rec").length;
       t = n;
+      marked = true;
       draw();
       pulse(before);
       if (!quiet) say(frameLine(S, snd, rcv, t));
@@ -221,6 +267,7 @@ const t0 = lastFrame(snd, rcv);
       const el = (e.target as Element).closest<HTMLElement>("button");
       if (!el || !root.contains(el)) return;
       const d = el.dataset;
+      echoBox.hidden = true;
       if (d.act === "restart") {
         run++;
         busy = false;
@@ -233,20 +280,26 @@ const t0 = lastFrame(snd, rcv);
         compute();
         t = lastFrame(snd, rcv);
         render();
-        say(summary(S, snd));
+        say(`${summary(S, snd)} ${S.hint}`);
       } else if (el.hasAttribute("data-flip")) {
         flip = !flip;
         compute();
         t = lastFrame(snd, rcv);
         render();
         say(frameLine(S, snd, rcv, t));
-      } else if (d.act === "step") stepTo(t >= lastFrame(snd, rcv) ? 0 : t + 1);
+      } else if (d.act === "step") {
+        stepTo(t >= lastFrame(snd, rcv) ? 0 : t + 1);
+        show();
+      }
       else if (d.act === "end") stepTo(lastFrame(snd, rcv));
       else if (d.act === "play") void play();
     });
 
     render();
+    say(`${summary(S, snd)} ${S.hint}`);
     q(".sr-bar").hidden = false;
+    q(".sr-stepbar").hidden = false;
+    q("[data-js-key]").hidden = false;
   }
 </script>
 
@@ -261,7 +314,7 @@ const t0 = lastFrame(snd, rcv);
     margin-bottom: var(--space-5);
   }
   .sr-bar[hidden],
-  .sr-now[hidden] {
+  .sr-stepbar[hidden] {
     display: none;
   }
   .buttons {
@@ -431,8 +484,13 @@ const t0 = lastFrame(snd, rcv);
     font-style: italic;
     font-weight: 400;
   }
+  /* What the last step did: a ring in the ink colour, kept until the next step. */
+  .bp.just,
   .tree-wrap :global(.bp.cur),
-  .tree-wrap :global(.slot.cur) {
+  .tree-wrap :global(.slot.cur),
+  .stream :global(.rec.just),
+  .recv :global(.blk.new),
+  .recv :global(li.new .fname) {
     outline: 2px solid var(--fg);
     outline-offset: 1px;
   }
@@ -470,6 +528,13 @@ const t0 = lastFrame(snd, rcv);
     display: flex;
     gap: var(--space-2);
     align-items: center;
+  }
+  .legend li[hidden] {
+    display: none;
+  }
+  /* The checksum key reads as one sentence that starts with its sample. */
+  .legend li.kline {
+    display: block;
   }
   /* The stream: a strip of records, top to bottom. */
   .stream :global(.strip) {
@@ -547,6 +612,26 @@ const t0 = lastFrame(snd, rcv);
     border-color: var(--bad);
     background: var(--bad-soft);
   }
+  .kck {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--fg);
+  }
+  .krec {
+    display: inline-block;
+    min-width: 1.6em;
+    height: 1.2em;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    text-align: center;
+    color: var(--ok);
+  }
+  .krec.bad {
+    border-color: var(--bad);
+    background: var(--bad-soft);
+  }
   /* The receiver: its files, block by block. */
   .recv :global(.holds) {
     font-size: var(--step--1);
@@ -597,6 +682,23 @@ const t0 = lastFrame(snd, rcv);
     border-color: var(--accent);
     background: var(--accent-soft);
   }
+  /* An object the step just freed: drawn once more, dashed, then dropped. */
+  .recv :global(li.gone) {
+    opacity: 0.6;
+    border: 1px dashed var(--fg-muted);
+    border-radius: 4px;
+    padding: 0.1em 0.45em;
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
+  }
+  .recv :global(li.gone .fname) {
+    text-decoration: line-through;
+  }
+  .recv :global(.del) {
+    font-size: var(--step--1);
+    font-style: italic;
+    color: var(--fg-muted);
+  }
   .recv :global(.verdict) {
     margin: var(--space-3) 0 0;
     font-size: var(--step--1);
@@ -612,8 +714,54 @@ const t0 = lastFrame(snd, rcv);
     background: var(--bad-soft);
     border-left: 3px solid var(--bad);
   }
+  /* Next step and the line that says what it did, right under the figure. The
+     bar sticks to the bottom of the screen while the figure is in view, so the
+     button stays in reach whatever part of the figure is on screen. */
+  .sr-stepbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    margin: var(--space-4) calc(-1 * var(--space-2)) 0;
+    padding: var(--space-2);
+    background: var(--bg);
+    border-top: 1px solid var(--line-strong);
+  }
+  .sr-stepbar {
+    flex-wrap: wrap;
+  }
+  .sr-stepbar .btn {
+    flex: none;
+  }
+  .sr-echo[hidden] {
+    display: none;
+  }
+  /* The records the step outlined, repeated on one line when they are off screen. */
+  .sr-echo {
+    flex-basis: 100%;
+    overflow-x: auto;
+    padding: 3px;
+  }
+  .sr-echo :global(.strip) {
+    display: flex;
+    gap: 4px;
+  }
+  .sr-echo :global(.rec) {
+    flex: none;
+    grid-template-columns: auto auto;
+  }
+  .sr-echo :global(.rec .n),
+  .sr-echo :global(.rec .ck) {
+    display: none;
+  }
+  .sr-echo :global(.rec .args) {
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
   .sr-now {
-    margin: var(--space-4) 0 0;
+    margin: 0;
     font-size: var(--step--1);
     max-width: 52rem;
     min-height: 3em;
@@ -623,10 +771,6 @@ const t0 = lastFrame(snd, rcv);
   .sr-now :global(b) {
     font-family: var(--font-mono);
     font-weight: 600;
-  }
-  .sr :global(a.see) {
-    font-size: 0.85em;
-    color: var(--fg-muted);
   }
   .sr-table {
     margin-top: var(--space-5);
@@ -687,6 +831,15 @@ const t0 = lastFrame(snd, rcv);
     .source {
       grid-column: 1 / -1;
     }
+    /* The line goes under the button, at full width. */
+    .sr-stepbar {
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+    .sr-now {
+      flex-basis: 100%;
+      min-height: 0;
+    }
   }
   @media (max-width: 40rem) {
     .sr-grid {
@@ -698,6 +851,10 @@ const t0 = lastFrame(snd, rcv);
     .tree-wrap :global(ul ul) {
       padding-left: var(--space-2);
       margin-left: var(--space-1);
+    }
+    .sr-now {
+      min-height: 0;
+      line-height: 1.35;
     }
   }
 </style>

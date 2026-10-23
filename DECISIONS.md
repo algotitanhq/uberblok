@@ -2813,3 +2813,56 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   the offset field is named in the reader's language (« décalage », « desplazamiento »), as the
   sentence under it; the "what to try" text of section 1 is three short paragraphs, and says that
   rewrite db stops by itself when the test says yes.
+
+## v1.4 send / receive room (ALG-201)
+
+### D29.1 The send / receive room as a question; one press of Next step, one outlined effect
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 8 excerpts (186 lines of code) and 48 links to GitHub in each language, 24 of
+  them in the prose, plus a "code" link after every line the figure narrated (10 targets). The
+  issue asks for a figure where the reader sends a full then an incremental stream and sees
+  which blocks travel.
+- **Question.** "How does ZFS send only what changed?" (« Comment ZFS n’envoie-t-il que ce qui a
+  changé ? », « ¿Cómo envía ZFS solo lo que cambió? »). The answer goes from the cost of
+  comparing files (rsync) to the birth txg in every block pointer, the subtree skipped whole
+  because copy-on-write rewrites every block above a change, then the stream: records, a running
+  checksum the receiver checks before it applies a record, and the from-snapshot named by GUID.
+- **Figure.** `SendLab` is improved, not rebuilt; the model (`src/lib/send.ts`) is unchanged.
+  Next step is the primary button and sits under the three panels with the line that says what
+  the step did; the bar sticks to the bottom of the screen while the figure is in view, on every
+  width, since the full stream makes the figure taller than a laptop screen too. Each press
+  outlines, in the ink colour, what it did: the block pointer or dnode it tested, the records it
+  wrote (`justWritten()` in `send-view.ts`), then on the receiving side the record checked and
+  the blocks it changed, or the header refused. The outline is a class, not an animation, so it
+  reads under reduced motion; nothing is outlined before the first press, nor without script.
+  After a press the outlined part is scrolled into view above the bar if it is not visible. The
+  tree's key gains the outline, the stream gets a key (the checksum value, applied, refused).
+  The narration is plain: no code links (D21.1) and no function names (`send_cb`, `dump_dnode`,
+  `td_min_txg`, `drr_checksum`, the receive functions); record types stay, since the stream
+  shows them. "What to try" asks for a full stream first, then from `@s3`, with the numbers the
+  table shows (21 records and 11,672 bytes, then 7 and 2,184). Without script the figure shows
+  the finished stream from `@s2` and its text version, as before.
+- **Code.** Six Source notes, 44 lines, all new short cuts in `ANALYSIS.md` (send / receive room,
+  13 to 18), checked against `zfs-2.4.4`: the bound (`send_traverse_thread`), the skip
+  (`traverse_visitbp`), data or hole (`send_cb`), the running checksum (`dump_record`), the check
+  (`receive_read_payload_and_next_header`) and the from-snapshot found by GUID
+  (`recv_begin_check_existing_impl`, which the room did not show before). The "three depths"
+  section is gone; `traverse_dnode` and `receive_process_record` are named in a note and in
+  "What the figure leaves out" instead of shown.
+- **Rejected.** Starting the figure empty, at BEGIN: without script it would show nothing, and
+  the finished stream is the figure's summary; the first press starts the send from BEGIN.
+  Taking snapshots in the figure: the four snapshots are the history the model and its tests are
+  hand-checked against; choosing the from-snapshot shows the same full-then-incremental sequence.
+  A sticky bar on phones only, as in the TXG room: at 1280×900 the outlined record of a full
+  stream was under the fold while Next step was in view.
+- **After the Design/UX review.** On a phone the panels stack, so a step's records and the
+  part it tested were rarely on screen together. When the outlined records would sit off
+  screen, the step bar repeats them on one line above its text (a copy, `inert` and hidden from
+  assistive technology, since the stream and the line already say it), and under the
+  three-column width the line goes under the button at full width. A FREEOBJECTS that deletes a
+  file draws it once more on the receiving side, dashed and marked deleted, then drops it on
+  the next frame: the deletion is an absence and otherwise outlines nothing. The key item for
+  the outline is shown by the script only, and the checksum key reads as one sentence.
+  Rejected: scrolling to the records instead of the pointer (the reader loses the cause), and
+  a second scroll after the first (the page jumps twice per press).

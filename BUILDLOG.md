@@ -2427,3 +2427,33 @@ standalone check by `pathToFileURL`, kept as in the other verify scripts.
 
 **Debts.** None found outside the room. On a 390 px phone the dedup table scrolls sideways to show
 its last column, as on `main`.
+
+### Design/UX fixes ([ALG-203](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-203), one pass)
+
+The full list from the design review (7 SHOULDs, 4 NITs) is fixed in this PR, and the change is
+logged under D31.1. The plain answer has 68, 82 and 80 words in EN (it had 117, 94 and 95), 76, 88
+and 85 in FR, and 73, 92 and 88 in ES. The key button names its next action. A failed read is marked
+on its block. A dedup hit outlines the block it reuses. Outlines wrap the step numbers. On a phone,
+labels sit on their own line. The DDT fits at 390 px in all three languages. Lines are no longer
+repeated in the figures. The dashed seven-eighths line has a key. After a bit flip, a scrub outlines
+only the checksum that failed. The panels are the same height.
+
+**Proof.** `npm test` passes all 263 tests (one new: the limit label; the dedup and encryption tests
+now cover the reused block, the brief line, the read mark and the failed checksum). `npm run build`
+passes, with FR typography at 0 failures. `scripts/verify-transforms.mjs` ran at a5669ef against the
+preview, in EN, FR and ES at 390 and 1440 px: 0 mismatches, 54 captures and 0 console errors. After
+one action per figure, the hit now also outlines the block on disk. The key button reads "Load the
+key" after it is pressed. The keyboard check finds 69 stops in each language and announces all six
+actions. Reduced motion and no-script both pass. Captures read by eye: the failed read (EN desktop,
+ES phone), the 4 KiB and 16 KiB compression bars, the FR and ES dedup figures at 390 px, and the
+mobile controls. The whole-site verify did not run again, because the change stays inside the room:
+its page, its three figures and `transforms.css`.
+
+**Reviews.** `code-reviewer` on the fixes found no blocker, and four of its points were taken:
+- The quota line brings back the full sentence for the last write.
+- A dragged range shows the full outcome.
+- The read mark fades in, and the key button keeps its width.
+- Step numbers are not read twice.
+
+Not taken: a "(changed)" text on the read mark (its own text says it), and a comment on exact
+seven-eighths values (block sizes are powers of two).

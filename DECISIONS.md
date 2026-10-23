@@ -2854,3 +2854,18 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   motion). Showing the dedup log in the figure: it changes when entries reach the disk, not what a
   write does, and the note shows the comment that explains it. A visible line for a change of block
   pointer kind: the sentence above the words is that line.
+- **Design/UX pass** ([ALG-203](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-203), 7 SHOULDs
+  and 4 NITs, all taken). The plain answer is 68, 82 and 80 words in EN (it was 117, 94 and 95); zeros and
+  embedding move to section 1, and the block pointer is glossed in a parenthesis where the answer
+  first needs it. The key button names its next action
+  ("Unload the key" / "Load the key") instead of a pressed state, because a toggle labelled with the
+  state it leaves contradicts itself once pressed. A failed read marks the block where it stopped, as the
+  scrub marks a damaged one, and the duplicate message under the file is gone. A dedup hit outlines
+  the block on disk it reuses, since its list of references grew. In `CompressLab` the branch numbers
+  are a CSS counter inside each branch's box, so the outline wraps them; bar rows get inner room.
+  Below 30rem each group's label takes its own line and the DDT drops the physical birth (the block
+  pointers show it); its key column is headed "Key". While the line under the controls says the
+  sentence, the figure keeps only its first words (the outcome's name, "Hit: nothing written."); during
+  a drag, or after a quota change in `DedupLab`, the figure says it in full. The limit label names
+  the seven eighths, and keys the dashed line, only when they differ. A scrub that finds damage
+  outlines only the failed checksum. The branch panel is as tall as the result beside it.

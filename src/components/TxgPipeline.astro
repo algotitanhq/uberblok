@@ -494,14 +494,15 @@ const textVersion = {
     function show(el: Element | null | undefined) {
       if (!el || !phone.matches) return;
       // A card may still be gliding from its previous stage (FLIP above): measure
-      // where it lands, not where it is drawn now.
+      // where it lands, not where it is drawn now. The outline may sit on a part
+      // inside the card, which moves with it.
       const r = el.getBoundingClientRect();
-      const dy = new DOMMatrix(getComputedStyle(el).transform).m42;
+      const dy = new DOMMatrix(getComputedStyle(el.closest(".card") ?? el).transform).m42;
       const top = r.top - dy;
       const bottom = r.bottom - dy;
       // Stop above the bar, whose height follows the narration. A part taller
       // than the room above the bar is aligned on its top.
-      const room = q(".stepbar").getBoundingClientRect().top - 8;
+      const room = Math.min(q(".stepbar").getBoundingClientRect().top, innerHeight) - 8;
       if (top >= 8 && bottom <= room) return;
       const by = top < 8 || bottom - top > room - 8 ? top - 8 : bottom - room;
       window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });

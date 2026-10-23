@@ -2197,6 +2197,67 @@ reversed step list noted in D23.1).
 `scripts/verify.mjs` on the whole visit at `b3ef3b5`: 457 captures, 0 console errors, every
 mismatch list empty.
 
+## v1.4 vdevs room (ALG-191): a question, and a figure that says where each block landed
+
+**What changed.** The vdevs room, in EN, FR and ES, asks one question ("Where does ZFS put a
+block in my pool?"), answers it in three plain paragraphs, says what to try in the figure,
+then shows the code in nine Source notes (D21.1, D26.1). In the figure, the line under the
+controls says where the last block went, the vdevs that got a copy are ringed, its class is
+marked in the table beside the tree, and a key explains every look. Nine short excerpts are
+new in `ANALYSIS.md` (vdevs room, 18 to 26). The other rooms are unchanged, except the Engine
+room's computed excerpt count (141 → 150).
+
+**Measures** (pages served by the build, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 93 | 37 |
+| of them in the prose | 48 | 0 |
+| in the figure (first state) | 7 | 0 |
+| in excerpts and Source notes | 38 | 37 |
+| Code excerpts | 14 | 9 |
+| Lines of code shown | 411 | 99 |
+
+**Reviews.** `technical-writer` on the three languages: eleven claims made precise (the
+second copy of metadata starts on the next vdev but shares it in a class of one; the
+deduplication table goes to special without a dedup vdev; only special and dedup fall back to
+normal; a RAID-Z block takes data and parity columns, fewer for a small block; a dRAID group
+of the figure is three columns over five children; the permutation offset grows by one per
+row; only the I/O path needs no special case for a replacement; a real pool with RAID-Z
+cannot remove a special vdev), `le txg`/`el txg` as on the rest of the site, calques in FR
+and ES. Not taken: "escritas" after "copias" in the Spanish narration (it refers to the
+block, and "1 copia" would need its own form).
+
+**Code review.** `code-reviewer` on the diff: the ring drawn before the node's box took the
+box's class, lit and selected looks (the box must stay the node's first rect); the key's
+count swatch showed the last block's look; the key stayed visible in 3D; a double colon in
+the key; strings left unused. All fixed, with a test that the ring comes after the box.
+
+**Verification** at `45c6648`: `npm test` 246 pass; `npm run build` 44 pages, typography
+check 0 failures; `check-permalinks` (ANALYSIS.md 150 excerpts, 957 line references; built
+site 1755), `check-sources` and `check-csp`: all pass. `scripts/verify-vdevs.mjs`: 136 runs
+against the model, 0 mismatches, keyboard walk with every stop visible. `scripts/audit.mjs`:
+42 pages, 0 problems. `scripts/verify.mjs` on the whole visit: 465 captures, 0 console errors,
+every mismatch list empty. axe (WCAG 2.2 AA) on the three vdevs pages with a block written, a
+read and a note open, dark and light at 1440 px, dark at 390 and 320 px: 0 violations but the
+debt below; no sideways scroll. Captures not committed (`shots/`).
+
+**Debts.** In the light theme, the "Source" tag of an open Source note's pill is 4.27:1 on
+its accent fill (axe `color-contrast`, needs 4.5:1). It is in the shared `SourceNote`, the
+same on `main` in every room (checked on the RAID-Z room), and the whole-visit audit does not
+open a note, so it never saw it. Left for the issue that owns `SourceNote`.
+
+**Design/UX fixes** (D26.1, design review). Measured with the "Write a block" row at 60 % of
+the window, then Metadata pressed: the ringed `mirror-4` was 540 px below the fold at
+1440×900 and the class row 410 px; now the line, the ring and the class row are all on screen
+at 1440×900 and 1366×768 (ring 839–867 of 900, class row 447–480), and on a 390×844 phone the
+line and the ring are (787–811 of 844), the class shown by its swatch in the line. Answer
+paragraph 2: 192 → 123 words in EN, 207 → 134 in FR, 205 → 129 in ES. The fill buttons are a
+group of their own (`aria-label` "Special class"). `npm test` 246 pass, build 0 errors,
+`verify-vdevs.mjs` 136 runs and 0 mismatches, keyboard walk with every stop visible, 0 console
+errors. `code-reviewer` on the fix: the scroll now waits a frame for the line above the tree
+to change; the FR and ES sentences on the two copies now use the figure's words for the ring.
+
 ## v1.4 ARC room (ALG-193): a question, and a figure that reads one block per press
 
 **What changed.** The ARC room, in EN, FR and ES, asks one question ("Why doesn't a big read

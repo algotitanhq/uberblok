@@ -45,11 +45,13 @@ function parse(html) {
   return root;
 }
 function matches(el, compound) {
+  if (compound.replace(/^[a-z][\w-]*/i, "").replace(/\.[\w-]+|\[[\w-]+(?:="[^"]*")?\]|:last-child/g, "") !== "")
+    throw new Error(`selector part not supported by the test: ${compound}`);
   if (el.tag === "#root") return false;
   const tag = compound.match(/^[a-z][\w-]*/i);
   if (tag && el.tag !== tag[0].toLowerCase()) return false;
   for (const [, c] of compound.matchAll(/\.([\w-]+)/g)) if (!(el.attrs.class ?? "").split(/\s+/).includes(c)) return false;
-  for (const [, n, v] of compound.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)) if (!(n in el.attrs) || (v !== undefined && el.attrs[n] !== v)) return false;
+  for (const [, n, v] of compound.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)) if (!Object.hasOwn(el.attrs, n) || (v !== undefined && el.attrs[n] !== v)) return false;
   if (compound.includes(":last-child") && el.parent.children.at(-1) !== el) return false;
   return true;
 }
@@ -309,6 +311,18 @@ test("a mount drawn step by step: one write replayed per step, the chain shown u
     assert.match(disk(t, S, f), /Claimed in txg<\/dt><dd>101/, `step ${k}`);
   }
   assert.doesNotMatch(disk(t, S), /data-seq=/);
+});
+
+test("the test's selector matcher finds only what is there", () => {
+  const doc = parse('<div data-writes><ul class="writes"><li data-w="1">a</li><li data-w="2"><b data-seq="3">x</b></li><p>z</p></ul></div>');
+  assert.equal(select(doc, '[data-w="2"]').length, 1);
+  assert.equal(select(doc, '[data-seq="999"]').length, 0);
+  assert.equal(select(doc, ".writes > li:last-child").length, 0);
+  assert.equal(select(doc, ".writes > p:last-child").length, 1);
+  assert.equal(select(doc, ".writes > [data-seq]").length, 0);
+  assert.equal(select(doc, ".writes [data-seq]").length, 1);
+  assert.equal(select(doc, "[constructor]").length, 0);
+  assert.throws(() => select(doc, "li:not(.x)"));
 });
 
 test("every step rings a part of the figure that the step's drawing has", () => {

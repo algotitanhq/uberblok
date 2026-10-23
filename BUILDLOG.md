@@ -2337,7 +2337,7 @@ bottom. The model is unchanged. Eight short excerpts are new in `ANALYSIS.md` (Z
 | Code excerpts (citations) | 9 | 9 |
 | Lines of code shown | 220 | 74 |
 
-**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (261 pass after the merge of `main`),
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (262 pass after the merge of `main`),
 `check-permalinks` (ANALYSIS.md 157 excerpts, 0 failures; built pages 1698 line references,
 0 failures), `check-csp` (44 pages). `scripts/verify-zil.mjs` (new, scoped to this room): EN,
 FR, ES on desktop and a 390 px phone; write, fsync, write, fsync, power cut, import, mount, one

@@ -16,14 +16,13 @@ register(
       }`,
     ),
 );
-const { eventLine, bits, tapeMeta, summary } = await import("../../src/lib/metaslab-view.ts");
+const { eventLine, bits, tapeMeta, summary, describe, changes } = await import("../../src/lib/metaslab-view.ts");
 const { MS_STRINGS } = await import("../../src/lib/metaslab-strings.ts");
 const { fr } = await import("../../src/lib/fr.ts");
-const { opening, BLOCK, SM_ALLOC, SM_FREE } = await import("../../src/lib/metaslab.ts");
+const { opening, clone, write, del, sync, load, churn, condenseNow, MIB, MS_START, BLOCK, SM_ALLOC, SM_FREE } = await import("../../src/lib/metaslab.ts");
 
 const strings = (lang) => ({
   ...Object.fromEntries(Object.entries(MS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])),
-  refs: new Proxy({}, { get: () => "#" }),
   lang,
 });
 const text = (html) => html.replace(/<[^>]+>/g, "").replace(/[  ]/g, " ");
@@ -92,8 +91,12 @@ test("fr: the regressions QA found on ALG-91", () => {
   assert.doesNotMatch(all, /1 entrée rejouées/);
   assert.doesNotMatch(all, /0 octet libres/);
   assert.doesNotMatch(all, /2 mot de remplissage/);
-  assert.match(all, /et 1 autre\b/);
   assert.match(all, /2 mots de remplissage/);
+  // The text version lists six free segments, then counts the rest.
+  const s = opening();
+  s.allocatable = Array.from({ length: 7 }, (_, i) => [MS_START + i * 2 * BLOCK, MS_START + (i * 2 + 1) * BLOCK]);
+  assert.match(text(describe(s, S)), /et 1 autre\b/);
+  assert.doesNotMatch(text(describe(s, S)), /et 1 autres/);
 });
 
 test("es: singular for 1 only, plural for 0 and 2", () => {
@@ -138,4 +141,67 @@ test("EN, FR and ES have the same keys and the same placeholders, and no placeho
     const out = [...[0, 1, 2].flatMap((n) => lines(S, n)), tapeMeta(s, S), summary(s, S), ...s.tape.map((_, i) => bits(s, S, i))].map(text);
     for (const o of out) assert.doesNotMatch(o, /\{\w+\}/, o);
   }
+});
+
+test("no line of the figure links to the code: the links live in the Source notes (D21.1)", () => {
+  for (const lang of ["en", "fr", "es"]) {
+    const S = strings(lang);
+    const s = opening();
+    const out = [...[0, 1, 2].flatMap((n) => lines(S, n)), describe(s, S), ...s.tape.map((_, i) => bits(s, S, i))].join("\n");
+    assert.doesNotMatch(out, /<a\b|github\.com/);
+  }
+});
+
+const run = (f) => {
+  const s = opening();
+  return (g) => {
+    f(s);
+    const before = clone(s);
+    g(s);
+    return { s, c: changes(before, s) };
+  };
+};
+const inside = (segs, [a, b]) => segs.some(([x, y]) => x <= a && b <= y);
+
+test("changes: a write outlines its new extent, the free tree, the cursor and the file", () => {
+  const { s, c } = run(() => {})((s) => write(s, 4 * MIB));
+  assert.deepEqual(c.segs, [[0x42400000, 0x42800000]]);
+  assert.deepEqual(c.trees.sort(), ["allocatable", "allocating", "cursor"]);
+  assert.deepEqual(c.files, ["C"]);
+  assert.equal(c.fresh, null);
+  assert.equal(s.files.at(-1).id, "C");
+});
+
+test("changes: a delete outlines A; its sync outlines the new words and A, now deferred", () => {
+  const A = [0x40000000, 0x42000000];
+  const d = run(() => {})((s) => del(s, "A"));
+  assert.ok(inside(d.c.segs, A));
+  assert.deepEqual(d.c.trees, ["freeing"]);
+  assert.deepEqual(d.c.files, ["A"]);
+  const y = run((s) => del(s, "A"))((s) => sync(s));
+  assert.ok(inside(y.c.segs, A));
+  assert.ok(y.c.trees.includes("defer") && y.c.trees.includes("freeing"));
+  assert.equal(y.c.fresh, 4);
+  assert.equal(y.s.tape.length, 6);
+});
+
+test("changes: two syncs later A comes back to the free tree, and only A is outlined", () => {
+  const { c } = run((s) => {
+    del(s, "A");
+    sync(s);
+    sync(s);
+  })((s) => sync(s));
+  assert.deepEqual(c.segs, [[0x40000000, 0x42000000]]);
+  assert.deepEqual(c.trees.sort(), ["allocatable", "defer"]);
+  assert.equal(c.fresh, null);
+});
+
+test("changes: a load changes nothing; a condense outlines the whole new map", () => {
+  const l = run(() => {})((s) => load(s));
+  assert.deepEqual(l.c, { segs: [], trees: [], files: [], fresh: null });
+  const k = run((s) => {
+    for (let i = 0; i < 4 && !churn(s).some((e) => e.k === "churn" && e.stopped); i++);
+  })((s) => condenseNow(s));
+  assert.equal(k.c.fresh, 0);
+  assert.ok(k.s.tape[0].condense);
 });

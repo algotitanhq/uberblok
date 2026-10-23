@@ -20,7 +20,7 @@ const L = {
   mmp: gh("include/sys/vdev_impl.h", 488),
   labels: gh("include/sys/vdev_impl.h", 560, 562),
   compare: gh("module/zfs/vdev_label.c", 1495, 1505),
-  loop: gh("module/zfs/vdev_label.c", 1578, 1585),
+  loop: gh("module/zfs/vdev_label.c", 1577, 1585),
 };
 ---
 
@@ -38,7 +38,7 @@ const L = {
         <div class="prose manifesto">
           <p class="lead">
             Uberblok explica cómo ZFS mantiene los datos a salvo frente a las caídas, los discos que fallan y las
-            escrituras interrumpidas. Cada sala toma una idea, la muestra en una figura que se puede manejar y cita el
+            escrituras interrumpidas. La mayoría de las salas toma una idea, la muestra en una figura que se puede manejar y cita el
             código de OpenZFS que la implementa.
           </p>
           <p class="muted">
@@ -61,8 +61,7 @@ const L = {
         <p>
           Un pool contiene millones de bloques repartidos entre varios discos. Después de una caída, ZFS tiene que
           encontrar el último estado coherente del pool sin leerlos todos. Parte de un pequeño registro que hay en cada
-          disco, el uberblock. El uberblock guarda el número del último grupo de transacciones (txg), el lote de cambios
-          que ZFS escribe junto cada pocos segundos, y un puntero a la cima del árbol de bloques del pool. Desde ese
+          disco, el uberblock. ZFS escribe los cambios por lotes, llamados grupos de transacciones (txg), cada pocos segundos. El uberblock guarda el número del último txg y un puntero a la cima del árbol de bloques del pool. Desde ese
           puntero se llega a todos los demás bloques.
         </p>
         <p>
@@ -78,10 +77,7 @@ const L = {
 
       <div class="prose try">
         <p>
-          La figura muestra un anillo. Confirma un txg nuevo cada 1,3 segundos. Pulsa Pausar y después Siguiente txg
-          para confirmarlos de uno en uno: el uberblock nuevo ocupa la ranura que sigue a la anterior, y el anterior se
-          queda en la suya. Cambia el tamaño de sector de los discos. Una ranura ocupa un sector, así que el mismo
-          anillo de 128 KiB tiene 128 ranuras en discos con sectores de 512 bytes y 32 en discos con sectores de 4 KiB.
+          La figura muestra un anillo. Pulsa Siguiente txg para confirmar un txg: el uberblock nuevo ocupa la ranura que sigue a la del anterior, y el anterior se queda en la suya. Con las animaciones activadas, el anillo también confirma un txg cada 1,3 segundos por sí solo, y Siguiente txg lo detiene. Cambia el tamaño de sector de los discos. Una ranura ocupa un sector, y nunca menos de 1&nbsp;KiB, así que el mismo anillo de 128&nbsp;KiB tiene 128 ranuras en discos con sectores de 512 bytes y 32 en discos con sectores de 4&nbsp;KiB.
         </p>
       </div>
       <div class="figure">
@@ -93,15 +89,13 @@ const L = {
 
       <h3 class="code-title">En el código</h3>
       <p class="prose">
-        La figura sigue tres lugares del código de OpenZFS. Abre una nota Fuente para ver las líneas, tomadas de la
-        versión zfs-2.4.4.
+        La figura sigue tres lugares del código de OpenZFS. Abre una nota Fuente para ver las líneas, tomadas de la versión <code>{OPENZFS_TAG}</code>.
       </p>
 
       <div class="step">
         <h4>El registro</h4>
         <p class="prose">
-          <code>struct uberblock</code> empieza por un número mágico y la versión del formato en disco. Después vienen
-          el txg, la hora de la sincronización y <code>ub_rootbp</code>, el puntero de bloque a los metadatos propios del
+          <code>struct uberblock</code> empieza por un número mágico y la versión del formato en disco. También guarda el txg, la hora de la sincronización y <code>ub_rootbp</code>, el puntero de bloque a los metadatos propios del
           pool, del que cuelga el resto del árbol.
         </p>
         <SourceNote lang={lang}>
@@ -164,8 +158,7 @@ const L = {
         <h4>La elección al importar</h4>
         <p class="prose">
           Al importar, <code>vdev_uberblock_load_done</code> se ejecuta una vez por cada ranura leída. Ignora una ranura
-          cuya lectura ha fallado o cuyo número mágico es incorrecto, y se queda con el uberblock que queda más arriba en
-          la comparación.
+          cuya lectura ha fallado o cuyo número mágico es incorrecto, y se queda con el uberblock que gana la comparación.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>vdev_uberblock_load_done</code>, vdev_label.c</Fragment>
@@ -204,8 +197,7 @@ const L = {
     <section class="section" aria-labelledby="map">
       <h2 id="map">Todas las salas</h2>
       <p class="prose muted">
-        Cada sala explica una parte de ZFS con una figura y el código que hay detrás. La lista sigue a los datos, desde
-        la raíz del pool hasta las funcionalidades construidas encima, pero cada sala se puede leer por separado. La
+        La mayoría de las salas explica una parte de ZFS con una figura y el código que hay detrás. La lista empieza por la historia de ZFS y luego sigue a los datos, desde la raíz del pool hasta las funcionalidades construidas encima. Cada sala se puede leer por separado. La
         última, la sala de máquinas, cuenta cómo se hizo este sitio.
       </p>
       <div class="map">

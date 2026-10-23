@@ -1,7 +1,7 @@
 ---
 import Base from "../../layouts/Base.astro";
 import RoomNav from "../../components/RoomNav.astro";
-import { room, roomNumber, roomUrl } from "../../lib/rooms";
+import { room, roomNumber } from "../../lib/rooms";
 import { OPENZFS_SHA, OPENZFS_TAG } from "../../lib/openzfs";
 import { COUNTS, REPO_URL, repoFile, VERSIONS } from "../../lib/stack";
 import { ANALYTICS_ON } from "../../lib/analytics";
@@ -144,10 +144,6 @@ const tree = `https://github.com/openzfs/zfs/tree/${OPENZFS_SHA}`;
           The site’s code is under the MIT licence, its texts and illustrations under
           <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>, and the excerpts under the CDDL, as above.
           Uberblok is not affiliated with the OpenZFS project.
-        </p>
-        <p class="muted">
-          This is the last room. The <a href={`${roomUrl(lang, "hall")}#map`}>list of all rooms</a> is in the
-          Hall.
         </p>
       </div>
     </section>

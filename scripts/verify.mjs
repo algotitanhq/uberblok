@@ -226,6 +226,19 @@ for (const lang of ["en", "fr"]) {
   report.keyboard.hallPause = { moved, tickMs, reached, paused: (await txg()) === t0, label: await page.evaluate(() => document.querySelector("[data-pause]")?.textContent) };
   const hp = report.keyboard.hallPause;
   if (!hp.moved || Math.abs(hp.tickMs - 1300) > 100 || !hp.reached || !hp.paused || hp.label !== "Resume") throw new Error(`Hall pause check failed: ${JSON.stringify(hp)}`);
+  // Next txg (D21.2): the next Tab stop; Enter commits exactly one txg and says where it went.
+  await page.keyboard.press("Tab");
+  const onStep = await page.evaluate(() => document.activeElement?.matches?.("[data-step]"));
+  const before = Number(await txg());
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  report.keyboard.hallStep = {
+    onStep,
+    added: Number(await txg()) - before,
+    live: await page.evaluate(() => document.querySelector("[data-live]")?.textContent ?? ""),
+  };
+  const hs = report.keyboard.hallStep;
+  if (!hs.onStep || hs.added !== 1 || !hs.live.includes(`Txg ${before + 1} goes to slot`)) throw new Error(`Hall step check failed: ${JSON.stringify(hs)}`);
   await ctx.close();
 }
 

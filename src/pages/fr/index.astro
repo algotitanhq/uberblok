@@ -20,7 +20,7 @@ const L = {
   mmp: gh("include/sys/vdev_impl.h", 488),
   labels: gh("include/sys/vdev_impl.h", 560, 562),
   compare: gh("module/zfs/vdev_label.c", 1495, 1505),
-  loop: gh("module/zfs/vdev_label.c", 1578, 1585),
+  loop: gh("module/zfs/vdev_label.c", 1577, 1585),
 };
 ---
 
@@ -38,7 +38,7 @@ const L = {
         <div class="prose manifesto">
           <p class="lead">
             Uberblok explique comment ZFS garde les données intactes malgré les pannes, les disques défaillants et les
-            écritures interrompues. Chaque salle prend une idée, la montre dans une figure que l’on manipule, et cite le
+            écritures interrompues. La plupart des salles prennent une idée, la montrent dans une figure que l’on manipule, et citent le
             code d’OpenZFS qui la met en œuvre.
           </p>
           <p class="muted">
@@ -61,9 +61,7 @@ const L = {
         <p>
           Un pool contient des millions de blocs répartis sur plusieurs disques. Après une panne, ZFS doit retrouver le
           dernier état cohérent du pool sans tous les lire. Il part d’un petit enregistrement présent sur chaque disque,
-          l’uberblock. L’uberblock contient le numéro du dernier groupe de transactions (txg), le lot de modifications
-          que ZFS écrit ensemble toutes les quelques secondes, et un pointeur vers le sommet de l’arbre de blocs du
-          pool. Tous les autres blocs sont accessibles à partir de ce pointeur.
+          l’uberblock. ZFS écrit les modifications par lots, appelés groupes de transactions (txg), à quelques secondes d’intervalle. L’uberblock contient le numéro du dernier txg et un pointeur vers le sommet de l’arbre de blocs du pool. Tous les autres blocs sont accessibles à partir de ce pointeur.
         </p>
         <p>
           ZFS n’écrit jamais un nouvel uberblock par-dessus l’uberblock en cours. Chaque disque garde un anneau de cases
@@ -78,11 +76,7 @@ const L = {
 
       <div class="prose try">
         <p>
-          La figure montre un anneau. Elle valide un nouveau txg toutes les 1,3 seconde. Appuyez sur Pause, puis sur
-          Txg suivant pour en valider un à la fois : le nouvel uberblock prend la case qui suit la précédente, et
-          l’ancien reste dans la sienne. Changez la taille de secteur des disques. Une case occupe un secteur, donc le
-          même anneau de 128 Kio compte 128 cases sur des disques à secteurs de 512 octets et 32 sur des disques à
-          secteurs de 4 Kio.
+          La figure montre un anneau. Appuyez sur Txg suivant pour valider un txg : le nouvel uberblock prend la case qui suit celle du précédent, et le précédent reste dans la sienne. Quand les animations sont actives, l’anneau valide aussi un txg toutes les 1,3 seconde, et Txg suivant l’arrête. Changez la taille de secteur des disques. Une case occupe un secteur, et jamais moins de 1 Kio, donc le même anneau de 128 Kio compte 128 cases sur des disques à secteurs de 512 octets et 32 sur des disques à secteurs de 4 Kio.
         </p>
       </div>
       <div class="figure">
@@ -94,15 +88,13 @@ const L = {
 
       <h3 class="code-title">Dans le code</h3>
       <p class="prose">
-        La figure suit trois endroits du code d’OpenZFS. Ouvrez une note Source pour voir les lignes, tirées de la
-        version zfs-2.4.4.
+        La figure suit trois endroits du code d’OpenZFS. Ouvrez une note Source pour voir les lignes, tirées de la version <code>{OPENZFS_TAG}</code>.
       </p>
 
       <div class="step">
         <h4>L’enregistrement</h4>
         <p class="prose">
-          <code>struct uberblock</code> commence par un nombre magique et la version du format sur disque. Viennent
-          ensuite le txg, l’heure de la synchronisation et <code>ub_rootbp</code>, le pointeur de bloc vers les
+          <code>struct uberblock</code> commence par un nombre magique et la version du format sur disque. Il contient aussi le txg, l’heure de la synchronisation et <code>ub_rootbp</code>, le pointeur de bloc vers les
           métadonnées propres au pool, d’où part tout le reste de l’arbre.
         </p>
         <SourceNote lang={lang}>
@@ -204,8 +196,7 @@ const L = {
     <section class="section" aria-labelledby="map">
       <h2 id="map">Toutes les salles</h2>
       <p class="prose muted">
-        Chaque salle explique une partie de ZFS avec une figure et le code qui la fait tourner. La liste suit les
-        données, de la racine du pool aux fonctions bâties dessus, mais chaque salle se lit seule. La dernière, la
+        La plupart des salles expliquent une partie de ZFS avec une figure et le code qui la fait tourner. La liste commence par l’histoire de ZFS, puis suit les données, de la racine du pool aux fonctionnalités construites par-dessus. Chaque salle se lit seule. La dernière, la
         salle des machines, dit comment ce site a été fait.
       </p>
       <div class="map">

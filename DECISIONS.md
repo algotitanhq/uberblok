@@ -2436,7 +2436,7 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
 
 ### D22.1 The tree room as a question, and a figure that climbs one level per step
 
-- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182))
+- **Context.** The roll-out of D21.1 (ALG-182)
   starts with the tree and the uberblock room, the most visited after the Hall. It had 12
   excerpts (255 lines of code) and 58 links to GitHub in each language, 27 of them in the
   prose. The issue asks for a figure where the reader changes a block and follows the new

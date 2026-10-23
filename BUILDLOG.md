@@ -1947,10 +1947,10 @@ shared with the tree room; same rules).
 
 | | `main` | this branch |
 |---|---|---|
-| GitHub links in the article | 58 | 28 |
+| GitHub links in the article | 58 | 22 |
 | of them in the prose | 27 | 0 |
 | in Source notes (excerpt captions and notes) | 25 | 22 |
-| in the figure ("code" links) | 6 | 6 |
+| in the figure ("code" links) | 6 | 0 |
 | Code excerpts | 12 | 7 |
 | Lines of code shown | 255 | 69 |
 
@@ -1973,8 +1973,7 @@ written copies from those in memory and re-grew every box on each step, beat 0 w
 "next" while under way, "levels" meant two things: all fixed.
 
 **Debts.** On a phone (390 px) the tree is drawn at about 60 % of its desktop size, so the
-block names are small; the 3D view and the text version carry the same state. The figure's
-own "code" links stay in the figure, as in the pilot. The disk table's header no longer wraps
+block names are small; the 3D view and the text version carry the same state. The disk table's header no longer wraps
 letter by letter at 390 px (fixed here, in the room's own stylesheet).
 
 **Design review fixes.** The step caption moved from below the panels (about 800 px under the
@@ -1985,3 +1984,11 @@ step ringed, and the legend is complete from the start (D22.1). Measured in a re
 every step; the ring is on exactly the row the step wrote (D2, then L1 #1, L2 #0, the dnode
 block, the objset). `npm test` (241 pass), `npm run build`, `scripts/verify-tree.mjs`: 332
 states, 0 mismatches, 38 captures, 0 console errors.
+
+**QA review fixes.** The figure no longer links to GitHub: the "code" links on the commit
+beats, the disk table's header, the step and import captions are gone, since the Source
+notes below the figure carry the same lines (the pilot room has no link outside its notes
+either). Counted in the built pages, EN, FR and ES alike: 22 GitHub links in the article,
+all 22 inside the Source notes; the 4 others on the page are the site header and footer.
+D22.1 cites ALG-182 by its bare id. `npm test` (241 pass), `npm run build`,
+`scripts/verify-tree.mjs` against the preview.

@@ -282,11 +282,6 @@
   border-left: 2px solid var(--accent);
   padding-left: var(--space-2);
 }
-.tr a.see {
-  font-size: 0.85em;
-  color: var(--fg-muted);
-  font-weight: 400;
-}
 .tr table {
   width: 100%;
   border-collapse: collapse;

@@ -25,7 +25,6 @@ const { fr } = await import("../../src/lib/fr.ts");
 
 const strings = (lang) => ({
   ...Object.fromEntries(Object.entries(TREE_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])),
-  refs: new Proxy({}, { get: () => "#" }),
   lang,
 });
 const text = (html) => html.replace(/<[^>]+>/g, "").replace(/[  ]/g, " ");
@@ -136,7 +135,7 @@ test("the drawing agrees with the model", () => {
   assert.deepEqual(["D2", "L1-1", "L2-0", "DN", "OS"].map((k) => st2[`${k}@4211`]), ["unflushed", "unflushed", "mem", "mem", "mem"]);
   assert.match(svg2, /class="edge e-mem" data-edge="L2-0@4211>L1-1@4211"/);
   assert.match(svg2, /class="edge e-wait" data-edge="DN@4211>L2-0@4211"/);
-  assert.equal(text(V.stepLine(S, h2)), "L1 #1 is written to a new place. Its new address and checksum are now in L2 #0, which the next step writes. code");
+  assert.equal(text(V.stepLine(S, h2)), "L1 #1 is written to a new place. Its new address and checksum are now in L2 #0, which the next step writes.");
   assert.match(text(V.beatsHtml(S, h2)), /under way spa_sync is writing the new blocks of txg 4211, from the data up\. Rows written: 2 of 5\./);
   // The ring marks only the blocks given as just written; the legend is whole from the start.
   const ringed = V.treeSvg(S, h2, new Set(["L1-1@4211"]));
@@ -145,7 +144,7 @@ test("the drawing agrees with the model", () => {
   assert.equal((V.treeSvg(S, p).match(/<li class="s-/g) ?? []).length, 8);
   // Caption sentences name the dnode block and the objset in full, a capital first.
   h2 = M.step(h2);
-  assert.equal(text(V.stepLine(S, h2)), "L2 #0 is written to a new place. Its new address and checksum are now in the dnode block, which the next step writes. code");
+  assert.equal(text(V.stepLine(S, h2)), "L2 #0 is written to a new place. Its new address and checksum are now in the dnode block, which the next step writes.");
   h2 = M.step(h2);
   assert.match(text(V.stepLine(S, h2)), /^The dnode block is written to a new place\. Its new address and checksum are now in the objset, /);
   assert.match(text(V.stepLine(strings("fr"), h2)), /^Le bloc de dnodes est écrit à un nouvel endroit\..* dans l’objset, /);
@@ -153,14 +152,14 @@ test("the drawing agrees with the model", () => {
   assert.match(text(V.stepLine(S, h2)), /^The objset is written: the 5 blocks of txg 4211 are on the disk, not flushed yet\./);
   // Both data blocks in one step when two leaves share the txg.
   const two = M.step(M.writeLeaf(M.writeLeaf(M.createPool(), 0).pool, 3).pool);
-  assert.equal(text(V.stepLine(S, two)), "D0 and D3 are written, each to a new place. Their new addresses and checksums are now in L1 #0 and L1 #1, which the next step writes. code");
+  assert.equal(text(V.stepLine(S, two)), "D0 and D3 are written, each to a new place. Their new addresses and checksums are now in L1 #0 and L1 #1, which the next step writes.");
   p = writeAll(p);
   for (let i = 0; i < 3; i++) p = M.step(p);
   assert.match(V.treeSvg(S, p), /data-root="OS@4211"/);
   assert.match(V.diskSvg(S, p), /L0 txg 4211, L1 txg 4211, L2 txg 4211, L3 txg 4211/);
   // The announcement of a write names the copies; of beat 3, the slot.
   const w = M.writeLeaf(M.createPool(), 2);
-  assert.equal(text(V.writeLine(S, w.pool, 2, w.rewritten)), "D2 written in txg 4211: new copies of D2, L1 #1, L2 #0, dnodes and objset. The old tree is intact. code");
+  assert.equal(text(V.writeLine(S, w.pool, 2, w.rewritten)), "D2 written in txg 4211: new copies of D2, L1 #1, L2 #0, dnodes and objset. The old tree is intact.");
   let q = writeAll(w.pool);
   for (let i = 0; i < 3; i++) q = M.step(q);
   assert.match(text(V.stepLine(S, q)), /^Beat 3: the uberblock of txg 4211 is in slot 115 of the four labels\./);

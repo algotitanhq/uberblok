@@ -10,7 +10,6 @@
 // DECISIONS.md D12.2 to D12.4.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { createPool, writeLeaf, NDATA } from "../lib/tree";
 import { treeSvg, diskSvg, diskHtml, beatsHtml, importHtml, describe, type TrStrings } from "../lib/tree-view";
@@ -21,22 +20,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const VL = "module/zfs/vdev_label.c";
-const refs = {
-  offset: gh(VL, 158, 170),
-  dirty: gh("module/zfs/dbuf.c", 2537, 2554),
-  write: gh("module/zfs/zio.c", 2102, 2104),
-  bottomUp: gh("module/zfs/zio.c", 1932, 1939),
-  flush: gh(VL, 2085, 2098),
-  even: gh(VL, 2100, 2116),
-  ubsync: gh(VL, 1782, 1796),
-  odd: gh(VL, 2144, 2161),
-  load: gh(VL, 1570, 1588),
-  compare: gh(VL, 1495, 1505),
-  readConfig: gh(VL, 832, 863),
-  cases: gh(VL, 2118, 2131),
-};
-const S = { ...Object.fromEntries(Object.entries(TREE_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const S = { ...Object.fromEntries(Object.entries(TREE_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as TrStrings;
 const t = UI[lang];
 const p0 = writeLeaf(createPool(), 2).pool;
 const helpId = `tr-help-${lang}`;

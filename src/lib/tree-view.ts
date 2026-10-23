@@ -9,15 +9,13 @@ import {
   type Blk, type ImportResult, type Pool, type Why,
 } from "./tree";
 
-export type TrStrings = Record<string, string> & { refs: Record<string, string>; lang: string };
+export type TrStrings = Record<string, string> & { lang: string };
 
 export const fill = (tpl: string, vars: Record<string, string | number>) =>
   tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
-const see = (S: TrStrings, r: string) => (S.refs[r] ? ` <a class="see" href="${S.refs[r]}">${S.see}</a>` : "");
-const strip = (html: string) => html.replace(/ ?<a class="see"[^>]*>[^<]*<\/a>/g, "");
-/** What the live region reads: the line without its code links and tags. */
+/** What the live region reads: the line without its tags. */
 // Collapses ASCII white space only: the French no-break spaces stay (D1.9).
-export const spoken = (html: string) => strip(html).replace(/<[^>]+>/g, "").replace(/[ \t\r\n]+/g, " ").trim();
+export const spoken = (html: string) => html.replace(/<[^>]+>/g, "").replace(/[ \t\r\n]+/g, " ").trim();
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
 /** Singular for 1 in English, for 0 and 1 in French (DECISIONS.md D7.4). */
@@ -201,7 +199,7 @@ export function diskHtml(S: TrStrings, p: Pool): string {
     const s = Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, "");
     return S.lang === "fr" ? `${decimal("fr", s)} Mio` : `${decimal(S.lang, s)} MiB`;
   };
-  const head = `<tr><th scope="col">${S.c_label}</th><th scope="col">${S.c_at}${see(S, "offset")}</th><th scope="col">${S.c_config}</th>`
+  const head = `<tr><th scope="col">${S.c_label}</th><th scope="col">${S.c_at}</th><th scope="col">${S.c_config}</th>`
     + `<th scope="col">${fill(S.c_slot, { slot: sp, off: ubOffset(sp, p.ashift) / 1024 })}</th><th scope="col">${fill(S.c_slot, { slot: sn, off: ubOffset(sn, p.ashift) / 1024 })}</th></tr>`;
   const rows = p.labels.map((lab, l) => {
     const c = (s: Pool["labels"][number]["ring"][number]) => `<td class="${s?.torn ? "torn" : s?.txg === work ? "new" : ""}">${cellText(S, s)}</td>`;
@@ -221,18 +219,18 @@ export function beatsHtml(S: TrStrings, p: Pool): string {
   const txg = workTxg(p);
   const done = t?.beat ?? -1;
   const cutAt = p.cut && t && p.cut.during !== "idle" ? (p.cut.during === "open" ? 0 : p.cut.during) : -2;
-  const items: [BeatKey, string, string][] = [
-    ["beat0", S.beat0, "write"],
-    ["beat1", S.beat1, "flush"],
-    ["beat2", p.configDirty ? S.beat2 : S.beat2none, "even"],
-    ["beat3", S.beat3, "ubsync"],
-    ["beat4", p.configDirty ? S.beat4 : S.beat4none, "odd"],
+  const items: [BeatKey, string][] = [
+    ["beat0", S.beat0],
+    ["beat1", S.beat1],
+    ["beat2", p.configDirty ? S.beat2 : S.beat2none],
+    ["beat3", S.beat3],
+    ["beat4", p.configDirty ? S.beat4 : S.beat4none],
   ];
   const lis = items.map(([k, text], i) => {
     const writing = i === 0 && !!t && t.beat === null && t.wrote > 0;
     const st = i === cutAt ? "cut" : i <= done ? "done" : writing ? "now" : t && !p.cut && i === done + 1 ? "next" : "todo";
     const say = writing ? S.beat0prog : text;
-    return `<li class="bt-${st}" data-beat="${i}"><span class="st">${S[`st_${st}`]}</span> ${fill(say, { txg, slot: slotOf(txg, p.ashift), w: t?.wrote ?? 0, h: HEIGHTS })}${see(S, k === "beat0" ? "write" : items[i][2])}</li>`;
+    return `<li class="bt-${st}" data-beat="${i}"><span class="st">${S[`st_${st}`]}</span> ${fill(say, { txg, slot: slotOf(txg, p.ashift), w: t?.wrote ?? 0, h: HEIGHTS })}</li>`;
   }).join("");
   return `<p class="muted">${beatsSummary(S, p)}</p><ol class="beats" start="0">${lis}</ol>`;
 }
@@ -252,10 +250,10 @@ export const newBlocks = (p: Pool) => (p.open ? PLACES.filter((pl) => p.open!.ve
 
 export function importHtml(S: TrStrings, r: ImportResult | null): string {
   if (!r) return `<p class="muted">${S.importNone}</p>`;
-  const parts = [S.imp_read + see(S, "load")];
+  const parts = [S.imp_read];
   if (r.tornSlots.length) parts.push(fill(S.imp_torn, { list: list(S, r.tornSlots.map((s) => fill(S.tornSlot, { slot: s.slot, l: L(s.label) }))) }));
-  parts.push(fill(S.imp_winner, { txg: r.winner.txg, slot: r.slot, labels: list(S, r.foundIn.map(L)) }) + see(S, "compare"));
-  if (r.configLabel >= 0) parts.push(fill(S.imp_cfg, { l: L(r.configLabel), cfg: r.labelReads[r.configLabel].config ?? 0, txg: r.winner.txg }) + see(S, "readConfig"));
+  parts.push(fill(S.imp_winner, { txg: r.winner.txg, slot: r.slot, labels: list(S, r.foundIn.map(L)) }));
+  if (r.configLabel >= 0) parts.push(fill(S.imp_cfg, { l: L(r.configLabel), cfg: r.labelReads[r.configLabel].config ?? 0, txg: r.winner.txg }));
   for (const x of r.labelReads) {
     if (x.verdict === "tooNew") parts.push(fill(S.imp_tooNew, { l: L(x.label), cfg: x.config ?? 0 }));
     if (x.verdict === "torn") parts.push(fill(S.imp_cfgTorn, { l: L(x.label) }));
@@ -270,7 +268,7 @@ export function importVerdict(S: TrStrings, r: ImportResult): string {
   if (cut === null) return `${fill(S.imp_same, vars)} ${S.why_idle}`;
   const why = whyKey(r);
   const head = r.tree === "new" ? S.imp_new : r.during === "open" ? S.imp_oldOpen : S.imp_old;
-  return `${fill(head, vars)} ${fill(S[why], vars)}${see(S, why === "why_3none" || why === "why_3some" ? "cases" : why === "why_2" ? "readConfig" : "")}`;
+  return `${fill(head, vars)} ${fill(S[why], vars)}`;
 }
 
 function whyKey(r: ImportResult): string {
@@ -291,7 +289,7 @@ function whyKey(r: ImportResult): string {
 export function writeLine(S: TrStrings, p: Pool, blkid: number, rewritten: string[]): string {
   const txg = p.open!.txg;
   if (rewritten.length === 1) return fill(S.sayWriteShared, { k: blkid, txg });
-  return fill(S.sayWrite, { k: blkid, txg, list: list(S, rewritten.map((k) => placeName(S, k))) }) + see(S, "dirty");
+  return fill(S.sayWrite, { k: blkid, txg, list: list(S, rewritten.map((k) => placeName(S, k))) });
 }
 
 export function stepLine(S: TrStrings, p: Pool): string {
@@ -301,12 +299,11 @@ export function stepLine(S: TrStrings, p: Pool): string {
     const fresh = newBlocks(p);
     const just = fresh.filter((k) => height(k) === t.wrote - 1);
     const parents = fresh.filter((k) => height(k) === t.wrote);
-    return capital(fill(just.length === 1 ? S.say0one : S.say0many, { list: list(S, just.map((k) => captionName(S, k))), parents: list(S, parents.map((k) => captionName(S, k))) })) + see(S, "bottomUp");
+    return capital(fill(just.length === 1 ? S.say0one : S.say0many, { list: list(S, just.map((k) => captionName(S, k))), parents: list(S, parents.map((k) => captionName(S, k))) }));
   }
   const vars = { txg: t.txg, prev: p.synced, slot: slotOf(t.txg, p.ashift), n: plural(S, newBlocks(p).length, "block1", "blockN") };
   const k = t.beat === 0 ? "say0" : t.beat === 1 ? "say1" : t.beat === 2 ? (p.configDirty ? "say2" : "say2none") : t.beat === 3 ? "say3" : p.configDirty ? "say4" : "say4none";
-  const ref = ["write", "flush", "even", "ubsync", "odd"][t.beat!];
-  return fill(S[k], vars) + see(S, ref);
+  return fill(S[k], vars);
 }
 
 function cutWhere(S: TrStrings, p: Pool): string {

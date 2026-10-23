@@ -8,7 +8,6 @@ import type { Lang } from "./rooms";
 
 export const TREE_STRINGS = {
   en: {
-    see: "code",
     block1: "{n} block",
     blockN: "{n} blocks",
     copy1: "{n} copy",
@@ -146,7 +145,6 @@ export const TREE_STRINGS = {
     tv_born: "{name} (txg {txg})",
   },
   fr: {
-    see: "code",
     block1: "{n} bloc",
     blockN: "{n} blocs",
     copy1: "{n} copie",
@@ -277,7 +275,6 @@ export const TREE_STRINGS = {
     tv_born: "{name} (txg {txg})",
   },
   es: {
-    see: "código",
     block1: "{n} bloque",
     blockN: "{n} bloques",
     copy1: "{n} copia",

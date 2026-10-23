@@ -72,12 +72,10 @@ const L = {
       <div class="prose answer">
         <p class="lead">
           ZFS escribe los archivos en bloques, de 128 KiB por defecto, y un disco los guarda en sectores enteros de 512
-          bytes o de 4 KiB. Antes de escribir un bloque, tres funciones opcionales actúan sobre él, en este orden: la
+          bytes o de 4 KiB. Antes de escribir un bloque, tres funcionalidades opcionales actúan sobre él, en este orden: la
           compresión, el cifrado y la deduplicación. ZFS solo guarda un bloque comprimido si así ahorra al menos un
           octavo de su tamaño, contado en sectores enteros; si no, lo guarda tal cual. Con la compresión activada, un
-          bloque de ceros no se escribe, y un bloque que se comprime a 112 bytes o menos puede caber en su puntero de
-          bloque, la pequeña ficha que un bloque padre guarda para cada hijo, con su dirección, su tamaño y su suma de
-          comprobación.
+          bloque de ceros no se escribe, y un bloque que se comprime a 112 bytes o menos puede caber en su puntero de bloque. Un puntero de bloque es la pequeña ficha que un bloque padre guarda para cada hijo, con su dirección, su tamaño y su suma de comprobación.
         </p>
         <p>
           La deduplicación evita escribir un bloque que ya está en el disco. Cuando está activada, ZFS busca la suma de
@@ -87,9 +85,7 @@ const L = {
           escritura, haya duplicado o no, y una tabla que crece con los datos y que hay que mantener al día en el disco.
         </p>
         <p>
-          El cifrado necesita, para cada bloque, una sal, un vector de inicialización (IV) y un código de autenticación
-          (MAC), que demuestra que el bloque no se ha modificado. ZFS los guarda en el puntero de bloque, en lugar de la
-          dirección de la tercera copia, de parte del contador de llenado y de la mitad de la suma de comprobación. La
+          Para cifrar un bloque, ZFS necesita una sal y un vector de inicialización (IV), dos valores que hacen distinto el cifrado de cada bloque. También calcula un código de autenticación (MAC), que demuestra que el bloque no se ha modificado. ZFS guarda los tres en el puntero de bloque, en lugar de la dirección de la tercera copia y de la mitad de la suma de comprobación, con unos pocos bits en un contador que un bloque de datos no necesita. La
           otra mitad es una suma de comprobación de los bytes cifrados, así que un scrub puede revisar cada bloque sin
           la clave.
         </p>
@@ -101,18 +97,17 @@ const L = {
       <div class="prose">
         <p>
           La figura sigue un bloque por las pruebas de la ruta de escritura. Elige los datos, el tamaño del bloque, el
-          del sector y la compresión. La línea bajo los controles dice qué ha pasado, y lo que ha cambiado queda
-          rodeado.
+          del sector y la compresión. La línea bajo los controles dice qué ha pasado, y lo que ha cambiado queda recuadrado.
         </p>
         <p>
           Con datos comprimibles, la salida queda bajo el límite, la línea continua a siete octavos del bloque
           redondeados al sector inferior, y el bloque ocupa menos sectores en el disco. Los datos ya comprimidos superan
-          el límite y el bloque se guarda tal cual. Solo ceros da un agujero, y unos datos casi vacíos caben en el
+          el límite y el bloque se guarda tal cual. Solo ceros da un hueco, y unos datos casi vacíos caben en el
           puntero de bloque.
         </p>
         <p>
-          Elige después un bloque de 4 KiB sobre sectores de 4 KiB. Siete octavos de un sector, redondeados al sector
-          inferior, se quedan en nada, así que el bloque solo sigue comprimido si baja a 112 bytes. La tabla bajo la
+          Elige después un bloque de 4 KiB con sectores de 4 KiB. Siete octavos de un sector, redondeados al sector
+          inferior, se quedan en nada, así que el bloque solo sigue comprimido si baja a 112 bytes o menos, y entonces va dentro de su puntero de bloque. La tabla bajo la
           figura muestra los mismos datos con los tres tamaños de sector.
         </p>
       </div>
@@ -123,17 +118,17 @@ const L = {
       <h2 id="dedup"><span class="n">2</span> Escribir dos veces el mismo bloque</h2>
       <div class="prose">
         <p>
-          Cada botón escribe un bloque con ese contenido, en un grupo de transacciones nuevo (el lote de cambios que ZFS
+          Cada botón Escribir escribe un bloque con ese contenido, en un grupo de transacciones nuevo (el lote de cambios que ZFS
           confirma cada pocos segundos). La figura se abre tras tres escrituras: A, B y otra vez A, que se encontró en la
           tabla.
         </p>
         <p>
-          Escribe C: no está en la tabla, así que el bloque se escribe y la tabla recibe una entrada para su suma de
+          Escribe C: C no está en la tabla, así que el bloque se escribe y la tabla recibe una entrada para su suma de
           comprobación. Escribe C otra vez: ahora sí está, el contador de la entrada pasa a 2 y no se escribe ningún
           bloque. El contador de búsquedas sube con cada escritura.
         </p>
         <p>
-          Reinicia, escribe A, pon la tabla por encima de su cuota y escribe B. B no obtiene entrada y se escribe como
+          Reinicia, escribe A, pulsa «Tabla de deduplicación por encima de su cuota» y escribe B. B no obtiene entrada y se escribe como
           cualquier bloque. Escribe A: la tabla todavía lo encuentra, y sigue deduplicado.
         </p>
       </div>
@@ -150,8 +145,7 @@ const L = {
         </p>
         <p>
           A la derecha, un pequeño archivo cifrado: su bloque de dnodes, que describe el archivo, un bloque indirecto
-          que apunta a los datos y tres bloques de datos. Descarga la clave: los datos se ven cifrados. Haz un scrub:
-          todos los bloques siguen pasando. Lee el archivo: la lectura falla en el primer bloque de datos, que no se
+          que apunta a los datos y tres bloques de datos. Pulsa «Clave cargada» para descargar la clave: los datos se ven cifrados. Haz un scrub: todos los bloques siguen pasando la comprobación. Lee el archivo: la lectura falla en el primer bloque de datos, que no se
           puede descifrar. Invierte un bit y repite el scrub: el bloque dañado aparece, con clave o sin ella.
         </p>
       </div>
@@ -168,7 +162,7 @@ const L = {
       <div class="step">
         <h3>El orden de las etapas</h3>
         <p class="prose">
-          Una escritura pasa por etapas, una por bit, en el orden de los bits. La compresión va antes que el cifrado, y
+          Cada etapa de una escritura es un bit, y una escritura recorre sus etapas del bit más bajo al más alto. La compresión va antes que el cifrado, y
           la suma de comprobación se calcula sobre los bytes que se van a escribir. La búsqueda de deduplicación viene
           después, así que usa la suma de comprobación del bloque comprimido y cifrado.
         </p>
@@ -231,7 +225,7 @@ const L = {
             notes={[
               { from: 1986, to: 1987, text: `Solo ceros: PSIZE 0. Esta prueba solo se hace con la compresión activada. Con la compresión desactivada y la deduplicación activada, ZFS <a href="${L.dedupEmpty}">activa un modo que solo detecta ceros</a>, porque «storing many references to an all zeros block in the dedup table would be expensive» (guardar muchas referencias a un bloque de ceros en la tabla saldría caro).` },
               { from: 1991, to: 1995, text: `El compresor recibe el límite como tamaño de salida; <a href="${L.compressData}">devuelve el tamaño del origen</a> cuando su salida no cabe.` },
-              { from: 1996, to: 1997, text: `PSIZE 0 da un agujero: no se asigna nada. Si el bloque ya existía, el agujero <a href="${L.holeBirth}">conserva su tamaño y nace en este txg</a>, para que un envío incremental lo vea.` },
+              { from: 1996, to: 1997, text: `PSIZE 0 da un hueco: no se asigna nada. Si el bloque ya existía, el hueco <a href="${L.holeBirth}">conserva su tamaño y nace en este txg</a>, para que un envío incremental lo vea.` },
               { from: 1998, to: 2001, text: "No se ahorra nada: la compresión se desactiva para este bloque, que se guarda con su tamaño completo." },
               { from: 2002, to: 2004, text: `Como mucho 112 bytes, sin cifrar, en el nivel 0, con <code>embedded_data</code> activada: los datos se <a href="${L.embed}">codifican dentro del puntero de bloque</a>, cuyas <a href="${L.embeddedLayout}">palabras llevan entonces los datos</a>, y la escritura termina ahí.` },
             ]}
@@ -288,8 +282,7 @@ const L = {
       <div class="step">
         <h3>Un bloque encontrado no escribe nada</h3>
         <p class="prose">
-          Cuando la entrada ya tiene una dirección, el nuevo puntero de bloque se rellena a partir de ella y el contador
-          de referencias sube. Su nacimiento lógico es el grupo de transacciones en curso y su nacimiento físico, aquel
+          Cuando la entrada ya tiene una dirección, el nuevo puntero de bloque se rellena a partir de ella y el contador de referencias sube. El nacimiento lógico del nuevo puntero es el grupo de transacciones en curso y su nacimiento físico, aquel
           en el que se escribieron los datos: por eso la figura muestra «nacido en el txg 102, nacimiento físico 100».
         </p>
         <SourceNote lang={lang}>
@@ -301,9 +294,9 @@ const L = {
             to={3986}
             symbol="zio_ddt_write"
             notes={[
-              { from: 3983, text: `<code>ddt_bp_fill</code> copia las direcciones de la entrada en el nuevo puntero de bloque, <a href="${L.fill}">con el txg en curso como nacimiento lógico y el de la entrada como nacimiento físico</a>. Una reescritura <a href="${L.rewrite}">prueba primero su nacimiento original</a>, y no hace nada si así obtiene el mismo puntero de bloque.` },
+              { from: 3983, text: `<code>ddt_bp_fill</code> copia las direcciones de la entrada en el nuevo puntero de bloque, <a href="${L.fill}">con el txg en curso como nacimiento lógico y el de la entrada como nacimiento físico</a>. Una reescritura <a href="${L.rewrite}">rellena primero el puntero con su txg de nacimiento original</a>, y no hace nada si así obtiene el mismo puntero de bloque.` },
               { from: 3984, text: `<a href="${L.addref}"><code>ddt_phys_addref</code></a> añade una referencia.` },
-              { from: 3985, to: 3986, text: "La función vuelve sin ninguna E/S de escritura." },
+              { from: 3985, to: 3986, text: "La función termina sin ninguna E/S de escritura." },
             ]}
           />
         </SourceNote>
@@ -324,7 +317,7 @@ const L = {
             to={4165}
             symbol="zio_ddt_write"
             notes={[
-              { from: 4161, text: "El contador de la entrada nueva pasa de 0 a 1 ya, antes de que termine la escritura; se deshace si la escritura falla." },
+              { from: 4161, text: "El contador de la entrada nueva pasa de 0 a 1 en ese momento, antes de que termine la escritura; se deshace si la escritura falla." },
               { from: 4165, text: `La <a href="${L.childWrite}">escritura hija</a> se lanza; cuando tiene su dirección, <a href="${L.extend}"><code>zio_ddt_child_write_ready</code> la copia en la entrada</a>.` },
             ]}
           />
@@ -335,8 +328,7 @@ const L = {
         <h3>Mantener la tabla en el disco</h3>
         <p class="prose">
           Las entradas que cambian en un grupo de transacciones tienen que llegar a la tabla en el disco, guardada como
-          objetos ZAP. Un comentario de <code>ddt.c</code> explica por qué eso salía caro. La función
-          <code>fast_dedup</code> añade un registro para ello, y la propiedad <code>dedup_table_quota</code> puede
+          objetos ZAP. Un comentario de <code>ddt.c</code> explica por qué eso salía caro. La funcionalidad <code>fast_dedup</code> añade un registro para ello, y la propiedad <code>dedup_table_quota</code> puede
           limitar el tamaño de la tabla.
         </p>
         <SourceNote lang={lang}>
@@ -348,7 +340,7 @@ const L = {
             to={142}
             symbol="DDT: the dedup log"
             notes={[
-              { from: 138, to: 142, text: `Sin el registro, cada entrada modificada se reescribía al final de su txg: se leía toda la hoja del ZAP, se actualizaba una entrada y se reescribía la hoja. Con <code>fast_dedup</code>, las entradas modificadas <a href="${L.log}">se añaden a un registro y se vuelcan al ZAP poco a poco en cada txg</a>; solo las tablas creadas con esa función <a href="${L.logFlags}">reciben el registro</a>.` },
+              { from: 138, to: 142, text: `Sin el registro, cada entrada modificada se reescribía al final de su txg: se leía toda la hoja del ZAP, se actualizaba una entrada y se reescribía la hoja. Con <code>fast_dedup</code>, las entradas modificadas <a href="${L.log}">se añaden a un registro y se vuelcan al ZAP poco a poco en cada txg</a>; solo las tablas creadas con esa funcionalidad <a href="${L.logFlags}">reciben el registro</a>.` },
             ]}
           />
         </SourceNote>
@@ -417,8 +409,7 @@ const L = {
         <p>
           La figura de deduplicación escribe un bloque por grupo de transacciones, con una sola copia, en direcciones
           inventadas. La verificación byte a byte (<code>dedup=verify</code>), las colisiones de sumas de comprobación,
-          las copias extra, el registro de deduplicación y la poda, que quita las entradas antiguas nunca duplicadas, se
-          describen pero no se muestran. El scrub recorre primero la tabla de deduplicación, así que un bloque
+          las copias extra y la poda, que quita las entradas antiguas nunca duplicadas, quedan fuera; el registro de deduplicación solo se describe, más arriba, en «En el código». El scrub recorre primero la tabla de deduplicación, así que un bloque
           referenciado muchas veces se revisa una sola vez. El código no da ninguna cifra de memoria por terabyte ni de
           ratio de deduplicación: las dos dependen de los datos.
         </p>

@@ -72,12 +72,11 @@ const L = {
       <div class="prose answer">
         <p class="lead">
           ZFS écrit les fichiers par blocs, de 128 Kio par défaut, et un disque les range en secteurs entiers de
-          512 octets ou de 4 Kio. Avant qu’un bloc soit écrit, trois fonctions facultatives s’en occupent, dans cet
+          512 octets ou de 4 Kio. Avant qu’un bloc soit écrit, trois fonctionnalités facultatives agissent sur lui, dans cet
           ordre : la compression, le chiffrement, puis la déduplication. ZFS ne garde un bloc compressé que si cela
           économise au moins un huitième de sa taille, compté en secteurs entiers ; sinon, il le range tel quel. Avec la
           compression active, un bloc de zéros n’est pas écrit du tout, et un bloc qui se compresse en 112 octets ou
-          moins peut tenir dans son pointeur de bloc, la petite fiche qu’un bloc parent garde pour chaque enfant, avec
-          son adresse, sa taille et sa somme de contrôle.
+          moins peut tenir dans son pointeur de bloc. Un pointeur de bloc est la petite fiche qu’un bloc parent garde pour chaque enfant, avec son adresse, sa taille et sa somme de contrôle.
         </p>
         <p>
           La déduplication évite d’écrire un bloc qui est déjà sur le disque. Quand elle est active, ZFS cherche la
@@ -87,10 +86,7 @@ const L = {
           écriture, doublon ou non, et une table qui grossit avec les données et qu’il faut tenir à jour sur le disque.
         </p>
         <p>
-          Le chiffrement demande, pour chaque bloc, un sel, un vecteur d’initialisation (IV) et un code
-          d’authentification (MAC), qui prouve que le bloc n’a pas été modifié. ZFS les range dans le pointeur de bloc,
-          à la place de l’adresse de la troisième copie, d’une partie du compteur de remplissage et de la moitié de la
-          somme de contrôle. L’autre moitié est une somme de contrôle des octets chiffrés : un scrub peut donc vérifier
+          Pour chiffrer un bloc, ZFS a besoin d’un sel et d’un vecteur d’initialisation (IV), deux valeurs qui rendent le chiffrement de chaque bloc différent. Il calcule aussi un code d’authentification (MAC), qui prouve que le bloc n’a pas été modifié. ZFS range les trois dans le pointeur de bloc, à la place de l’adresse de la troisième copie et de la moitié de la somme de contrôle, avec quelques bits dans un compteur dont un bloc de données n’a pas besoin. L’autre moitié est une somme de contrôle des octets chiffrés : un scrub peut donc vérifier
           chaque bloc sans la clé.
         </p>
       </div>
@@ -112,7 +108,7 @@ const L = {
         </p>
         <p>
           Choisissez ensuite un bloc de 4 Kio sur des secteurs de 4 Kio. Sept huitièmes d’un secteur, arrondis au
-          secteur inférieur, ne font plus rien : le bloc ne reste compressé que s’il tombe à 112 octets. Le tableau sous
+          secteur inférieur, ne font plus rien : le bloc ne reste compressé que s’il tombe à 112 octets ou moins, et il va alors dans son pointeur de bloc. Le tableau sous
           la figure montre les mêmes données pour les trois tailles de secteur.
         </p>
       </div>
@@ -123,17 +119,17 @@ const L = {
       <h2 id="dedup"><span class="n">2</span> Écrire deux fois le même bloc</h2>
       <div class="prose">
         <p>
-          Chaque bouton écrit un bloc de ce contenu, dans un nouveau groupe de transactions (le lot de modifications que
+          Chaque bouton Écrire écrit un bloc de ce contenu, dans un nouveau groupe de transactions (le lot de modifications que
           ZFS valide à quelques secondes d’intervalle). La figure s’ouvre après trois écritures : A, B, puis de nouveau
           A, qui a été trouvé dans la table.
         </p>
         <p>
-          Écrivez C : il est absent, le bloc est donc écrit et la table reçoit une entrée pour sa somme de contrôle.
+          Écrivez C : C n’est pas dans la table, le bloc est donc écrit et la table reçoit une entrée pour sa somme de contrôle.
           Écrivez C une deuxième fois : il est trouvé, le compteur de l’entrée passe à 2 et aucun bloc n’est écrit. Le
           compteur de recherches augmente à chaque écriture.
         </p>
         <p>
-          Recommencez, écrivez A, puis faites dépasser son quota à la table et écrivez B. B n’obtient pas d’entrée et
+          Recommencez, écrivez A, puis activez « Table de déduplication au-dessus de son quota » et écrivez B. B n’obtient pas d’entrée et
           il est écrit comme n’importe quel bloc. Écrivez A : il est encore trouvé dans la table, et encore dédupliqué.
         </p>
       </div>
@@ -150,7 +146,7 @@ const L = {
         </p>
         <p>
           À droite, un petit fichier chiffré : son bloc de dnodes, qui décrit le fichier, un bloc indirect qui pointe
-          vers les données, et trois blocs de données. Déchargez la clé : les données s’affichent chiffrées. Lancez un
+          vers les données, et trois blocs de données. Désactivez « Clé chargée » pour décharger la clé : les données s’affichent chiffrées. Lancez un
           scrub : chaque bloc passe encore. Lisez le fichier : la lecture échoue au premier bloc de données, qui ne
           peut pas être déchiffré. Inversez un bit, puis relancez le scrub : le bloc abîmé est repéré, avec ou sans la
           clé.
@@ -169,7 +165,7 @@ const L = {
       <div class="step">
         <h3>L’ordre des étapes</h3>
         <p class="prose">
-          Une écriture passe par des étapes, une par bit, dans l’ordre des bits. La compression vient avant le
+          Chaque étape d’une écriture est un bit, et une écriture parcourt ses étapes du bit le plus bas au plus haut. La compression vient avant le
           chiffrement, et la somme de contrôle est calculée sur les octets qui seront écrits. La recherche de
           déduplication vient ensuite : elle utilise donc la somme de contrôle du bloc compressé et chiffré.
         </p>
@@ -194,8 +190,7 @@ const L = {
         <h3>La limite</h3>
         <p class="prose">
           Avant de compresser, <code>zio_get_compression_max_size</code> calcule la taille permise pour la sortie :
-          sept huitièmes du bloc, arrondis vers le bas à un nombre entier de secteurs. Un gain plus petit qu’un secteur
-          ne gagne rien, puisqu’un bloc occupe des secteurs entiers sur le disque.
+          sept huitièmes du bloc, arrondis vers le bas à un nombre entier de secteurs. Gagner moins d’un secteur ne sert à rien, puisqu’un bloc occupe des secteurs entiers sur le disque.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>zio_get_compression_max_size</code>, zio.c</Fragment>
@@ -289,8 +284,7 @@ const L = {
       <div class="step">
         <h3>Un bloc trouvé n’écrit rien</h3>
         <p class="prose">
-          Quand l’entrée contient déjà une adresse, le nouveau pointeur de bloc est rempli à partir d’elle et le
-          compteur de références augmente. Sa naissance logique est le groupe de transactions en cours, et sa naissance
+          Quand l’entrée contient déjà une adresse, le nouveau pointeur de bloc est rempli à partir d’elle et le compteur de références augmente. La naissance logique du nouveau pointeur est le groupe de transactions en cours, et sa naissance
           physique celui où les données ont été écrites : c’est pourquoi la figure affiche « né au txg 102, physique
           100 ».
         </p>
@@ -303,7 +297,7 @@ const L = {
             to={3986}
             symbol="zio_ddt_write"
             notes={[
-              { from: 3983, text: `<code>ddt_bp_fill</code> copie les adresses de l’entrée dans le nouveau pointeur de bloc, <a href="${L.fill}">avec le txg en cours comme naissance logique et celui de l’entrée comme naissance physique</a>. Une réécriture <a href="${L.rewrite}">essaie d’abord sa naissance d’origine</a>, et ne fait rien si cela donne le même pointeur de bloc.` },
+              { from: 3983, text: `<code>ddt_bp_fill</code> copie les adresses de l’entrée dans le nouveau pointeur de bloc, <a href="${L.fill}">avec le txg en cours comme naissance logique et celui de l’entrée comme naissance physique</a>. Une réécriture <a href="${L.rewrite}">remplit d’abord le pointeur avec son txg de naissance d’origine</a>, et ne fait rien si cela donne le même pointeur de bloc.` },
               { from: 3984, text: `<a href="${L.addref}"><code>ddt_phys_addref</code></a> ajoute une référence.` },
               { from: 3985, to: 3986, text: "La fonction rend la main sans aucune E/S d’écriture." },
             ]}
@@ -419,8 +413,7 @@ const L = {
         <p>
           La figure de déduplication écrit un bloc par groupe de transactions, en une seule copie, à des adresses
           inventées. La vérification octet par octet (<code>dedup=verify</code>), les collisions de sommes de contrôle,
-          les copies supplémentaires, le journal de déduplication et l’élagage, qui retire les vieilles entrées jamais
-          dupliquées, sont décrits mais pas montrés. Le scrub parcourt d’abord la table de déduplication, si bien qu’un
+          les copies supplémentaires et l’élagage, qui retire les vieilles entrées jamais dupliquées, sont laissés de côté ; le journal de déduplication est seulement décrit, plus haut, dans « Dans le code ». Le scrub parcourt d’abord la table de déduplication, si bien qu’un
           bloc référencé de nombreuses fois n’est vérifié qu’une fois. Le code ne donne aucun chiffre de mémoire par
           téraoctet ni de taux de déduplication : les deux dépendent des données.
         </p>

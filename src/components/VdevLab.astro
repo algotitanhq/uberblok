@@ -64,7 +64,7 @@ const helpId = `vd-help-${lang}`;
       <div class="vd-3d" data-3d hidden></div>
       <p class="vd-help muted" id={helpId} data-help-text hidden>{S.view3dHelp}</p>
       <p class="muted" id={`${helpId}-no3d`} data-no3d hidden>{S.no3d}</p>
-      <div class="vd-key" set:html={legendHtml(S)} />
+      <div class="vd-key" data-key set:html={legendHtml(S)} />
     </div>
     <div class="vd-side">
       <section class="panel" aria-labelledby={`vd-last-${lang}`}>
@@ -140,7 +140,7 @@ const helpId = `vd-help-${lang}`;
     /**
      * The visible line, and one announcement per action: the live region is
      * emptied, then filled on the next frame, so that the same text twice is
-     * announced twice; it reads the line without its code links.
+     * announced twice; it reads the line without its tags.
      */
     function say(html: string) {
       const el = q("[data-now]");
@@ -208,6 +208,8 @@ const helpId = `vd-help-${lang}`;
       q("[data-3d]").hidden = !on;
       q("[data-help-text]").hidden = !on;
       q("[data-tree]").hidden = on;
+      // The key describes the 2D drawing's looks, which the 3D scene does not draw.
+      q("[data-key]").hidden = on;
       btn.setAttribute("aria-pressed", String(on));
       if (on && scene) scene.draw(pool, io, selected, false);
       if (announce) say(on ? S.say3d : S.say2d);

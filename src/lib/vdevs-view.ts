@@ -81,8 +81,9 @@ export function treeSvg(S: VdStrings, p: Pool, h: Hop | null, selected: string |
     const isHit = top && hit.includes(v.id);
     const landed = top && counts.get(v.id) ? `<g class="landed${isHit ? " last" : ""}"><rect x="${W - 34}" y="${y(i) - 8}" width="12" height="12" rx="2"/><text x="${W - 18}" y="${y(i) + 3}">${counts.get(v.id)}</text></g>` : "";
     nodes += `<g class="n t-${v.type}${cls ? ` c-${cls}` : ""}${l ? " on" : ""}${v.id === selected ? " sel" : ""}${isHit ? " hit" : ""}" data-node="${esc(v.id)}" data-depth="${l?.depth ?? 0}">`
-      + (isHit ? `<rect class="ring" x="${x - 3}" y="${y(i) - 13}" width="${tw + 6}" height="26" rx="6"/>` : "")
       + `<rect x="${x}" y="${y(i) - 10}" width="${tw}" height="20" rx="4"/>`
+      // After the box, so the box stays the node's first rect for the class, lit and selected looks.
+      + (isHit ? `<rect class="ring" x="${x - 3}" y="${y(i) - 13}" width="${tw + 6}" height="26" rx="6"/>` : "")
       + (top ? `<rect class="bias" x="${x}" y="${y(i) - 10}" width="4" height="20" rx="1"/>` : "")
       + `<text class="nm" x="${x + 8}" y="${y(i) + 4}">${label}</text>`
       + `<text class="ty" x="${x + tw + 6}" y="${y(i) + 4}">${type}</text>${badge}${landed}</g>`;

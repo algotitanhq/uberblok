@@ -151,6 +151,8 @@ test("the last block's vdevs and class are marked, and the figure carries no cod
   const hit = [...svg.matchAll(/<g class="n [^"]*\bhit\b[^"]*" data-node="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(hit.map((id) => r.pool.vdevs[id].name), ["mirror-4"]);
   assert.match(svg, /<g class="landed last">/);
+  // The ring comes after the box: the box stays the node's first rect, which the class, lit and selected looks style.
+  for (const g of svg.match(/<g class="n [^"]*\bhit\b[^>]*>.*?<\/g>/g)) assert.doesNotMatch(g, /^<g[^>]*><rect class="ring"/);
   const cls = V.classesHtml(S, r.pool, r.block.cls);
   assert.deepEqual([...cls.matchAll(/<tr class="cl-(\w+)[^"]*\bhit\b/g)].map((m) => m[1]), ["special"]);
   // Nothing is marked before a write.

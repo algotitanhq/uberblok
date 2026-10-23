@@ -386,7 +386,7 @@
 }
 .vd .lg-path { border: 2px solid var(--accent); background: var(--accent-soft); }
 .vd .lg-hit { border: 2px solid var(--accent); background: none; border-radius: 5px; }
-.vd .lg-count { width: 0.7em; height: 0.7em; border: none; background: var(--accent); border-radius: 2px; }
+.vd .lg-count { width: 0.7em; height: 0.7em; border: 1.2px solid var(--fg-muted); background: none; border-radius: 2px; }
 .vd .lg-sel { border: 2px dashed var(--fg); }
 .vd .lg-rep { border: 1px solid var(--bad); }
 .vd .lg-sw.lg-bias { background: var(--c-normal); }

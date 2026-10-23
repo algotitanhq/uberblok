@@ -344,7 +344,7 @@ export function eventLine(S: ZilStrings, e: Ev): string {
   }
 }
 
-/** The parts of the figure an event changed: they get a ring until the next step (D27.1). */
+/** The parts of the figure an event changed: they get a ring until the next step (D30.1). */
 export function targets(e: Ev): string[] {
   switch (e.k) {
     case "itx":

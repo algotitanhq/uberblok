@@ -5,7 +5,7 @@
 // The visitor picks the log device, logbias, O_DSYNC, O_DIRECT and a size,
 // writes, fsyncs, syncs the txg, cuts the power, imports and mounts; each
 // action then shows one step per press of Next step, and a ring marks what the
-// step changed (D27.1). src/lib/zil.ts (a transcription of zil.c, zfs_log.c and
+// step changed (D30.1). src/lib/zil.ts (a transcription of zil.c, zfs_log.c and
 // zio.c) decides every outcome, and src/lib/zil-view.ts draws it, at build time
 // for the opening state (readable without JavaScript) and in the browser after.
 // Refs: ANALYSIS.md, room "ZIL and SLOG"; simplifications: DECISIONS.md D8.2.
@@ -830,7 +830,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
   .zl-log :global(li.refused) {
     border-left-color: var(--bad);
   }
-  /* What the last step changed (D27.1): a ring until the next step. Static, so it reads under
+  /* What the last step changed (D30.1): a ring until the next step. Static, so it reads under
      reduced motion too; it fades in only when motion is allowed. */
   .zl :global(.hit) {
     outline: 2px solid var(--accent);
@@ -896,7 +896,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
   }
   /* Next step and the line that says what it did stick to the bottom of the screen while the
      figure is in view, so the button stays where it is and the ringed part can be scrolled
-     into view above it (D27.1). */
+     into view above it (D30.1). */
   .stepbar {
     position: sticky;
     bottom: 0;

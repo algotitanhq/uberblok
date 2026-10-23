@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The ZIL room alone (D27.1): every language, desktop and phone. Writes,
+// The ZIL room alone (D30.1): every language, desktop and phone. Writes,
 // fsyncs, cuts the power, imports and mounts, one press of Next step at a
 // time, and checks that each step rings a part of the figure, that the
 // narration counts the steps and carries no link, that on a phone the ringed

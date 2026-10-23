@@ -2257,11 +2257,70 @@ in three. `npm test` 245 pass, `verify-arc.mjs` 35 captures, 0 problems.
 **Debts.** None new. `scripts/verify.mjs` still checks this room in EN and FR only;
 `verify-arc.mjs` covers ES.
 
+## v1.4 metaslabs room (ALG-197): a question, a figure that outlines what each action changed
+
+**What changed.** The metaslabs room, in EN, FR and ES, asks one question ("How does ZFS know
+which space is free?"), answers it in three plain paragraphs, keeps its figure with what to try,
+then shows the code in eight Source notes (D21.1, D27.1). In the figure, each action (write,
+delete, sync, rewrite, load, condense) outlines what it changed: the range on the metaslab, the
+in-memory tree, the file, the new words on the tape. The line under the buttons says it in plain
+words, without code links. A line under the vdev strip names the active metaslab and how ZFS
+picks one. Eight short excerpts are new in `ANALYSIS.md` (metaslab room, 15 to 22). The other
+rooms are unchanged, except the Engine room's computed excerpt count (141 → 149).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 66 | 38 |
+| of them in the prose | 40 | 0 |
+| in the figure (opening state; the old log added one per line) | 2 | 0 |
+| in excerpts and Source notes | 24 | 38 |
+| Code excerpts (citations) | 10 | 8 |
+| Source notes | 0 | 8 |
+| Lines of code shown | 276 | 58 |
+
+**Proof.** `npm test` (250 pass, 5 new for the outline and the no-link rule), `npm run build`
+(astro check 0 errors, FR typography 0 failures), `check-permalinks` (ANALYSIS.md 149 excerpts,
+957 line references; built site 1869 references), `check-sources` (156 references, 44 pages),
+`check-csp` (44 pages): all pass. `scripts/verify-metaslabs.mjs` against the preview, EN, FR and
+ES at 390 and 1440 px: QA's sequences replayed against the model with every tape word equal, the
+outline after a delete on exactly A's range, `ms_freeing` and file A, no link in the figure, the
+Source note in the side panel, keyboard walk with visible focus on every stop, reduced motion
+(no running animation), no script (opening state and text version); 42 captures (not committed,
+`shots/`), 0 console errors.
+
+**Reviews.** `technical-writer` on the three languages (30 edits proposed, most taken): the
+dynamic-fit fallback stated fully (nothing after the cursor, under 4 % free, or no free segment
+of 128 KiB), metaslabs loaded on demand, the deferred frees still counted free before
+`metaslab_load` removes them, uberblock glossed, the weight as a size class, the exception to
+the deferral spelled out, the Spanish "registro" no longer used for both the log and a record,
+calques in FR and ES. Not taken: "about two hundred metaslabs" (D27.1).
+`code-reviewer` on the whole diff: the selected tape entry stays inverted after a condense,
+"changed" is a dashed outline so the solid focus ring stays visible, Load clears the last
+outlines, and the keyboard walk now fails the run on a missing focus ring. All four fixed;
+`verify-metaslabs.mjs` replayed at the head after the fixes (42 captures, 0 console errors,
+0 mismatches, 48 keyboard stops with visible focus in each language).
+
+**Debts.** None found outside the room.
+
+### Design/UX fixes (ALG-197, second pass)
+
+All eight items of the Design/UX review fixed (D27.2): allocated fill at 4.3:1 against free in both
+themes, labels on a chip; one dashed outline per changed run on the bar, the tape and the rows; the
+"what to try" text in three paragraphs in EN, FR and ES; no gap in "Verdict: no."; the selected
+entry's range marked under the bar; the cursor clamped at 512 MiB; Delete kept on the right in FR
+at 390 px; « décalage » for the FR offset field. `code-reviewer` on the diff: no defect; taken the
+strip under the bar instead of over it, padding on file rows, fresh words hidden in the skipped gap
+counted in the run, two new tests. **Proof.** `npm test` 252 pass, `npm run build` 0 errors,
+`verify-metaslabs.mjs` EN, FR, ES at 390 and 1440 px: 42 captures, 0 console errors, 0 mismatches;
+captures of the bar in the light theme, after a rewrite and of the verdict read by eye.
+
 ## v1.4 ZIL room (ALG-199): a question, and a figure that shows each action one step per press
 
 **What changed.** The ZIL room, in EN, FR and ES, asks one question ("What does fsync() wait
 for?"), answers it in three plain paragraphs, keeps its figure with what to try, then shows the
-code in nine Source notes (D21.1, D27.1). In `ZilLab`, each action shows one step per press of
+code in nine Source notes (D21.1, D30.1). In `ZilLab`, each action shows one step per press of
 Next step (Show every step finishes it), rings what the step changed, and says the step in a
 plain sentence with no code link; on a phone Next step and the narration stay in a bar at the
 bottom. The model is unchanged. Eight short excerpts are new in `ANALYSIS.md` (ZIL room, 11 to

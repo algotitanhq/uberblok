@@ -2698,9 +2698,74 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   the controls would sit apart from the button they qualify. The nine-step tour paragraph is split
   at its three phases: the scan, the ghost hits, the 10 ms re-read.
 
+## v1.4 metaslabs room (ALG-197)
+
+### D27.1 The metaslabs room as a question, and a figure that outlines what each action changed
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 10 excerpts (276 lines of code) and 66 links to GitHub in each language, 40 of
+  them in the prose and a "code" link after every line the figure narrated. The issue asks for
+  a figure where the reader allocates and frees blocks and watches the space map and the
+  metaslab choice.
+- **Question.** "How does ZFS know which space is free?" (« Comment ZFS sait-il quel espace est
+  libre ? », « ¿Cómo sabe ZFS qué espacio está libre? »). The answer goes from the problem
+  (copy-on-write allocates and frees all the time; a bitmap would be rewritten in place) to the
+  mechanism (metaslabs, a free tree in memory, an append-only space map replayed on load), then
+  the two-txg grace and condensing.
+- **Figure.** `MetaslabLab` is improved, not rebuilt; the model (`src/lib/metaslab.ts`) is
+  unchanged. `changes()` in `metaslab-view.ts` compares the state before and after an action, and
+  the figure outlines exactly that in ink until the next action: the ranges of the metaslab
+  whose state changed, the in-memory trees that changed, the file written or deleted, and the
+  words the action wrote on the tape (the whole tape after a condense). Load changes nothing, and
+  says the tree is the same. The outline is a class, not an animation, so it reads the same
+  under reduced motion; the key gains "changed by the last action". The selected tape entry is
+  now inverted, so an outline means only "changed". "What the last action did" moves from the
+  bottom of the figure to just under the buttons, and its lines are plain sentences with no code
+  links (D21.1) and fewer code names. The metaslab choice: a line under the vdev strip says that
+  metaslab 2 is the active metaslab and how ZFS ranks and activates metaslabs, and a write that
+  does not fit says ZFS would activate the next metaslab in rank; the "Choosing a metaslab" note
+  shows the code. Without script the opening state and the text version show, as before.
+  `scripts/verify-metaslabs.mjs` runs the room alone in EN, FR and ES (it was EN and FR inside
+  `verify.mjs`) and checks the outline after a delete.
+- **Code.** Eight Source notes, 58 lines (`ANALYSIS.md` metaslab room, 15 to 22: 15 is new,
+  `metaslab_compare`; the others are short cuts of excerpts 9, 1, 2, 10, 11, 12 and 14, checked
+  against `zfs-2.4.4`). The "three depths" section is gone, and the coda on the log space map
+  moves into "What the figure leaves out", without links.
+- **Rejected.** Modelling the weights of all sixteen metaslabs and moving a write to another
+  metaslab when metaslab 2 is full: the segment-based weight needs every metaslab's free-segment
+  histogram, and with fifteen empty metaslabs of equal weight the choice would teach nothing the
+  sentence and the note do not. "About two hundred metaslabs" in the answer, as the writing
+  review suggested: 200 is the target, but a vdev larger than 200 × 16 GiB gets more, so the
+  answer keeps "a few hundred". Animating the outline: an animation cannot be read at the
+  reader's pace or under reduced motion.
+
+### D27.2 The metaslabs figure after the Design/UX review: contrast, one outline per run, the selected range
+
+- **Context.** Design/UX on PR #14 at 0e331ca: three SHOULD, five NIT
+  ([ALG-197](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-197), document `design-review`).
+- **Allocated fill.** `--fg-faint` instead of `--line-strong`: 4.3:1 against the free fill
+  (`--surface-2`) in both themes, over the 3:1 of WCAG 1.4.11 (it was 1.7:1). In the light theme no
+  fill reaches 3:1 against the free fill and 4.5:1 under `--fg` text, so the file labels on the bar
+  sit on a small `--surface` chip and keep their contrast on any fill.
+- **One outline per run.** Changed ranges of the metaslab closer than 2.5 % of its size (12.8 MiB)
+  merge into one dashed box; a rewrite of db touched hundreds of blocks and drew hundreds of boxes.
+  The words an action wrote are always the end of the tape, so they are grouped in one nested list
+  item outlined once (the whole tape after a condense). Rows of "In memory" and "Files" draw their
+  outline inside the row, so two changed neighbours do not draw double lines. A single change looks
+  as before.
+- **The selected entry on the bar.** A 6 px ink strip just under the bar marks the range of the
+  selected tape entry, at least 10 px wide, so B (4 MiB, 3 px on a phone) shows when its entry is
+  selected at the opening. The key gains "range of the selected tape entry". Rejected: a label
+  above narrow extents with a tick, which would still leave the reader to match the tape to the bar.
+- **Smaller fixes.** The dynamic-fit cursor is clamped inside the bar at 0 and 512 MiB; the verdict's
+  yes/no has no fixed width; file rows are a grid, so Delete stays on the right in FR on a phone;
+  the offset field is named in the reader's language (« décalage », « desplazamiento »), as the
+  sentence under it; the "what to try" text of section 1 is three short paragraphs, and says that
+  rewrite db stops by itself when the test says yes.
+
 ## v1.4 ZIL room (ALG-199)
 
-### D27.1 The ZIL room as a question, and a figure that shows each action one step per press
+### D30.1 The ZIL room as a question, and a figure that shows each action one step per press
 
 - **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)),
   sixth room. It had 9 excerpts (220 lines of code) and 79 links to GitHub in each language, 41

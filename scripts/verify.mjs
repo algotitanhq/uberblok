@@ -23,10 +23,10 @@ register(
     ),
 );
 const sendModel = await import("../src/lib/send.ts");
-const trModel = await import("../src/lib/transforms.ts");
 const { verifyVdevs, VD, GL_ARGS } = await import("./verify-vdevs.mjs");
 const { verifyTree, TR: TREE } = await import("./verify-tree.mjs");
 const { verifyMetaslabs } = await import("./verify-metaslabs.mjs");
+const { verifyTransforms, TRP } = await import("./verify-transforms.mjs");
 
 const [base = "http://127.0.0.1:4321", out = "shots/verify"] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
@@ -44,7 +44,7 @@ const PAGES = [
   { id: "metaslabs", en: "/en/metaslabs/", fr: "/fr/metaslabs/", es: "/es/metaslabs/" },
   { id: "zil", en: "/en/zil/", fr: "/fr/zil/", es: "/es/zil/" },
   { id: "send", en: "/en/send-receive/", fr: "/fr/send-receive/", es: "/es/send-receive/" },
-  { id: "transforms", en: "/en/compression-dedup-encryption/", fr: "/fr/compression-dedup-chiffrement/", es: "/es/compresion-dedup-cifrado/" },
+  TRP,
   { id: "engine-room", en: "/en/engine-room/", fr: "/fr/salle-des-machines/", es: "/es/sala-de-maquinas/" },
 ];
 const TXG = PAGES.find((p) => p.id === "txg");
@@ -1247,200 +1247,12 @@ for (const lang of ["en", "fr"]) {
   await ctx.close();
 }
 
-// The compression, dedup and encryption room: QA's replays, each checked
-// against the model (src/lib/transforms.ts): compressible, incompressible,
-// all-zero and embeddable blocks at ashift 9 and 12; a dedup miss, a hit, then
-// over quota; the encrypted block pointer, the key unloaded, scrub and read.
-// Then reduced motion, no JavaScript, and a keyboard-only walk.
-report.transforms = { runs: {}, mismatches: [] };
-const TR = PAGES.find((p) => p.id === "transforms");
-const TRL = {
-  en: { comp: "Compressible", rnd: "Already compressed", zero: "All zeros", tiny: "Almost empty", quota: "Dedup table over its quota", key: "Key loaded", scrub: "Scrub", read: "Read the file", enc: "an encrypted data block", flip: "Flip a bit in data block 1 on disk" },
-  fr: { comp: "Compressibles", rnd: "Déjà compressées", zero: "Que des zéros", tiny: "Presque vides", quota: "Table de déduplication au-dessus de son quota", key: "Clé chargée", scrub: "Scrub", read: "Lire le fichier", enc: "d’un bloc de données chiffré", flip: "Inverser un bit du bloc de données 1 sur disque" },
-};
-const TR_OUT = { text: (l) => Math.round(l * 0.38), random: (l) => l + 64, tiny: () => 90 };
-const trRead = (page) => page.evaluate(() => {
-  const c = document.querySelector("[data-compress]");
-  const d = document.querySelector("[data-dedup]");
-  const e = document.querySelector("[data-crypt]");
-  return {
-    taken: c.querySelector("[data-path] li.taken")?.dataset.i,
-    outcome: c.querySelector("[data-result] .outcome")?.className.replace("outcome ", ""),
-    ashiftRow: c.querySelector("[data-table] tr.cur th")?.textContent,
-    sectors: c.querySelectorAll("[data-bars] .sec").length,
-    entries: [...d.querySelectorAll(".ddt tbody tr")].map((tr) => [tr.children[1].textContent, Number(tr.children[2].textContent)]),
-    bps: [...d.querySelectorAll(".bps li")].map((li) => [li.querySelector(".ct").textContent, li.querySelector(".dbit").textContent, li.querySelector("code").textContent]),
-    disk: d.querySelectorAll(".disk li").length,
-    diff: [...e.querySelectorAll("[data-words] tr.diff th")].map((th) => th.textContent),
-    scrub: [...e.querySelectorAll("[data-file] .sc")].map((x) => x.classList.contains("ok")),
-    readout: e.querySelector("[data-file] .readout")?.textContent ?? "",
-    plainShown: e.querySelectorAll("[data-file] .plain").length,
-    live: [...document.querySelectorAll("[aria-live]")].map((x) => x.textContent.trim()).filter(Boolean),
-  };
-});
-for (const lang of ["en", "fr"])
-  for (const vp of ["iphone", "desktop"]) {
-    const { ctx, page } = await open(VIEWPORTS[vp], TR[lang]);
-    const L = TRL[lang];
-    const cl = page.locator("[data-compress]");
-    const shot = async (loc, name) => {
-      await page.waitForTimeout(1300);
-      await loc.screenshot({ path: join(out, name) });
-      report.captures.push(name);
-    };
-    // Compression: four data at two ashifts, each against the model.
-    for (const [lsize, ashift] of [[131072, 12], [131072, 9], [4096, 12], [4096, 9]]) {
-      await cl.locator(`button[data-lsize="${lsize}"]`).click();
-      await cl.locator(`button[data-ashift="${ashift}"]`).click();
-      for (const [preset, name] of [["text", L.comp], ["random", L.rnd], ["zero", L.zero], ["tiny", L.tiny]]) {
-        await cl.getByRole("button", { name, exact: true }).click();
-        const got = await trRead(page);
-        const want = trModel.compress({ lsize, ashift, algo: "lz4", zero: preset === "zero", out: preset === "zero" ? 0 : TR_OUT[preset](lsize) });
-        const k = `${lang}-${vp}-${lsize}-a${ashift}-${preset}`;
-        report.transforms.runs[k] = { outcome: got.outcome, sectors: got.sectors };
-        if (got.outcome !== want.outcome || got.sectors !== want.sectors) report.transforms.mismatches.push({ where: k, got, want: { outcome: want.outcome, sectors: want.sectors } });
-      }
-    }
-    await cl.locator('button[data-lsize="4096"]').click();
-    await cl.locator('button[data-ashift="12"]').click();
-    await cl.getByRole("button", { name: L.tiny, exact: true }).click();
-    await shot(cl, `transforms-${lang}-${vp}-embedded.png`);
-    await cl.locator('button[data-lsize="131072"]').click();
-    await cl.getByRole("button", { name: L.comp, exact: true }).click();
-    await shot(cl, `transforms-${lang}-${vp}-compressed.png`);
-    // Dedup: start again, A (miss), A (hit), then over quota: C, A, C.
-    const dd = page.locator("[data-dedup]");
-    await dd.locator('[data-act="restart"]').click();
-    for (const c of ["A", "A"]) await dd.locator(`button[data-write="${c}"]`).click();
-    await dd.getByRole("button", { name: L.quota }).click();
-    for (const c of ["C", "A", "C"]) await dd.locator(`button[data-write="${c}"]`).click();
-    {
-      const got = await trRead(page);
-      let m = trModel.dedupStart();
-      for (const [c, q] of [["A", false], ["A", false], ["C", true], ["A", true], ["C", true]]) m = trModel.dedupWrite(m, c, q);
-      const want = { entries: m.entries.map((e) => [e.content, e.refcnt]), bps: m.bps.map((b) => [b.content, `D=${b.dedup ? 1 : 0}`, b.dva]), disk: m.disk.length };
-      report.transforms.runs[`${lang}-${vp}-dedup`] = { entries: got.entries, disk: got.disk };
-      if (JSON.stringify([got.entries, got.bps, got.disk]) !== JSON.stringify([want.entries, want.bps, want.disk])) report.transforms.mismatches.push({ where: `${lang}-${vp}-dedup`, got, want });
-    }
-    await shot(dd, `transforms-${lang}-${vp}-dedup.png`);
-    // Encryption: the encrypted bp, the key unloaded, scrub, read; then a flipped bit.
-    const cr = page.locator("[data-crypt]");
-    await cr.getByRole("button", { name: L.enc }).click();
-    await cr.getByRole("button", { name: L.key }).click();
-    await cr.getByRole("button", { name: L.scrub, exact: true }).click();
-    const s1 = await trRead(page);
-    await cr.getByRole("button", { name: L.read }).click();
-    const s2 = await trRead(page);
-    report.transforms.runs[`${lang}-${vp}-nokey`] = { diff: s1.diff, scrub: s1.scrub, readout: s2.readout, plainShown: s2.plainShown };
-    if (s1.diff.join() !== "4,5,b,e,f" || !s1.scrub.every(Boolean) || s1.scrub.length !== 5 || !/EACCES/.test(s2.readout) || s2.plainShown !== 0)
-      report.transforms.mismatches.push({ where: `${lang}-${vp}-nokey`, s1, s2 });
-    await shot(cr, `transforms-${lang}-${vp}-nokey.png`);
-    await cr.getByRole("button", { name: L.flip }).click();
-    await cr.getByRole("button", { name: L.scrub, exact: true }).click();
-    const s3 = await trRead(page);
-    report.transforms.runs[`${lang}-${vp}-flip`] = { scrub: s3.scrub };
-    if (JSON.stringify(s3.scrub) !== JSON.stringify([true, true, true, false, true])) report.transforms.mismatches.push({ where: `${lang}-${vp}-flip`, s3 });
-    await ctx.close();
-  }
-{
-  // Reduced motion: no animation runs after an action.
-  const { ctx, page } = await open({ ...VIEWPORTS.iphone, reducedMotion: "reduce" }, TR.en);
-  await page.locator("[data-compress]").getByRole("button", { name: "All zeros" }).click();
-  await page.locator('[data-dedup] button[data-write="B"]').click();
-  await page.locator("[data-crypt]").getByRole("button", { name: "an indirect block" }).click();
-  report.reducedMotion.transforms = { running: await page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length) };
-  if (report.reducedMotion.transforms.running) report.transforms.mismatches.push({ where: "reduced-motion", running: report.reducedMotion.transforms.running });
-  await page.screenshot({ path: join(out, "transforms-en-iphone-reduced-motion.png"), fullPage: true });
-  report.captures.push("transforms-en-iphone-reduced-motion.png");
-  await ctx.close();
-}
-{
-  const ctx = await browser.newContext({ ...VIEWPORTS.iphone, javaScriptEnabled: false });
-  const page = await ctx.newPage();
-  await page.goto(base + TR.en);
-  report.transforms.noJs = await page.evaluate(() => ({
-    compress: document.querySelector("[data-compress] [data-result] .outcome")?.textContent?.slice(0, 40),
-    ddtRows: document.querySelectorAll("[data-dedup] .ddt tbody tr").length,
-    words: document.querySelectorAll("[data-crypt] [data-words] tbody tr").length,
-    barsHidden: [...document.querySelectorAll(".cl-bar, [data-dedup] .tr-bar, [data-crypt] .tr-bar")].every((b) => b.hidden),
-  }));
-  const nj = report.transforms.noJs;
-  if (!nj.barsHidden || nj.ddtRows !== 2 || nj.words !== 16 || !nj.compress) report.transforms.mismatches.push({ where: "nojs", nj });
-  await page.screenshot({ path: join(out, "transforms-en-iphone-nojs.png"), fullPage: true });
-  report.captures.push("transforms-en-iphone-nojs.png");
-  await ctx.close();
-}
-for (const lang of ["en", "fr"]) {
-  const { ctx, page } = await open(VIEWPORTS.desktop, TR[lang]);
-  const stops = [];
-  for (let i = 0; i < 400; i++) {
-    await page.keyboard.press("Tab");
-    const info = await page.evaluate(() => {
-      const el = document.activeElement;
-      if (!el || el === document.body) return null;
-      const cs = getComputedStyle(el);
-      return {
-        label: (el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 50),
-        ok: el.matches(":focus-visible") && cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) > 0,
-        key: el.tagName + "|" + (el.getAttribute("href") || "") + "|" + Object.entries(el.dataset ?? {}).join(",") + "|" + el.textContent + "|" + el.id,
-      };
-    });
-    if (!info) continue;
-    if (stops.length && info.key === stops[0].key) break;
-    stops.push(info);
-  }
-  await page.goto(base + TR[lang]);
-  async function tabTo(sel) {
-    for (let i = 0; i < 400; i++) {
-      await page.keyboard.press("Tab");
-      if (await page.evaluate((s) => document.activeElement?.matches(s), sel)) return true;
-    }
-    return false;
-  }
-  // Keyboard only: all zeros by Enter, the output typed in the number field, a dedup hit, the key unloaded and a scrub.
-  const drive = {};
-  await page.evaluate(() => {
-    window.__said = [];
-    for (const el of document.querySelectorAll("[data-live]"))
-      new MutationObserver(() => el.textContent && window.__said.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
-  });
-  drive.zero = await tabTo('button[data-preset="zero"]');
-  await page.keyboard.press("Enter");
-  drive.zeroOutcome = (await trRead(page)).outcome;
-  drive.comp = await tabTo('button[data-preset="text"]');
-  await page.keyboard.press("Enter");
-  drive.num = await tabTo("[data-out-num]");
-  await page.keyboard.press("Control+a");
-  await page.keyboard.type("50000");
-  await page.keyboard.press("Enter");
-  drive.numOutcome = (await trRead(page)).outcome;
-  drive.write = await tabTo('button[data-write="A"]');
-  await page.keyboard.press("Enter");
-  drive.focusKept = await page.evaluate(() => document.activeElement?.dataset.write === "A");
-  drive.key = await tabTo("button[data-key]");
-  await page.keyboard.press("Enter");
-  drive.scrub = await tabTo('button[data-act="scrub"]');
-  await page.keyboard.press("Space");
-  const st = await trRead(page);
-  drive.live = st.live;
-  await page.waitForTimeout(200);
-  // Six actions: all zeros, compressible, the typed output, a write, the key, scrub.
-  drive.said = await page.evaluate(() => window.__said);
-  drive.ok = drive.said.length === 6 && !drive.said.some((t) => /\bcode\b$/.test(t)) && drive.zeroOutcome === "hole" && drive.numOutcome === "compressed" && drive.focusKept && st.scrub.length === 5 && st.scrub.every(Boolean) && st.entries.find((e) => e[0] === "A")?.[1] === 3;
-  if (!drive.ok) report.transforms.mismatches.push({ where: `keyboard-${lang}`, drive, st });
-  if (lang === "en") {
-    await page.screenshot({ path: join(out, "transforms-en-desktop-keyboard.png") });
-    report.captures.push("transforms-en-desktop-keyboard.png");
-  }
-  const noFocus = stops.filter((s) => !s.ok).map((s) => s.label);
-  if (noFocus.length) report.transforms.mismatches.push({ where: `focus-${lang}`, noFocus });
-  report.keyboard[`transforms-${lang}`] = { stops: stops.length, withoutVisibleFocus: noFocus, drive: { ok: drive.ok, zero: drive.zeroOutcome, num: drive.numOutcome, focusKept: drive.focusKept, said: drive.said.length } };
-  await ctx.close();
-}
+// The compression, dedup and encryption room: scripts/verify-transforms.mjs, called below.
 
 await verifyVdevs({ browser, open, base, out, report, VIEWPORTS });
 await verifyTree({ browser, open, base, out, report, VIEWPORTS });
 await verifyMetaslabs({ browser, open, base, out, report, VIEWPORTS });
+await verifyTransforms({ browser, open, base, out, report, VIEWPORTS });
 
 report.nav = {};
 // Spanish (D16.3) is captured and checked for console errors with the others; the

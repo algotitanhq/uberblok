@@ -226,7 +226,7 @@ export function beatsHtml(S: TrStrings, p: Pool): string {
     ["beat3", S.beat3],
     ["beat4", p.configDirty ? S.beat4 : S.beat4none],
   ];
-  const lis = items.map(([k, text], i) => {
+  const lis = items.map(([, text], i) => {
     const writing = i === 0 && !!t && t.beat === null && t.wrote > 0;
     const st = i === cutAt ? "cut" : i <= done ? "done" : writing ? "now" : t && !p.cut && i === done + 1 ? "next" : "todo";
     const say = writing ? S.beat0prog : text;

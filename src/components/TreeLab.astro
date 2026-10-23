@@ -108,7 +108,7 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
     /**
      * The visible line, and one announcement per action: the live region is
      * emptied, then filled on the next frame, so that the same text twice is
-     * announced twice; it reads the line without its code links.
+     * announced twice; it reads the line without its tags.
      */
     function say(html: string) {
       q("[data-now]").innerHTML = html;

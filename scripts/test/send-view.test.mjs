@@ -97,9 +97,9 @@ test("counts: singular for 1 in English and Spanish, for 0 and 1 in French", () 
   assert.ok(lines("es").some((l) => /b libera 2 bloques \(1, 2\)/.test(l)));
   assert.equal(V.plural(strings("es"), 1, "blk1", "blkN"), "1 bloque");
   // FREEOBJECTS names the file that is gone from @s4.
-  assert.ok(lines("en").some((l) => /receive_freeobjects.*: c is deleted\./.test(l)));
-  assert.ok(lines("fr").some((l) => /receive_freeobjects.*: c est supprimé\./.test(l)));
-  assert.ok(lines("es").some((l) => /receive_freeobjects.*: c se elimina\./.test(l)));
+  assert.ok(lines("en").some((l) => /FREEOBJECTS.*: c is deleted\./.test(l)));
+  assert.ok(lines("fr").some((l) => /FREEOBJECTS.* ?: c est supprimé\./.test(l)));
+  assert.ok(lines("es").some((l) => /FREEOBJECTS.*: c se elimina\./.test(l)));
 });
 
 test("the drawing agrees with the model: final frame", () => {
@@ -135,21 +135,21 @@ test("frames in order: the traversal, then END, then the receiver one record at 
   assert.equal(V.received(snd, rcv, V.lastFrame(snd, rcv)), snd.records.length);
   assert.match(text(V.frameLine(S, snd, rcv, snd.steps.length + 1)), /The traversal is done\. Written: FREEOBJECTS 5 to 7, END/);
   // The first dispatched record is BEGIN, found by GUID on the receiver.
-  assert.match(text(V.frameLine(S, snd, rcv, snd.steps.length + 2)), /BEGIN → dmu_recv_begin.*GUID of @s2/);
+  assert.match(text(V.frameLine(S, snd, rcv, snd.steps.length + 2)), /^BEGIN: the receiver holds a snapshot with the GUID of @s2/);
 });
 
-test("a flipped bit: the strip marks the record, the receiver shows ECKSUM and keeps the from-snapshot", () => {
+test("a flipped bit: the strip marks the record, the receiver shows a checksum error and keeps the from-snapshot", () => {
   const want = {
-    en: [/record 4 .*ECKSUM.*Record 3, WRITE a at 0/, /holds nothing, as before/, /still holds @s1\./],
-    fr: [/enregistrement 4 .*ECKSUM.*enregistrement 3, WRITE a à 0/, /ne détient toujours rien/, /détient toujours @s1\./],
-    es: [/registro 4 .*ECKSUM.*registro 3, WRITE a en 0/, /no tiene nada, como antes/, /sigue teniendo @s1\./],
+    en: [/record 4 does not match.*Record 3, WRITE a at 0/, /holds nothing, as before/, /still holds @s1\./],
+    fr: [/enregistrement 4 ne correspond pas.*enregistrement 3, WRITE a à 0/, /ne détient toujours rien/, /détient toujours @s1\./],
+    es: [/registro 4 no coincide.*registro 3, WRITE a en 0/, /no tiene nada, como antes/, /sigue teniendo @s1\./],
   };
   for (const lang of ["en", "fr", "es"]) {
     const S = strings(lang);
     const { snd, rcv } = all(null, true);
     const last = V.lastFrame(snd, rcv);
     assert.deepEqual(rcv.error, { i: 4, err: "ECKSUM" });
-    assert.match(V.strip(S, snd, rcv, last), /class="rec [a-z]+ bad" data-rec="4"/);
+    assert.match(V.strip(S, snd, rcv, last), /class="rec [a-z]+ bad( just)?" data-rec="4"/);
     assert.match(V.strip(S, snd, rcv, last), /class="rec write lost" data-rec="3"/, "the damaged WRITE is marked never applied");
     assert.match(V.receiver(S, snd, rcv, last), /class="verdict bad"/);
     assert.match(text(V.frameLine(S, snd, rcv, last)), want[lang][0]);
@@ -158,4 +158,28 @@ test("a flipped bit: the strip marks the record, the receiver shows ECKSUM and k
     const inc = all(snaps[0], true);
     assert.match(text(V.receiver(S, inc.snd, inc.rcv, V.lastFrame(inc.snd, inc.rcv))), want[lang][2]);
   }
+});
+
+test("each frame outlines what it did, and the narration carries no link or code name (D29.1)", () => {
+  for (const lang of ["en", "fr", "es"]) {
+    const S = strings(lang);
+    for (const from of FROMS)
+      for (const flip of [false, true]) {
+        const { snd, rcv } = all(from, flip);
+        const last = V.lastFrame(snd, rcv);
+        for (let t = 0; t <= last; t++) {
+          const line = V.frameLine(S, snd, rcv, t);
+          assert.doesNotMatch(line, /<a\b|send_cb|dump_|td_min_txg|drr_checksum|receive_\w+|dmu_recv/, `${lang} t=${t}`);
+          const just = V.justWritten(snd, rcv, t);
+          const st = V.strip(S, snd, rcv, t);
+          assert.equal((st.match(/<li class="rec [^"]*\bjust\b/g) ?? []).length, just.size, `${lang} t=${t}`);
+          // A traversal step that emits nothing outlines its block pointer or dnode in the tree instead.
+          if (t > 0 && t <= snd.steps.length && !just.size) assert.match(V.tree(S, snd, t), /class="(bp|slot) [^"]*\bcur\b/);
+        }
+      }
+  }
+  // The first frame outlines BEGIN; a refused header is outlined at the error.
+  const { snd, rcv } = all(snaps[2], true);
+  assert.deepEqual([...V.justWritten(snd, rcv, 0)], [0]);
+  assert.deepEqual([...V.justWritten(snd, rcv, V.lastFrame(snd, rcv))], [rcv.error.i]);
 });

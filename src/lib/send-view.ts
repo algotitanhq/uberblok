@@ -14,12 +14,10 @@ import {
   type Bp, type Content, type Dnode, type Rec, type Received, type Send, type Snapshot, type Step,
 } from "./send";
 
-export type SrStrings = Record<string, string> & { refs: Record<string, string>; lang: string };
+export type SrStrings = Record<string, string> & { lang: string };
 
 const fill = (tpl: string, vars: Record<string, string | number>) =>
   tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
-const code = (s: string | number) => `<code>${s}</code>`;
-const see = (S: SrStrings, r: string) => ` <a class="see" href="${S.refs[r]}">${S.see}</a>`;
 
 /** A whole number in the page's language. */
 export const num = (S: SrStrings, x: number) =>
@@ -153,17 +151,17 @@ export function stepLine(S: SrStrings, snd: Send, i: number): string {
     const d = s.dn!;
     const what = fill(d.type === "file" ? S.sDnodeFile : d.type === "none" ? S.sDnodeFree : S.sDnodeReserved, { o: d.object, f: d.name ?? "" });
     const pend = d.type === "none" && !recs.length ? ` ${S.pending}` : "";
-    return `${what} ${cbText(S, s)}${see(S, d.type === "file" ? "dumpDnode" : "sendCbDnode")}${out}${pend}`;
+    return `${what} ${cbText(S, s)}${out}${pend}`;
   }
   const b = s.bp!;
   const label = bpLabel(S, snd, b);
   if (!s.visit) {
     const n = s.pruned!.length;
     const tail = n ? fill(S.sSkipBelow, { n: plural(S, n, "bp1", "bpN") }) : S.sSkipLeaf;
-    return `${fill(S.sSkip, { label, birth: b.birth, F: snd.minTxg })} ${tail}${see(S, "visitbp")}`;
+    return `${fill(S.sSkip, { label, birth: b.birth, F: snd.minTxg })} ${tail}`;
   }
   const pend = b.hole && !recs.length ? ` ${S.pending}` : "";
-  return `${fill(s.zeroHole ? S.sVisitZeroHole : S.sVisit, { label, birth: b.birth, F: snd.minTxg })} ${cbText(S, s)}${see(S, b.kind === "data" ? "sendCbData" : "sendCbMeta")}${out}${pend}`;
+  return `${fill(s.zeroHole ? S.sVisitZeroHole : S.sVisit, { label, birth: b.birth, F: snd.minTxg })} ${cbText(S, s)}${out}${pend}`;
 }
 
 /** What frame t did, for the status line and the log. */
@@ -172,12 +170,12 @@ export function frameLine(S: SrStrings, snd: Send, rcv: Received, t: number): st
   if (t <= snd.steps.length) return stepLine(S, snd, t - 1);
   if (t === snd.steps.length + 1) {
     const tail = snd.records.filter((r) => r.step === snd.steps.length).map((r) => `<b>${recLabel(S, snd, r)}</b>`);
-    return fill(S.fEnd, { list: fill(tail.length === 1 ? S.wrote1 : S.wroteN, { list: tail.join(", ") }), ck: shortCksum(snd.total) }) + see(S, "end");
+    return fill(S.fEnd, { list: fill(tail.length === 1 ? S.wrote1 : S.wroteN, { list: tail.join(", ") }), ck: shortCksum(snd.total) });
   }
   const k = t - snd.steps.length - 1;
   if (k > rcv.dispatched.length) {
     const j = rcv.dispatched.length;
-    return fill(S.fEcksum, { i: rcv.error!.i, j, rec: recLabel(S, snd, snd.records[j]) }) + see(S, "recvCheck");
+    return fill(S.fEcksum, { i: rcv.error!.i, j, rec: recLabel(S, snd, snd.records[j]) });
   }
   return dispatchLine(S, snd, rcv, k - 1);
 }
@@ -211,7 +209,7 @@ export function dispatchLine(S: SrStrings, snd: Send, rcv: Received, k: number):
       eff = fill(S.eEnd, { ck: shortCksum(snd.total) });
       break;
   }
-  return `${rec}${ck} → ${code(d.fn)}${see(S, d.type === "END" ? "recvEnd" : d.type === "BEGIN" ? "recvBegin" : "dispatch")}${(S.lang === "fr" ? "\u00a0: " : ": ")}${eff}`;
+  return `${rec}${ck}${S.lang === "fr" ? "\u00a0: " : ": "}${eff}`;
 }
 
 // ---------------------------------------------------------------- the strip and the receiver
@@ -221,16 +219,32 @@ export function strip(S: SrStrings, snd: Send, rcv: Received, t: number): string
   const w = written(snd, t);
   const r = received(snd, rcv, t);
   const bad = failed(snd, rcv, t) ? rcv.error!.i : -1;
+  const just = justWritten(snd, rcv, t);
   if (!w) return `<p class="muted">${S.stripEmpty}</p>`;
   const cards = snd.records.slice(0, w).map((x, i) => {
     const ck = x.cksum ? `<span class="ck" title="drr_checksum">${shortCksum(x.cksum)}</span>` : `<span class="ck none">${S.noCk}</span>`;
     // The failing header, and the record before it that it was checking: neither is applied.
     const lost = bad >= 0 && i >= r && i < bad;
-    const st = i === bad ? " bad" : lost ? " lost" : i < r ? " done" : "";
+    const st = (i === bad ? " bad" : lost ? " lost" : i < r ? " done" : "") + (just.has(i) ? " just" : "");
     const sr = i === bad || lost ? `<span class="visually-hidden"> ${S.srBad}</span>` : i < r ? `<span class="visually-hidden"> ${S.srDone}</span>` : "";
     return `<li class="rec ${x.type.toLowerCase()}${st}" data-rec="${i}"><span class="n">${i}</span><span class="ty">${x.type}</span><span class="args">${recArgs(S, snd, x)}${sr}</span>${ck}</li>`;
   });
   return `<ol class="strip" aria-label="${S.stripLabel}">${cards.join("")}</ol>`;
+}
+
+/**
+ * The records frame t touched, outlined until the next step (D29.1): those it
+ * wrote, the one the receiver applied, or the header it refused.
+ */
+export function justWritten(snd: Send, rcv: Received, t: number): Set<number> {
+  const out = new Set<number>();
+  const n = snd.steps.length;
+  if (t === 0) out.add(0);
+  else if (t <= n) for (const j of snd.steps[t - 1].emitted) out.add(j);
+  else if (t === n + 1) snd.records.forEach((r, j) => r.step === n && out.add(j));
+  else if (failed(snd, rcv, t)) out.add(rcv.error!.i);
+  else out.add(rcv.dispatched[t - n - 2].i);
+  return out;
 }
 
 function recArgs(S: SrStrings, snd: Send, r: Rec): string {
@@ -276,7 +290,7 @@ export function receiver(S: SrStrings, snd: Send, rcv: Received, t: number): str
   }
   const content = failed(snd, rcv, t) ? rcv.start : cur ? cur.after : rcv.start;
   let verdict = "";
-  if (failed(snd, rcv, t)) verdict = `<p class="verdict bad">${fill(S.vEcksum, { i: rcv.error!.i, holds: kept(S, snd) })}${see(S, "recvCheck")}</p>`;
+  if (failed(snd, rcv, t)) verdict = `<p class="verdict bad">${fill(S.vEcksum, { i: rcv.error!.i, holds: kept(S, snd) })}</p>`;
   else if (k === rcv.dispatched.length && !rcv.error) {
     const same = sameContent(rcv.content, contentOf(snd.to.root));
     verdict = `<p class="verdict ${same ? "ok" : "bad"}">${fill(same ? S.vSame : S.vDiffer, { to: snd.to.name, ck: shortCksum(snd.total) })}</p>`;
@@ -322,7 +336,7 @@ export function history(S: SrStrings, snaps: Snapshot[]): string {
 
 /** The text version: the choice, every test, every record, the receiver's result. */
 export function describe(S: SrStrings, snd: Send, rcv: Received): string {
-  const tests = snd.steps.map((_, i) => `<li>${stepLine(S, snd, i).replace(/ ?<a class="see"[^>]*>[^<]*<\/a>/g, "")}</li>`).join("");
+  const tests = snd.steps.map((_, i) => `<li>${stepLine(S, snd, i)}</li>`).join("");
   const recs = snd.records.map((r) => `<li>${recLabel(S, snd, r)}${r.cksum ? `, drr_checksum ${shortCksum(r.cksum)}` : ""}</li>`).join("");
   const end = rcv.error
     ? fill(S.vEcksum, { i: rcv.error.i, holds: kept(S, snd) })

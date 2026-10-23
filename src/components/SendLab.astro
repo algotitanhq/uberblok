@@ -8,10 +8,11 @@
 // receive checks) decides every outcome, and src/lib/send-view.ts draws it, at
 // build time for the finished stream (readable without JavaScript) and in the
 // browser frame by frame. Refs: ANALYSIS.md, room "send / receive";
-// simplifications: DECISIONS.md D9.2.
+// simplifications: DECISIONS.md D9.2. One step per press of Next step, and
+// what it did stays outlined until the next one (D29.1); the narration is
+// plain and carries no code links, which live in the room's Source notes.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { snapshots, send, receive, streamBytes, contentOf } from "../lib/send";
 import { tree, strip, receiver, counters, table, history, describe, summary, lastFrame, type SrStrings } from "../lib/send-view";
@@ -21,21 +22,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const SEND = "module/zfs/dmu_send.c";
-const RECV = "module/zfs/dmu_recv.c";
-const refs = {
-  visitbp: gh("module/zfs/dmu_traverse.c", 277, 278),
-  sendCbDnode: gh(SEND, 1098, 1108),
-  sendCbMeta: gh(SEND, 1109, 1120),
-  sendCbData: gh(SEND, 1140, 1146),
-  dumpDnode: gh(SEND, 732, 742),
-  end: gh(SEND, 2619, 2626),
-  recvBegin: gh(RECV, 1304, 1306),
-  recvEnd: gh(RECV, 3000, 3007),
-  recvCheck: gh(RECV, 2861, 2866),
-  dispatch: gh(RECV, 3188, 3213),
-};
-const S = { ...Object.fromEntries(Object.entries(SEND_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as SrStrings;
+const S = { ...Object.fromEntries(Object.entries(SEND_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as SrStrings;
 const t = UI[lang];
 const snaps = snapshots();
 const to = snaps[3];
@@ -60,8 +47,7 @@ const t0 = lastFrame(snd, rcv);
       }
     </div>
     <div class="buttons actions">
-      <button class="btn btn--primary" type="button" data-act="play">{S.play}</button>
-      <button class="btn" type="button" data-act="step">{S.step}</button>
+      <button class="btn" type="button" data-act="play">{S.play}</button>
       <button class="btn" type="button" data-act="end">{S.showAll}</button>
       <button class="btn" type="button" data-act="restart">{S.restart}</button>
       <button class="btn btn--danger" type="button" data-flip aria-pressed="false">{S.flip}</button>
@@ -84,11 +70,17 @@ const t0 = lastFrame(snd, rcv);
         <li><span class="bp data skip"><span class="t">a0</span><sub>10</sub></span>{S.legendSkip}</li>
         <li><span class="bp data pruned"><span class="t">a1</span><sub>10</sub></span>{S.legendPruned}</li>
         <li><span class="bp data hole visit"><span class="t">{S.hole}</span><sub>30</sub></span>{S.legendHole}</li>
+        <li><span class="bp data visit just"><span class="t">a2′</span><sub>20</sub></span>{S.legendJust}</li>
       </ul>
     </section>
     <section class="panel stream" aria-labelledby={`sr-str-${lang}`}>
       <h3 id={`sr-str-${lang}`}>{S.streamLabel}</h3>
       <div data-strip set:html={strip(S, snd, rcv, t0)} />
+      <ul class="legend" aria-hidden="true">
+        <li><span class="kck">{S.keyCk}</span></li>
+        <li><span class="krec done">✓</span>{S.keyDone}</li>
+        <li><span class="krec bad"></span>{S.keyBad}</li>
+      </ul>
     </section>
     <section class="panel recv" aria-labelledby={`sr-rcv-${lang}`}>
       <h3 id={`sr-rcv-${lang}`}>{S.receiverLabel}</h3>
@@ -96,7 +88,10 @@ const t0 = lastFrame(snd, rcv);
     </section>
   </div>
 
-  <p class="sr-now" data-now aria-live="polite" hidden></p>
+  <div class="sr-stepbar" hidden>
+    <button class="btn btn--primary" type="button" data-act="step">{S.step}</button>
+    <p class="sr-now" data-now aria-live="polite"></p>
+  </div>
   <noscript><p class="muted">{S.noScript}</p></noscript>
 
   <div class="sr-table" data-table tabindex="0" role="region" aria-label={t.scrollTable} set:html={table(S, sends, FROM0)} />
@@ -141,9 +136,21 @@ const t0 = lastFrame(snd, rcv);
     }
 
     function say(text: string) {
-      const el = q("[data-now]");
-      el.hidden = false;
-      el.innerHTML = text;
+      q("[data-now]").innerHTML = text;
+    }
+
+    // On a phone the figure is taller than the screen: after a press, bring what
+    // the step outlined into view above the bar, which sticks to the bottom of
+    // the screen with Next step under the thumb (as in the TXG room, D24.1).
+    const phone = matchMedia("(max-width: 40rem)");
+    function show() {
+      if (!phone.matches) return;
+      const el = root.querySelector("[data-tree] .cur, [data-receiver] .blk.new, [data-receiver] li.new, [data-receiver] .verdict, [data-strip] .rec.just");
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const room = Math.min(q(".sr-stepbar").getBoundingClientRect().top, innerHeight) - 8;
+      if (r.top >= 8 && r.bottom <= room) return;
+      window.scrollBy({ top: r.top < 8 ? r.top - 8 : r.bottom - room, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
     function controls() {
@@ -154,7 +161,7 @@ const t0 = lastFrame(snd, rcv);
       // the focus: every control but Start again while the stream plays, Show the end once it is shown.
       // Next step at the end starts the stream again from BEGIN. With reduced motion, Play shows the end
       // at once, so it does not apply once the end is shown either.
-      for (const b of root.querySelectorAll<HTMLButtonElement>(".sr-bar button:not([data-act=restart])")) {
+      for (const b of root.querySelectorAll<HTMLButtonElement>(".sr-bar button:not([data-act=restart]), .sr-stepbar button")) {
         if (busy || ((b.dataset.act === "end" || (b.dataset.act === "play" && reducedMotion())) && t >= last)) b.setAttribute("aria-disabled", "true");
         else b.removeAttribute("aria-disabled");
       }
@@ -190,7 +197,10 @@ const t0 = lastFrame(snd, rcv);
       t = n;
       draw();
       pulse(before);
-      if (!quiet) say(frameLine(S, snd, rcv, t));
+      if (!quiet) {
+        say(frameLine(S, snd, rcv, t));
+        show();
+      }
     }
 
     async function play() {
@@ -233,7 +243,7 @@ const t0 = lastFrame(snd, rcv);
         compute();
         t = lastFrame(snd, rcv);
         render();
-        say(summary(S, snd));
+        say(`${summary(S, snd)} ${S.hint}`);
       } else if (el.hasAttribute("data-flip")) {
         flip = !flip;
         compute();
@@ -246,7 +256,9 @@ const t0 = lastFrame(snd, rcv);
     });
 
     render();
+    say(`${summary(S, snd)} ${S.hint}`);
     q(".sr-bar").hidden = false;
+    q(".sr-stepbar").hidden = false;
   }
 </script>
 
@@ -261,7 +273,7 @@ const t0 = lastFrame(snd, rcv);
     margin-bottom: var(--space-5);
   }
   .sr-bar[hidden],
-  .sr-now[hidden] {
+  .sr-stepbar[hidden] {
     display: none;
   }
   .buttons {
@@ -431,8 +443,13 @@ const t0 = lastFrame(snd, rcv);
     font-style: italic;
     font-weight: 400;
   }
+  /* What the last step did: a ring in the ink colour, kept until the next step. */
+  .bp.just,
   .tree-wrap :global(.bp.cur),
-  .tree-wrap :global(.slot.cur) {
+  .tree-wrap :global(.slot.cur),
+  .stream :global(.rec.just),
+  .recv :global(.blk.new),
+  .recv :global(li.new .fname) {
     outline: 2px solid var(--fg);
     outline-offset: 1px;
   }
@@ -547,6 +564,24 @@ const t0 = lastFrame(snd, rcv);
     border-color: var(--bad);
     background: var(--bad-soft);
   }
+  .kck {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+  }
+  .krec {
+    display: inline-block;
+    min-width: 1.6em;
+    height: 1.2em;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    text-align: center;
+    color: var(--ok);
+  }
+  .krec.bad {
+    border-color: var(--bad);
+    background: var(--bad-soft);
+  }
   /* The receiver: its files, block by block. */
   .recv :global(.holds) {
     font-size: var(--step--1);
@@ -612,8 +647,18 @@ const t0 = lastFrame(snd, rcv);
     background: var(--bad-soft);
     border-left: 3px solid var(--bad);
   }
+  /* Next step and the line that says what it did, right under the figure. */
+  .sr-stepbar {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+    margin-top: var(--space-4);
+  }
+  .sr-stepbar .btn {
+    flex: none;
+  }
   .sr-now {
-    margin: var(--space-4) 0 0;
+    margin: 0;
     font-size: var(--step--1);
     max-width: 52rem;
     min-height: 3em;
@@ -623,10 +668,6 @@ const t0 = lastFrame(snd, rcv);
   .sr-now :global(b) {
     font-family: var(--font-mono);
     font-weight: 600;
-  }
-  .sr :global(a.see) {
-    font-size: 0.85em;
-    color: var(--fg-muted);
   }
   .sr-table {
     margin-top: var(--space-5);
@@ -698,6 +739,22 @@ const t0 = lastFrame(snd, rcv);
     .tree-wrap :global(ul ul) {
       padding-left: var(--space-2);
       margin-left: var(--space-1);
+    }
+    /* Phone: Next step and its line stay at the bottom of the screen while the
+       figure is in view; the bar's sticky range is the whole figure. */
+    .sr-stepbar {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      align-items: center;
+      margin: var(--space-4) calc(-1 * var(--space-2)) 0;
+      padding: var(--space-2);
+      background: var(--bg);
+      border-top: 1px solid var(--line-strong);
+    }
+    .sr-now {
+      min-height: 0;
+      line-height: 1.35;
     }
   }
 </style>

@@ -5176,6 +5176,104 @@ The receiver keeps its own running checksum, which starts over the whole BEGIN r
 - *From `@s3`* (F = 30): dnode block 1 (30) is skipped with d's subtree; in dnode block 0 (40), a's and b's indirect blocks (20, 30) are skipped. 3 visited (objset, meta-dnode indirect block, dnode block 0), 3 skipped, 13 below them. 7 records: BEGIN, OBJECT 1, FREE 1 from 2048, OBJECT 2, FREE 2 from 2048, FREEOBJECTS 3, END. a and b are sent as OBJECT records, without data, because they share a dnode block with c, whose removal rewrote it.
 - *A flipped bit* in the payload of the first WRITE of the full stream (record 3): the receiver fails with `ECKSUM` when it checks record 4's header. BEGIN, OBJECT 1 and FREE 1 were applied; the WRITE never is, and the receive is undone.
 
+### 13. `send_traverse_thread`, the bound — module/zfs/dmu_send.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1211-L1213
+
+```c
+	err = traverse_dataset_resume(st_arg->os->os_dsl_dataset,
+	    st_arg->fromtxg, &st_arg->resume,
+	    st_arg->flags | TRAVERSE_LOGICAL, send_cb, st_arg);
+```
+
+Excerpt 4 cut to the call. L1211-L1212: the snapshot being sent is traversed from `fromtxg`, the from-snapshot's creation txg ([`module/zfs/dmu_send.c#L2370`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L2370)), 0 for a full stream; inside the traversal it becomes `td_min_txg` ([`module/zfs/dmu_traverse.c#L653`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L653)). L1213: `TRAVERSE_LOGICAL` is added to the send's flags ([`module/zfs/dmu_send.c#L2088`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L2088)), so births are compared by their logical txg, and every visited block goes to `send_cb`.
+
+### 14. `traverse_visitbp`, the skip — module/zfs/dmu_traverse.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L277-L279
+
+```c
+	} else if (get_birth_time(td, bp) <= td->td_min_txg) {
+		return (0);
+	}
+```
+
+Excerpt 2 cut to the rule. A block pointer born at or before `td_min_txg` is in the from-snapshot: the function returns before reading the block or calling the callback, so nothing below it is reached. `get_birth_time` returns the logical birth under `TRAVERSE_LOGICAL` ([`module/zfs/dmu_traverse.c#L78-L84`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L78-L84)); the comment that defines the two births ([`include/sys/spa.h#L483-L488`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/spa.h#L483-L488)) says the logical one is the one for incremental replication. Holes of birth 0 take the branch above (excerpt 2, L249-L276) and are visited, since `send_holes_without_birth_time` is 1 by default ([`module/zfs/dmu_traverse.c#L44`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L44)).
+
+### 15. `send_cb`, data or hole — module/zfs/dmu_send.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1140-L1146
+
+```c
+	enum type record_type = DATA;
+	if (BP_IS_HOLE(bp))
+		record_type = HOLE;
+	else if (BP_IS_REDACTED(bp))
+		record_type = REDACT;
+	else
+		record_type = DATA;
+```
+
+Excerpt 7 cut to the choice. A visited level-0 block becomes a DATA range, which `do_dump` writes as a WRITE with the block's data, or a HOLE range, written as a FREE of its range ([`module/zfs/dmu_send.c#L1018-L1034`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1018-L1034)); among the dnode blocks a hole frees objects ([`module/zfs/dmu_send.c#L1012-L1017`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1012-L1017)). REDACT belongs to redacted sends. A dnode becomes an OBJECT range a few lines above (excerpt 6, L1098-L1108), and every dnode of a visited dnode block reaches the callback, changed or not (excerpt 5, L534-L543).
+
+### 16. `dump_record`, the running checksum — module/zfs/dmu_send.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L268-L283
+
+```c
+	(void) fletcher_4_incremental_native(dscp->dsc_drr,
+	    offsetof(dmu_replay_record_t, drr_u.drr_checksum.drr_checksum),
+	    &dscp->dsc_zc);
+	if (dscp->dsc_drr->drr_type == DRR_BEGIN) {
+		dscp->dsc_sent_begin = B_TRUE;
+	} else {
+		ASSERT(ZIO_CHECKSUM_IS_ZERO(&dscp->dsc_drr->drr_u.
+		    drr_checksum.drr_checksum));
+		dscp->dsc_drr->drr_u.drr_checksum.drr_checksum = dscp->dsc_zc;
+	}
+	if (dscp->dsc_drr->drr_type == DRR_END) {
+		dscp->dsc_sent_end = B_TRUE;
+	}
+	(void) fletcher_4_incremental_native(&dscp->dsc_drr->
+	    drr_u.drr_checksum.drr_checksum,
+	    sizeof (zio_cksum_t), &dscp->dsc_zc);
+```
+
+Excerpt 10 cut to the checksum. L268-L270: the running fletcher-4 sum `dsc_zc` is carried on over the record's header, up to its last 32 bytes. L271-L277: except for BEGIN, that value is stored in those 32 bytes, `drr_checksum`. L281-L283: the 32 bytes are then summed too. So each record's `drr_checksum` is the fletcher-4 of every byte of the stream before it, its own header up to the checksum included; the payload after the header is summed below (excerpt 10, L295-L298).
+
+### 17. `receive_read_payload_and_next_header`, the check — module/zfs/dmu_recv.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L2861-L2868
+
+```c
+	if ((!ZIO_CHECKSUM_IS_ZERO(cksump)) &&
+	    !ZIO_CHECKSUM_EQUAL(drc->drc_cksum, *cksump)) {
+		kmem_free(drc->drc_next_rrd, sizeof (*drc->drc_next_rrd));
+		drc->drc_next_rrd = NULL;
+		return (SET_ERROR(ECKSUM));
+	}
+
+	receive_cksum(drc, sizeof (cksum_orig), &cksum_orig);
+```
+
+Excerpt 12 cut to the test. L2861-L2866: the receiver's own running sum `drc_cksum` (over the next header up to its checksum, excerpt 12, L2849-L2851) is compared with the header's `drr_checksum`; a mismatch stops the receive with `ECKSUM`. A checksum of all zeros is not checked. L2868: the stored value is then summed, as the sender did. This runs before the previous record is queued for the writer ([`module/zfs/dmu_recv.c#L3500-L3513`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L3500-L3513)), so a damaged record is never applied; END is checked once more against the sum before it ([`module/zfs/dmu_recv.c#L3000-L3007`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L3000-L3007)), and on an error the receive is undone ([`module/zfs/dmu_recv.c#L3582-L3588`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L3582-L3588)).
+
+### 18. `recv_begin_check_existing_impl`, the from-snapshot — module/zfs/dmu_recv.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L473-L479
+
+```c
+			if (dsl_dataset_phys(snap)->ds_guid == fromguid)
+				break;
+			obj = dsl_dataset_phys(snap)->ds_prev_snap_obj;
+			dsl_dataset_rele(snap, FTAG);
+		}
+		if (obj == 0)
+			return (SET_ERROR(ENODEV));
+```
+
+The end of the loop that looks, among the receiving filesystem's snapshots, newest first, for the one whose GUID is the stream's `drr_fromguid` (the loop starts at [`module/zfs/dmu_recv.c#L463-L464`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L463-L464)). Found: the incremental stream applies on top of it. Not found: `ENODEV`, and nothing is received. The sender writes the two GUIDs in BEGIN ([`module/zfs/dmu_send.c#L2049-L2050`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L2049-L2050)).
+
 ## Room: Compression, dedup, encryption
 
 **Problem.** Three features transform a block between the application and the disk. Compression must not waste CPU and metadata on data that barely shrinks. Dedup must recognise that a block already exists on disk and avoid writing it again, at the price of a table that must be consulted on every write. Encryption must protect user data while leaving enough in clear that the pool can still be scrubbed, resilvered and replicated without the key.

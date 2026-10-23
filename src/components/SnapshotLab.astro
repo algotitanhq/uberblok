@@ -430,7 +430,8 @@ const sum = summary(s0, S);
     // FLIP: each chip that moved (tree -> deadlist, or into a new row) slides from where it was.
     function rects() {
       const m = new Map<string, DOMRect>();
-      for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) m.set(`${c.dataset.b}|${c.dataset.at}`, c.getBoundingClientRect());
+      // The copies in a snapshot's "destroying it frees" line are not where a block lives.
+      for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]:not([data-at^='only:'])")) m.set(`${c.dataset.b}|${c.dataset.at}`, c.getBoundingClientRect());
       const byBlock = new Map<string, DOMRect>();
       for (const [k, r] of m) byBlock.set(k.split("|")[0], r);
       return { m, byBlock };
@@ -446,7 +447,7 @@ const sum = summary(s0, S);
       render();
       logEl.replaceChildren();
       if (!reducedMotion()) {
-        for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) {
+        for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]:not([data-at^='only:'])")) {
           const k = `${c.dataset.b}|${c.dataset.at}`;
           if (before.m.has(k)) continue;
           const from = before.byBlock.get(c.dataset.b!);
@@ -459,16 +460,16 @@ const sum = summary(s0, S);
         }
         for (const c of boardEl.querySelectorAll<HTMLElement>(".freed .chip")) c.animate([{ opacity: 1 }, { opacity: 0.45 }], { duration: 900, fill: "none" });
       }
+      // Another action during the replay writes the rest of the log at once.
       for (const e of ev) {
         const li = document.createElement("li");
         li.className = e.k === "kill" ? (e.freed ? "free" : "dead") : e.k;
         li.innerHTML = eventLine(s, S, e);
         logEl.append(li);
-        await wait(e.k === "born" ? 60 : 140);
-        if (me !== run) return;
+        if (me === run) await wait(e.k === "born" ? 60 : 140);
       }
       // The summary only; the steps stay in the log below, for whoever wants them.
-      say(q("[data-did]").textContent ?? "");
+      if (me === run) say(q("[data-did]").textContent ?? "");
     }
 
     root.addEventListener("click", (e) => {
@@ -476,9 +477,12 @@ const sum = summary(s0, S);
       if (!el || !root.contains(el)) return;
       const d = el.dataset;
       if (d.act === "sync") return void doSync();
-      run++;
-      // A ring marks what the last sync did; any other action clears it, except selecting a block.
-      if (d.b === undefined) last = new Set();
+      // Selecting a block lets a sync's log finish and keeps its ring; any other action
+      // stops the log and clears the ring.
+      if (d.b === undefined) {
+        run++;
+        last = new Set();
+      }
       if (d.act === "snapshot") ask(s, { kind: "snapshot" });
       else if (d.act === "reset") {
         s = opening();
@@ -754,7 +758,7 @@ const sum = summary(s0, S);
     outline-offset: 2px;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .sn-board :global(.chip.hit) {
+    .sn-board :global(.chip.hit:not(.sel)) {
       animation: hit var(--dur-2) var(--ease);
     }
   }

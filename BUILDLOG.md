@@ -2219,9 +2219,11 @@ of the snapshot button ("Prendre un instantané de fs", a verb like the other la
 | Code excerpts | 7 | 5 |
 | Lines of code shown | 141 | 35 |
 
-**Proof.** `npm run build` (typography check: 14 files, 0 failures), `npm test` (247 pass,
-including two new model tests: a destroy frees exactly the blocks only that snapshot held, over
-300 random sequences; the opening state's pinned blocks), `check-permalinks` (ANALYSIS.md 145
+**Proof.** `npm run build` (typography check: 14 files, 0 failures), `npm test` (251 pass;
+new: the "destroying it frees" prediction matches the destroy over random sequences, with and
+without changes waiting in the same txg; the hatched blocks against the deadlists; the opening
+state; `scripts/test/snapshots-view.test.mjs`, 3 tests on the ring, the hatching and the summary
+line), `check-permalinks` (ANALYSIS.md 145
 excerpts, 954 line references; built site 1899 references), `check-sources` (156 references,
 44 pages) and `check-csp` (44 pages, no new hash): all pass. Captures in Chromium at 1440 and
 390 px in EN, FR and ES (not committed, `shots/`): the opening state, an overwrite, a snapshot,
@@ -2234,4 +2236,9 @@ creation txg, from the head's deadlist; "cloned blocks" in what is left out mean
 cloning), the counter argument softened, "The work comes later." folded into the next sentence,
 glosses made explicit, fragments in two notes made sentences, calques in FR and ES ("lâcher",
 "soltar", "quels deux", "né au plus tard avec"), a French button with no verb, a Spanish verb
-agreement. Not taken: none of substance.
+agreement. Not taken: none of substance. `code-reviewer` on the diff: the "destroying it frees"
+line ignored overwrites waiting in the same txg, whose kills run before the destroy (now
+predicted by running the destroy on a copy); selecting a block during a sync cut its log short
+(now only other actions stop the replay, and they write the rest of the log at once); the
+moving animation took the "frees" chips for where a block lives; the text version lacked what a
+destroy would free; a test of the hatching restated the code. All fixed, and view tests added.

@@ -422,9 +422,9 @@ export function wouldKill(s: State, d: Dataset, id: number): { freed: boolean; k
 export const onDisk = (s: State) => s.blocks.filter((b) => b.freed === undefined);
 
 /**
- * Blocks only this snapshot holds: on disk and in no other dataset's tree. They are
- * what destroying it would free (the entries dsl_destroy.c L415-L418 moves), when
- * nothing else changes in that txg; the tests check the two agree.
+ * Blocks only this snapshot holds: on disk and in no other dataset's tree. With
+ * nothing else waiting in the txg, they are what destroying it frees (the entries
+ * dsl_destroy.c L415-L418 moves); the tests check that destroyFrees agrees.
  */
 export const heldOnlyBy = (s: State, id: string): number[] =>
   onDisk(s)
@@ -433,6 +433,21 @@ export const heldOnlyBy = (s: State, id: string): number[] =>
       return r.length === 1 && r[0] === id;
     })
     .map((b) => b.id);
+
+/**
+ * What destroying this snapshot at the end of the open txg would free: the destroy
+ * run on a copy, after whatever else is waiting in the txg (its kills come first, so
+ * they can add blocks). Null when the destroy would be refused.
+ */
+export function destroyFrees(s: State, id: string): number[] | null {
+  const t = clone(s);
+  if (!t.pending.tasks.some((x) => x.kind === "destroy" && x.snap === id)) {
+    if (taskRefusal(t, { kind: "destroy", snap: id })) return null;
+    ask(t, { kind: "destroy", snap: id });
+  }
+  const e = sync(t).find((x) => x.k === "destroy" && x.snap === id);
+  return e && e.k === "destroy" ? e.freed : null;
+}
 
 /** A block kept only for snapshots: on disk, and in no head's tree. */
 export const pinned = (s: State, id: number): boolean => {

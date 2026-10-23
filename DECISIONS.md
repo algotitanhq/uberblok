@@ -2672,9 +2672,12 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   The blocks a sync touched (born, kept, freed) carry a ring until the next action other than a
   selection: a static outline, faded in only when motion is allowed. A block kept only for
   snapshots (on disk, in no head's tree) is hatched wherever it is drawn. Each snapshot row says
-  what destroying it would free, with the blocks; `heldOnlyBy` computes it from the references,
-  and a new test checks over 300 random sequences that a destroy alone in its txg frees exactly
-  those blocks. The legend lists every look from the start. The narration and the owner panel
+  what destroying it at the end of the open txg would free, with the blocks. `destroyFrees`
+  runs the destroy on a copy of the state, after whatever else waits in the txg: the kills of
+  waiting overwrites come first and can add blocks, which a prediction from the references alone
+  (`heldOnlyBy`) missed in about half of the random cases (found by the code review). The tests
+  check over random sequences that the prediction matches the destroy, with and without waiting
+  changes, and that it equals the blocks only that snapshot holds when nothing else waits. The legend lists every look from the start. The narration and the owner panel
   say "lets go of" and "latest snapshot: fs@s1, txg 9" rather than `kill` and `ds_prev_snap_txg`,
   and carry no code links (D21.1); the live region reads the summary line once per sync. Without
   script the board, the opening line and the text version show, as before.

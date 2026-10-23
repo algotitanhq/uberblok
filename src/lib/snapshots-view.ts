@@ -4,7 +4,7 @@
 // every later state with the same functions. The narration is plain and has no
 // code links: those live in the room's Source notes (DECISIONS.md D21.1).
 import {
-  SLOTS, head, ds, snapshots, referencedBy, owners, wouldKill, taskRefusal, slotBlock, heldOnlyBy, pinned,
+  SLOTS, head, ds, snapshots, referencedBy, owners, wouldKill, taskRefusal, slotBlock, destroyFrees, pinned,
   type State, type Dataset, type Event, type Block, type Task,
 } from "./snapshots";
 
@@ -92,12 +92,11 @@ function dsRow(s: State, S: SnStrings, d: Dataset, live: boolean): string {
     }
     acts = `<div class="acts">${bits.join("")}</div>`;
   }
-  // What only this snapshot holds: what destroying it would free.
-  let only = "";
-  if (d.snapshot && d.numChildren < 2) {
-    const ids = heldOnlyBy(s, d.id);
-    only = `<p class="only">${ids.length ? `${fill(S.onlyHolds, { n: ids.length })} ${ids.map((id) => chip(s, S, id, `only:${d.id}`, false)).join("")}` : S.onlyNone}</p>`;
-  }
+  // What destroying it at the end of the open txg would free.
+  const ids = d.snapshot ? destroyFrees(s, d.id) : null;
+  const only = ids
+    ? `<p class="only">${ids.length ? `${fill(S.onlyHolds, { n: ids.length })} ${ids.map((id) => chip(s, S, id, `only:${d.id}`, false)).join("")}` : S.onlyNone}</p>`
+    : "";
   return `<section class="ds ${d.snapshot ? "snap" : d.dir === "clone" ? "clone" : "head"}" data-ds="${d.id}" aria-label="${d.name}">
 <header><h3><code>${d.name}</code></h3><span class="kind">${kind}</span><span class="meta">${meta}</span>${acts}</header>
 <div class="tree"><span class="lbl">${code("ds_bp")} →</span>${chip(s, S, d.bp, `tree:${d.id}`, live)}<span class="arrow" aria-hidden="true">→</span><span class="slots">${slots}</span></div>
@@ -108,11 +107,18 @@ ${entries(s, S, d, live)}${only}
 /** The board: every dataset, then the blocks freed by the last sync. */
 export function board(s: State, S: SnStrings, live: boolean, freedLast: number[] = [], last: ReadonlySet<number> = new Set()): string {
   hit = last;
+  try {
+    return boardHtml(s, S, live, freedLast);
+  } finally {
+    hit = new Set();
+  }
+}
+
+function boardHtml(s: State, S: SnStrings, live: boolean, freedLast: number[]): string {
   const rows = s.datasets.map((d) => dsRow(s, S, d, live)).join("");
   const freed = freedLast.length
     ? `<p class="freed"><span class="lbl">${fill(S.freedIn, { txg: s.txg - 1 })}</span>${freedLast.map((id) => `<span class="chip gone${s.blocks[id].slot < 0 ? " root" : ""}${s.blocks[id].dir === "clone" ? " c" : ""}${hit.has(id) ? " hit" : ""}" data-b="${id}" data-at="freed">${blockName(s.blocks[id])}</span>`).join("")}</p>`
     : "";
-  hit = new Set();
   return `<div class="board">${rows}</div>${freed}`;
 }
 
@@ -223,9 +229,11 @@ export function describe(s: State, S: SnStrings): string {
       .map((e) => fill(S.tEntry, { key: e.key, list: e.blocks.length ? list(S, e.blocks.map((id) => blockText(S, s.blocks[id]))) : S.none }))
       .join(S.semi);
     const kind = d.snapshot ? fill(S.kSnapshot, { txg: d.creationTxg }) : d.dir === "clone" ? fill(S.kClone, { origin: dsName(s, d.prevSnap), txg: d.creationTxg }) : S.kHead;
+    const frees = d.snapshot ? destroyFrees(s, d.id) : null;
+    const only = frees ? ` ${frees.length ? `${fill(S.onlyHolds, { n: frees.length })} ${list(S, frees.map((id) => blockText(S, s.blocks[id])))}.` : S.onlyNone}` : "";
     return `<li>${fill(S.tDataset, {
       name: code(d.name), kind, prev: metaLine(s, S, d, String(d.prevSnapTxg)), root: blockText(S, s.blocks[d.bp]), blocks: blocks.join(", "), dl,
-    })}</li>`;
+    })}${only}</li>`;
   });
   const freed = s.blocks.filter((b) => b.freed !== undefined);
   const tail = freed.length ? `<p>${fill(S.tFreed, { list: list(S, freed.map((b) => fill(S.tFreedOne, { b: blockText(S, b), txg: b.freed! }))) })}</p>` : "";

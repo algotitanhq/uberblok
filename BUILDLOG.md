@@ -2247,3 +2247,15 @@ All fixed.
 
 **Debts.** `Dispatch.fn` in `send.ts` is no longer shown by the figure; the model and its test
 keep it, since the model is unchanged by this issue.
+
+**Design/UX fixes.** The review asked for four changes, all in `SendLab`: on a phone every
+outlined part on screen after each press (20 of 51 presses missed one at FR 390), the deleted
+file shown on the receiving side, the outline key hidden without script, the checksum key on one
+line. All four done (D29.1, last point). `scripts/verify-send.mjs` now checks every part the step
+outlined (the pointer, the receiver's change, the records in the stream or repeated in the bar)
+on 1280×900, 390×844 and 360×740 phones, a full stream to the end and then from `@s3` to the end,
+in three languages: 621 presses, 0 off screen, the deleted row on the one frame that frees c,
+nothing outlined and no outline key without script, 0 problems. `npm test` green,
+`scripts/audit.mjs` 42 pages, 0 problems (send room: 42 stops, axe 0). `code-reviewer` on the
+fix: the repeated records could take focus inside an `aria-hidden` box (now `inert`), and the
+copy could outlive a rotation (now dropped when the width changes). Both fixed.

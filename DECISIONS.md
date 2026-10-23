@@ -2693,3 +2693,13 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   hand-checked against; choosing the from-snapshot shows the same full-then-incremental sequence.
   A sticky bar on phones only, as in the TXG room: at 1280×900 the outlined record of a full
   stream was under the fold while Next step was in view.
+- **After the Design/UX review.** On a phone the panels stack, so a step's records and the
+  part it tested were rarely on screen together. When the outlined records would sit off
+  screen, the step bar repeats them on one line above its text (a copy, `inert` and hidden from
+  assistive technology, since the stream and the line already say it), and under the
+  three-column width the line goes under the button at full width. A FREEOBJECTS that deletes a
+  file draws it once more on the receiving side, dashed and marked deleted, then drops it on
+  the next frame: the deletion is an absence and otherwise outlines nothing. The key item for
+  the outline is shown by the script only, and the checksum key reads as one sentence.
+  Rejected: scrolling to the records instead of the pointer (the reader loses the cause), and
+  a second scroll after the first (the page jumps twice per press).

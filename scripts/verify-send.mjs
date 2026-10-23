@@ -27,7 +27,11 @@ const V = await import("../src/lib/send-view.ts");
 
 const [base = "http://127.0.0.1:4321", out = "shots/send"] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
-const VP = { desktop: { width: 1280, height: 900 }, phone: { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true } };
+const VP = {
+  desktop: { width: 1280, height: 900 },
+  phone: { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  phone360: { width: 360, height: 740, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+};
 const URL = { en: "/en/send-receive/", fr: "/fr/send-receive/", es: "/es/send-receive/" };
 const report = { problems: [], captures: [], runs: {} };
 const problem = (x) => report.problems.push(x);
@@ -51,10 +55,24 @@ async function state(page) {
       return r.top >= 0 && r.bottom <= Math.min(innerHeight, getComputedStyle(f.querySelector(".sr-stepbar")).position === "sticky" ? bar.top + 1 : innerHeight);
     };
     const btn = f.querySelector('.sr-stepbar [data-act="step"]').getBoundingClientRect();
-    const cur = f.querySelector("[data-tree] .cur");
+    const cur = f.querySelector("[data-tree] .cur") ?? f.querySelector("[data-tree] .slot.cur");
     const just = [...f.querySelectorAll("[data-strip] .rec.just")].map((e) => Number(e.dataset.rec));
-    const recv = f.querySelector("[data-receiver] .verdict, [data-receiver] .blk.new, [data-receiver] li.new");
+    // Every part the step outlined must be on screen (Design/UX review of ALG-201): the
+    // pointer or dnode tested, what the receiver changed, and the records, either in the
+    // stream or repeated in the step bar.
+    const echo = f.querySelector("[data-echo]");
+    const onScreen = (el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; };
+    const echoed = !echo.hidden && onScreen(echo) ? echo.querySelectorAll(".rec.just").length : 0;
+    const recvAll = [...f.querySelectorAll("[data-receiver] .verdict, [data-receiver] .blk.new, [data-receiver] li.new, [data-receiver] li.gone")];
+    const recsSeen = [...f.querySelectorAll("[data-strip] .rec.just")].every(inView) || echoed === just.length;
+    const off = [];
+    if (cur && !inView(cur)) off.push("tree");
+    if (!recvAll.every(inView)) off.push("receiver");
+    if (!recsSeen) off.push("records");
+    const recv = recvAll[0];
     return {
+      off,
+      gone: [...f.querySelectorAll("[data-receiver] li.gone .fname")].map((e) => e.textContent),
       line: f.querySelector("[data-now]").innerHTML,
       cur: cur?.dataset.bp ?? f.querySelector("[data-tree] .slot.cur")?.dataset.dn ?? null,
       just,
@@ -69,7 +87,7 @@ async function state(page) {
 
 for (const lang of ["en", "fr", "es"])
   for (const [vp, view] of Object.entries(VP)) {
-    const ctx = await browser.newContext({ viewport: { width: view.width, height: view.height }, deviceScaleFactor: view.deviceScaleFactor ?? 1, isMobile: !!view.isMobile, hasTouch: !!view.hasTouch, reducedMotion: vp === "phone" && lang === "en" ? "reduce" : "no-preference" });
+    const ctx = await browser.newContext({ viewport: { width: view.width, height: view.height }, deviceScaleFactor: view.deviceScaleFactor ?? 1, isMobile: !!view.isMobile, hasTouch: !!view.hasTouch, reducedMotion: vp !== "desktop" && lang === "en" ? "reduce" : "no-preference" });
     const page = await ctx.newPage();
     const errors = [];
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -81,14 +99,16 @@ for (const lang of ["en", "fr", "es"])
     if (s0.just.length) problem({ where: `${lang}-${vp}`, what: "outlined before any step", just: s0.just });
     if (!s0.line) problem({ where: `${lang}-${vp}`, what: "no line on load" });
 
-    for (const [fi, presses] of [[0, 4], [3, 6]]) {
+    for (const fi of [0, 3]) {
       await fig.locator(`.sr-bar button[data-from="${fi}"]`).click();
       const { snd, rcv } = model(fi);
       const last = V.lastFrame(snd, rcv);
       // The first press at the end starts again from BEGIN (t = 0).
-      for (let t = 0; t < (fi === 3 ? last + 1 : presses); t++) {
+      for (let t = 0; t < last + 1; t++) {
         await fig.locator('.sr-stepbar [data-act="step"]').click();
         await page.waitForTimeout(450);
+        // A long smooth scroll (from the end of the stream back to BEGIN) can outlast that.
+        for (let y = -1, i = 0; i < 20 && y !== (y = await page.evaluate(() => scrollY)); i++) await page.waitForTimeout(100);
         const s = await state(page);
         run.presses++;
         const want = [...V.justWritten(snd, rcv, t)];
@@ -97,11 +117,14 @@ for (const lang of ["en", "fr", "es"])
         if (JSON.stringify(s.just) !== JSON.stringify(want) || !curOk) problem({ where: `${lang}-${vp}-from${fi}-t${t}`, got: { just: s.just, cur: s.cur }, want: { just: want, cur: wantCur?.bp?.id ?? wantCur?.dn?.object } });
         else run.outlinedOk++;
         if (/<a\b|send_cb|dump_|td_min_txg|drr_checksum|receive_\w+/.test(s.line)) problem({ where: `${lang}-${vp}-t${t}`, what: "code in the line", line: s.line });
-        {
-          const seen = t > 0 && t <= snd.steps.length ? s.curInView : t > snd.steps.length + 1 ? s.recvInView ?? s.justInView : s.justInView;
-          if (!s.buttonInView || seen === false) problem({ where: `${lang}-${vp}-from${fi}-t${t}`, what: "off screen", button: s.buttonInView, seen });
-        }
-        if (vp === "phone" && lang === "en" && s.running) problem({ where: `reduced-motion-t${t}`, running: s.running });
+        if (!s.buttonInView || s.off.length) problem({ where: `${lang}-${vp}-from${fi}-t${t}`, what: "off screen", button: s.buttonInView, off: s.off });
+        // A FREEOBJECTS that deletes a file shows it once more, marked deleted, on the receiving side.
+        const k = t - snd.steps.length - 1;
+        const d = k >= 1 && !(rcv.error && rcv.error.i <= rcv.dispatched[k - 1]?.i) ? rcv.dispatched[k - 1] : null;
+        const wantGone = d?.type === "FREEOBJECTS" ? d.effect.split(",").filter(Boolean).length : 0;
+        if (s.gone.length !== wantGone) problem({ where: `${lang}-${vp}-from${fi}-t${t}`, what: "deleted row", got: s.gone, want: wantGone });
+        if (wantGone) run.deletedShown = (run.deletedShown ?? 0) + 1;
+        if (vp !== "desktop" && lang === "en" && s.running) problem({ where: `reduced-motion-t${t}`, running: s.running });
         if (fi === 0 && t === 3) {
           await page.screenshot({ path: join(out, `send-${lang}-${vp}-full-step3.png`) });
           report.captures.push(`send-${lang}-${vp}-full-step3.png`);
@@ -132,9 +155,10 @@ for (const lang of ["en", "fr", "es"])
   report.noJs = await page.evaluate(() => ({
     stepbarHidden: getComputedStyle(document.querySelector("[data-send] .sr-stepbar")).display === "none",
     outlined: document.querySelectorAll("[data-send] .rec.just, [data-send] [data-tree] .cur").length,
+    keyJustShown: [...document.querySelectorAll("[data-send] .legend li")].filter((l) => l.querySelector(".just") && getComputedStyle(l).display !== "none").length,
     records: document.querySelectorAll("[data-send] [data-strip] .rec").length,
   }));
-  if (!report.noJs.stepbarHidden || report.noJs.outlined) problem({ where: "noJs", ...report.noJs });
+  if (!report.noJs.stepbarHidden || report.noJs.outlined || report.noJs.keyJustShown) problem({ where: "noJs", ...report.noJs });
   await ctx.close();
 }
 

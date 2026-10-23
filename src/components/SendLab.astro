@@ -70,14 +70,14 @@ const t0 = lastFrame(snd, rcv);
         <li><span class="bp data skip"><span class="t">a0</span><sub>10</sub></span>{S.legendSkip}</li>
         <li><span class="bp data pruned"><span class="t">a1</span><sub>10</sub></span>{S.legendPruned}</li>
         <li><span class="bp data hole visit"><span class="t">{S.hole}</span><sub>30</sub></span>{S.legendHole}</li>
-        <li><span class="bp data visit just"><span class="t">a2′</span><sub>20</sub></span>{S.legendJust}</li>
+        <li data-js-key hidden><span class="bp data visit just"><span class="t">a2′</span><sub>20</sub></span>{S.legendJust}</li>
       </ul>
     </section>
     <section class="panel stream" aria-labelledby={`sr-str-${lang}`}>
       <h3 id={`sr-str-${lang}`}>{S.streamLabel}</h3>
       <div data-strip set:html={strip(S, snd, rcv, t0, false)} />
       <ul class="legend" aria-hidden="true">
-        <li><span class="kck">57970fd7</span>{S.keyCk}</li>
+        <li class="kline"><span class="kck">57970fd7</span> {S.keyCk}</li>
         <li><span class="krec done">✓</span>{S.keyDone}</li>
         <li><span class="krec bad"></span>{S.keyBad}</li>
       </ul>
@@ -89,6 +89,7 @@ const t0 = lastFrame(snd, rcv);
   </div>
 
   <div class="sr-stepbar" hidden>
+    <div class="sr-echo stream" data-echo aria-hidden="true" inert hidden></div>
     <button class="btn btn--primary" type="button" data-act="step">{S.step}</button>
     <p class="sr-now" data-now aria-live="polite"></p>
   </div>
@@ -148,18 +149,45 @@ const t0 = lastFrame(snd, rcv);
     function target(): Element | null {
       const pick = (...sel: string[]) => sel.map((s) => root.querySelector(s)).find(Boolean) ?? null;
       if (t > 0 && t <= snd.steps.length) return pick("[data-tree] .cur", "[data-strip] .rec.just");
-      return pick("[data-receiver] .verdict", "[data-receiver] .blk.new", "[data-receiver] li.new", "[data-strip] .rec.just");
+      return pick("[data-receiver] .verdict", "[data-receiver] .blk.new", "[data-receiver] li.new", "[data-receiver] li.gone", "[data-strip] .rec.just");
     }
-    function show() {
-      const el = target();
-      if (!el) return;
+    // The records a step wrote or checked and the part show() brings into view
+    // are often not on screen together (the panels stack on a phone, the stream
+    // grows long on a desktop): then the bar repeats those records above its
+    // line (Design/UX review of ALG-201).
+    const echoBox = q("[data-echo]");
+    // A rotation or a new width moves the panels: the copy may no longer be needed.
+    // Height alone changes when a phone's address bar hides on scroll; keep it then.
+    let echoWidth = innerWidth;
+    addEventListener("resize", () => {
+      if (innerWidth !== echoWidth) echoBox.hidden = true;
+      echoWidth = innerWidth;
+    });
+    /** How far to scroll so that el sits between the top of the screen and the bar; 0 if it does. */
+    function scrollFor(el: Element): number {
       const r = el.getBoundingClientRect();
       // Stop above the bar, whose height follows the line; a part taller than
       // the room above the bar is aligned on its top.
       const room = Math.min(q(".sr-stepbar").getBoundingClientRect().top, innerHeight) - 8;
-      if (r.top >= 8 && r.bottom <= room) return;
-      const by = r.top < 8 || r.bottom - r.top > room - 8 ? r.top - 8 : r.bottom - room;
-      window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
+      if (r.top >= 8 && r.bottom <= room) return 0;
+      return r.top < 8 || r.bottom - r.top > room - 8 ? r.top - 8 : r.bottom - room;
+    }
+    function show() {
+      echoBox.hidden = true;
+      const el = target();
+      if (!el) return;
+      let by = scrollFor(el);
+      const recs = [...root.querySelectorAll("[data-strip] .rec.just")];
+      const room = Math.min(q(".sr-stepbar").getBoundingClientRect().top, innerHeight) - 8;
+      if (recs.some((r) => r.getBoundingClientRect().top - by < 8 || r.getBoundingClientRect().bottom - by > room)) {
+        const ol = document.createElement("ol");
+        ol.className = "strip";
+        ol.append(...recs.map((r) => r.cloneNode(true)));
+        echoBox.replaceChildren(ol);
+        echoBox.hidden = false;
+        by = scrollFor(el);
+      }
+      if (by) window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
     function controls() {
@@ -239,6 +267,7 @@ const t0 = lastFrame(snd, rcv);
       const el = (e.target as Element).closest<HTMLElement>("button");
       if (!el || !root.contains(el)) return;
       const d = el.dataset;
+      echoBox.hidden = true;
       if (d.act === "restart") {
         run++;
         busy = false;
@@ -270,6 +299,7 @@ const t0 = lastFrame(snd, rcv);
     say(`${summary(S, snd)} ${S.hint}`);
     q(".sr-bar").hidden = false;
     q(".sr-stepbar").hidden = false;
+    q("[data-js-key]").hidden = false;
   }
 </script>
 
@@ -499,6 +529,13 @@ const t0 = lastFrame(snd, rcv);
     gap: var(--space-2);
     align-items: center;
   }
+  .legend li[hidden] {
+    display: none;
+  }
+  /* The checksum key reads as one sentence that starts with its sample. */
+  .legend li.kline {
+    display: block;
+  }
   /* The stream: a strip of records, top to bottom. */
   .stream :global(.strip) {
     list-style: none;
@@ -645,6 +682,23 @@ const t0 = lastFrame(snd, rcv);
     border-color: var(--accent);
     background: var(--accent-soft);
   }
+  /* An object the step just freed: drawn once more, dashed, then dropped. */
+  .recv :global(li.gone) {
+    opacity: 0.6;
+    border: 1px dashed var(--fg-muted);
+    border-radius: 4px;
+    padding: 0.1em 0.45em;
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
+  }
+  .recv :global(li.gone .fname) {
+    text-decoration: line-through;
+  }
+  .recv :global(.del) {
+    font-size: var(--step--1);
+    font-style: italic;
+    color: var(--fg-muted);
+  }
   .recv :global(.verdict) {
     margin: var(--space-3) 0 0;
     font-size: var(--step--1);
@@ -675,8 +729,36 @@ const t0 = lastFrame(snd, rcv);
     background: var(--bg);
     border-top: 1px solid var(--line-strong);
   }
+  .sr-stepbar {
+    flex-wrap: wrap;
+  }
   .sr-stepbar .btn {
     flex: none;
+  }
+  .sr-echo[hidden] {
+    display: none;
+  }
+  /* The records the step outlined, repeated on one line when they are off screen. */
+  .sr-echo {
+    flex-basis: 100%;
+    overflow-x: auto;
+    padding: 3px;
+  }
+  .sr-echo :global(.strip) {
+    display: flex;
+    gap: 4px;
+  }
+  .sr-echo :global(.rec) {
+    flex: none;
+    grid-template-columns: auto auto;
+  }
+  .sr-echo :global(.rec .n),
+  .sr-echo :global(.rec .ck) {
+    display: none;
+  }
+  .sr-echo :global(.rec .args) {
+    overflow-wrap: normal;
+    white-space: nowrap;
   }
   .sr-now {
     margin: 0;
@@ -748,6 +830,15 @@ const t0 = lastFrame(snd, rcv);
     }
     .source {
       grid-column: 1 / -1;
+    }
+    /* The line goes under the button, at full width. */
+    .sr-stepbar {
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+    .sr-now {
+      flex-basis: 100%;
+      min-height: 0;
     }
   }
   @media (max-width: 40rem) {

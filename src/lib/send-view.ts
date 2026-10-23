@@ -259,11 +259,16 @@ function recArgs(S: SrStrings, snd: Send, r: Rec): string {
   }
 }
 
-function files(S: SrStrings, c: Content, names: Record<number, string>, changed: Set<string>): string {
-  const objs = Object.keys(c).map(Number).sort((a, b) => a - b);
+/**
+ * The receiver's files. An object the step just freed (gone) is drawn once more, dashed and
+ * marked deleted, so that the deletion shows on the receiving side; the next frame drops it.
+ */
+function files(S: SrStrings, c: Content, names: Record<number, string>, changed: Set<string>, gone: Content = {}): string {
+  const objs = [...Object.keys(c), ...Object.keys(gone)].map(Number).sort((a, b) => a - b);
   if (!objs.length) return `<p class="muted">${S.noFiles}</p>`;
   return `<ul class="files">${objs
     .map((o) => {
+      if (gone[o]) return `<li class="gone"><span class="fname">${names[o] ?? o}</span><span class="o">${fill(S.objN, { o })}</span><span class="del">${S.deleted}</span></li>`;
       const bl = c[o].blocks;
       const cells = Array.from({ length: Math.max(bl.length, 0) }, (_, i) =>
         `<span class="blk${bl[i] === null ? " hole" : ""}${changed.has(`${o}.${i}`) ? " new" : ""}">${bl[i] ?? S.hole}</span>`).join("");
@@ -283,10 +288,13 @@ export function receiver(S: SrStrings, snd: Send, rcv: Received, t: number): str
   const holds = snd.from ? fill(S.holdsFrom, { from: snd.from.name, F: snd.from.txg }) : S.holdsNone;
   const cur = k ? rcv.dispatched[k - 1] : null;
   const changed = new Set<string>();
+  const gone: Content = {};
   if (cur && !failed(snd, rcv, t)) {
     const r = snd.records[cur.i];
     if (cur.type === "WRITE" || cur.type === "FREE") for (const i of cur.effect.split(",").filter(Boolean)) changed.add(`${r.object}.${i}`);
     if (cur.type === "OBJECT" && cur.effect === "created") changed.add(`${r.object}`);
+    const before = k >= 2 ? rcv.dispatched[k - 2].after : rcv.start;
+    if (cur.type === "FREEOBJECTS") for (const o of cur.effect.split(",").filter(Boolean).map(Number)) if (before[o]) gone[o] = before[o];
   }
   const content = failed(snd, rcv, t) ? rcv.start : cur ? cur.after : rcv.start;
   let verdict = "";
@@ -295,7 +303,7 @@ export function receiver(S: SrStrings, snd: Send, rcv: Received, t: number): str
     const same = sameContent(rcv.content, contentOf(snd.to.root));
     verdict = `<p class="verdict ${same ? "ok" : "bad"}">${fill(same ? S.vSame : S.vDiffer, { to: snd.to.name, ck: shortCksum(snd.total) })}</p>`;
   }
-  return `<p class="holds">${holds}</p>${files(S, content, names, changed)}${verdict}`;
+  return `<p class="holds">${holds}</p>${files(S, content, names, changed, gone)}${verdict}`;
 }
 
 /** The counters at frame t. */

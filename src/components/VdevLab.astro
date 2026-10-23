@@ -5,13 +5,13 @@
 // it in 2D (SVG) and src/lib/vdevs-3d.ts in 3D, loaded only on demand
 // (src/lib/lazy3d.ts). Shown without JavaScript: the default pool after a
 // metadata block and a large file block. Refs: ANALYSIS.md, room "The vdevs";
-// simplifications: DECISIONS.md D11.2 to D11.4.
+// simplifications: DECISIONS.md D11.2 to D11.4. No code links in the figure,
+// a line under the controls says what the last action did (D25.1).
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { createPool, writeBlock, DEFAULT_OPTIONS, KINDS } from "../lib/vdevs";
-import { treeSvg, lastHtml, opsHtml, classesHtml, auxHtml, nodeOptions, describe, type VdStrings } from "../lib/vdevs-view";
+import { treeSvg, lastHtml, opsHtml, classesHtml, auxHtml, legendHtml, nodeOptions, describe, dropLine, topsOf, type VdStrings } from "../lib/vdevs-view";
 import { VDEVS_STRINGS } from "../lib/vdevs-strings";
 import "../styles/vdevs.css";
 
@@ -19,41 +19,14 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const Z = "module/zfs/zio.c";
-const SM = "module/zfs/spa_misc.c";
-const VM = "module/zfs/vdev_mirror.c";
-const DR = "module/zfs/vdev_draid.c";
-const refs = {
-  zilOrder: gh(Z, 4561, 4595),
-  fallback: gh(Z, 4368, 4407),
-  pcDdt: gh(SM, 2121, 2156),
-  pcRest: gh(SM, 2158, 2179),
-  copies: gh("module/zfs/dmu.c", 2400, 2404),
-  ditto: gh("module/zfs/metaslab.c", 5401, 5427),
-  logical: gh(Z, 4692, 4697),
-  mirrorIo: gh(VM, 656, 693),
-  raidzIo: gh("module/zfs/vdev_raidz.c", 2443, 2462),
-  draidIo: gh(DR, 1042, 1064),
-  dspareIo: gh(DR, 2424, 2454),
-  aux: gh("include/sys/spa_impl.h", 284, 285),
-  replacingOps: gh(VM, 997, 1021),
-  resilverDone: gh("module/zfs/spa.c", 9438, 9480),
-  ops_root: gh("module/zfs/vdev_root.c", 145, 169),
-  ops_mirror: gh(VM, 971, 995),
-  ops_replacing: gh(VM, 997, 1021),
-  ops_spare: gh(VM, 1023, 1047),
-  ops_raidz: gh("module/zfs/vdev_raidz.c", 5481, 5505),
-  ops_draid: gh(DR, 2336, 2360),
-  ops_disk: gh("module/os/linux/zfs/vdev_disk.c", 1341, 1365),
-  ops_dspare: gh(DR, 2829, 2853),
-};
-const S = { ...Object.fromEntries(Object.entries(VDEVS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as VdStrings;
+const S = { ...Object.fromEntries(Object.entries(VDEVS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs: {}, lang } as unknown as VdStrings;
 const t = UI[lang];
 const first = writeBlock(createPool(DEFAULT_OPTIONS), "meta");
 const second = writeBlock(first.pool, "large");
 const p0 = second.pool;
 const io0 = { block: second.block, trace: second.trace, type: "write" as const };
 const sel0 = "sdd";
+const now0 = dropLine(S, p0, second.block, second.trace);
 const helpId = `vd-help-${lang}`;
 ---
 
@@ -84,17 +57,25 @@ const helpId = `vd-help-${lang}`;
       <button class="btn" type="button" data-view3d aria-pressed="false" hidden>{S.view3d}</button>
     </div>
   </div>
+  <p class="vd-now" data-now aria-hidden="true" set:html={now0} />
   <div class="vd-grid">
     <div class="vd-stage">
-      <div data-tree set:html={treeSvg(S, p0, io0.trace, sel0)} />
+      <div data-tree set:html={treeSvg(S, p0, io0.trace, sel0, topsOf(io0.block))} />
       <div class="vd-3d" data-3d hidden></div>
       <p class="vd-help muted" id={helpId} data-help-text hidden>{S.view3dHelp}</p>
       <p class="muted" id={`${helpId}-no3d`} data-no3d hidden>{S.no3d}</p>
+      <div class="vd-key" set:html={legendHtml(S)} />
     </div>
-    <section class="panel vd-aux" aria-labelledby={`vd-aux-${lang}`}>
-      <h3 id={`vd-aux-${lang}`}>{S.auxTitle}</h3>
-      <div data-aux set:html={auxHtml(S, p0)} />
-    </section>
+    <div class="vd-side">
+      <section class="panel" aria-labelledby={`vd-last-${lang}`}>
+        <h3 id={`vd-last-${lang}`}>{S.lastTitle}</h3>
+        <div data-last set:html={lastHtml(S, p0, io0)} />
+      </section>
+      <section class="panel" aria-labelledby={`vd-cls-${lang}`}>
+        <h3 id={`vd-cls-${lang}`}>{S.classTitle}</h3>
+        <div data-classes set:html={classesHtml(S, p0, io0.block.cls)} />
+      </section>
+    </div>
   </div>
   <div class="vd-bar vd-sel" hidden>
     <label class="vd-pick"><span class="glabel">{S.nodeLabel}</span> <select data-pick set:html={nodeOptions(S, p0, sel0)}></select></label>
@@ -104,23 +85,17 @@ const helpId = `vd-help-${lang}`;
       <button class="btn" type="button" data-rep="dspare">{S.replaceDspare.replace("{spare}", p0.spares[1])}</button>
       <button class="btn" type="button" data-act="resilver">{S.resilverDone}</button>
     </div>
-    <p class="muted vd-why" data-why></p>
   </div>
   <div class="vd-panels">
-    <section class="panel" aria-labelledby={`vd-last-${lang}`}>
-      <h3 id={`vd-last-${lang}`}>{S.lastTitle}</h3>
-      <div data-last set:html={lastHtml(S, p0, io0)} />
-    </section>
     <section class="panel" aria-labelledby={`vd-ops-${lang}`}>
       <h3 id={`vd-ops-${lang}`}>{S.opsTitle}</h3>
       <div data-ops set:html={opsHtml(S, p0, sel0)} />
     </section>
-    <section class="panel" aria-labelledby={`vd-cls-${lang}`}>
-      <h3 id={`vd-cls-${lang}`}>{S.classTitle}</h3>
-      <div data-classes set:html={classesHtml(S, p0)} />
+    <section class="panel vd-aux" aria-labelledby={`vd-aux-${lang}`}>
+      <h3 id={`vd-aux-${lang}`}>{S.auxTitle}</h3>
+      <div data-aux set:html={auxHtml(S, p0)} />
     </section>
   </div>
-  <p class="vd-now" data-now aria-hidden="true" hidden></p>
   <p class="visually-hidden" data-live aria-live="polite"></p>
   <noscript><p class="muted">{t.noScript}</p></noscript>
   <details class="text-version">
@@ -133,7 +108,7 @@ const helpId = `vd-help-${lang}`;
   import { strings, reducedMotion } from "../lib/svg";
   import { createPool, writeBlock, ioTrace, replace, resilverDone, canReplace, sameBlock, DEFAULT_OPTIONS, type Options, type Pool, type Kind } from "../lib/vdevs";
   import {
-    treeSvg, lastHtml, opsHtml, classesHtml, auxHtml, nodeOptions, describe, spoken,
+    treeSvg, lastHtml, opsHtml, classesHtml, auxHtml, nodeOptions, describe, spoken, topsOf,
     fill, dropLine, readLine, replaceLine, resilverLine, poolLine, selectLine, type VdStrings, type LastIo,
   } from "../lib/vdevs-view";
   import { no3dReason, once } from "../lib/lazy3d";
@@ -178,11 +153,13 @@ const helpId = `vd-help-${lang}`;
 
     function render(animate: boolean) {
       if (!pool.vdevs[selected]) selected = pool.vdevs.sdd ? "sdd" : "root";
-      q("[data-tree]").innerHTML = treeSvg(S, pool, io?.trace ?? null, selected);
+      // The last write's vdevs and class are marked until the next action.
+      const wrote = io?.type === "write" ? io.block : null;
+      q("[data-tree]").innerHTML = treeSvg(S, pool, io?.trace ?? null, selected, topsOf(wrote));
       q("[data-aux]").innerHTML = auxHtml(S, pool);
       q("[data-last]").innerHTML = lastHtml(S, pool, io);
       q("[data-ops]").innerHTML = opsHtml(S, pool, selected);
-      q("[data-classes]").innerHTML = classesHtml(S, pool);
+      q("[data-classes]").innerHTML = classesHtml(S, pool, wrote?.cls ?? null);
       q("[data-describe]").innerHTML = describe(S, pool, io);
       q<HTMLSelectElement>("[data-pick]").innerHTML = nodeOptions(S, pool, selected);
       for (const b of root.querySelectorAll<HTMLElement>("[data-opt]")) b.setAttribute("aria-pressed", String(opts[b.dataset.opt as "log"]));
@@ -194,11 +171,6 @@ const helpId = `vd-help-${lang}`;
       }
       for (const b of root.querySelectorAll<HTMLElement>("[data-rep]")) b.setAttribute("aria-disabled", String(!!canReplace(pool, selected, b.dataset.rep as "new")));
       q("[data-act='read']").setAttribute("aria-disabled", String(!last));
-      // Why the disabled replace buttons are disabled, each reason once.
-      const whys = new Set<string>((["new", "spare", "dspare"] as const).map((by) => canReplace(pool, selected, by)).filter((w) => w !== null));
-      if (!opts.special) whys.add("noSpecial");
-      if (!last) whys.add("noBlock");
-      q("[data-why]").textContent = [...whys].map((w) => S[`why_${w}` as keyof VdStrings]).join(" ");
       if (scene) scene.draw(pool, io, selected, animate && !reducedMotion());
       if (animate && !reducedMotion() && !is3d) {
         for (const el of root.querySelectorAll<SVGGraphicsElement>("[data-tree] .n.on, [data-tree] .edge.on")) {

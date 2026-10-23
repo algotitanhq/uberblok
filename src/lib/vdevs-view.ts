@@ -49,8 +49,11 @@ export function litMap(h: Hop | null): Map<string, { depth: number; sectors?: nu
   return m;
 }
 
-/** The tree as an indented SVG drawing, as zpool status lists it, with the last I/O lit. */
-export function treeSvg(S: VdStrings, p: Pool, h: Hop | null, selected: string | null): string {
+/**
+ * The tree as an indented SVG drawing, as zpool status lists it, with the last I/O lit.
+ * `hit`: the top-level vdevs that hold a copy of the last block, ringed, their count in the accent.
+ */
+export function treeSvg(S: VdStrings, p: Pool, h: Hop | null, selected: string | null, hit: string[] = []): string {
   const rows = walk(p);
   const lit = litMap(h);
   const y = (i: number) => 14 + i * ROW;
@@ -75,8 +78,10 @@ export function treeSvg(S: VdStrings, p: Pool, h: Hop | null, selected: string |
     const badge = l?.sectors !== undefined
       ? `<text class="sec" x="${x + tw + 6 + type.length * 6.4 + 10}" y="${y(i) + 4}">${l.role && l.role !== "skip" && l.role !== "spare" && !l.role.startsWith("DVA") ? `${esc(l.role)} ` : ""}${plural(S, l.sectors, "sector1", "sectorN")}</text>`
       : "";
-    const landed = top && counts.get(v.id) ? `<g class="landed"><rect x="${W - 34}" y="${y(i) - 8}" width="12" height="12" rx="2"/><text x="${W - 18}" y="${y(i) + 3}">${counts.get(v.id)}</text></g>` : "";
-    nodes += `<g class="n t-${v.type}${cls ? ` c-${cls}` : ""}${l ? " on" : ""}${v.id === selected ? " sel" : ""}" data-node="${esc(v.id)}" data-depth="${l?.depth ?? 0}">`
+    const isHit = top && hit.includes(v.id);
+    const landed = top && counts.get(v.id) ? `<g class="landed${isHit ? " last" : ""}"><rect x="${W - 34}" y="${y(i) - 8}" width="12" height="12" rx="2"/><text x="${W - 18}" y="${y(i) + 3}">${counts.get(v.id)}</text></g>` : "";
+    nodes += `<g class="n t-${v.type}${cls ? ` c-${cls}` : ""}${l ? " on" : ""}${v.id === selected ? " sel" : ""}${isHit ? " hit" : ""}" data-node="${esc(v.id)}" data-depth="${l?.depth ?? 0}">`
+      + (isHit ? `<rect class="ring" x="${x - 3}" y="${y(i) - 13}" width="${tw + 6}" height="26" rx="6"/>` : "")
       + `<rect x="${x}" y="${y(i) - 10}" width="${tw}" height="20" rx="4"/>`
       + (top ? `<rect class="bias" x="${x}" y="${y(i) - 10}" width="4" height="20" rx="1"/>` : "")
       + `<text class="nm" x="${x + 8}" y="${y(i) + 4}">${label}</text>`
@@ -108,7 +113,7 @@ const dvaText = (S: VdStrings, p: Pool, b: Block) =>
 /** The decision for a block: its class and why, then its DVAs. */
 export function decisionHtml(S: VdStrings, p: Pool, b: Block): string {
   const steps = b.decision.map((s, i) => `<li class="${i === b.decision.length - 1 ? "taken" : "pass"}">${stepLine(S, s)}</li>`).join("");
-  const copies = fill(S.copiesLine, { dvas: plural(S, COPIES[b.kind], "dva1", "dvaN"), why: S[`copies_${b.kind}`] }) + see(S, "copies");
+  const copies = fill(S.copiesLine, { dvas: plural(S, COPIES[b.kind], "copy1", "copyN"), why: S[`copies_${b.kind}`] }) + see(S, "copies");
   return `<ol class="path">${steps}<li class="taken">${cap(copies)} ${dvaText(S, p, b)}.${see(S, "ditto")}</li></ol>`;
 }
 
@@ -127,7 +132,7 @@ function hopLine(S: VdStrings, p: Pool, x: Hop): string {
 /** The I/O as a nested list, from the logical zio to the leaves. */
 export function walkHtml(S: VdStrings, p: Pool, b: Block, h: Hop, type: "write" | "read"): string {
   const sub = (x: Hop): string => `<li>${hopLine(S, p, x)}${x.kids.length ? `<ul>${x.kids.map(sub).join("")}</ul>` : ""}</li>`;
-  const head = fill(type === "write" ? S.walkWrite : b.dvas.length === 1 ? S.walkRead1 : S.walkRead, { dvas: plural(S, b.dvas.length, "dva1", "dvaN") }) + see(S, "logical");
+  const head = fill(type === "write" ? S.walkWrite : b.dvas.length === 1 ? S.walkRead1 : S.walkRead, { dvas: plural(S, b.dvas.length, "copy1", "copyN") }) + see(S, "logical");
   return `<p class="walk-head">${head}</p><ul class="walk">${h.kids.map(sub).join("")}</ul>`;
 }
 
@@ -146,16 +151,34 @@ export function lastHtml(S: VdStrings, p: Pool, io: LastIo | null): string {
   return `<p class="last-head" data-kind="${b.kind}" data-cls="${b.cls}" data-tops="${b.dvas.map((d) => d.top).join(",")}" data-io="${io.type}">${head}</p>${io.type === "write" ? decisionHtml(S, p, b) : ""}<h4>${S.walkTitle}</h4>${walkHtml(S, p, b, io.trace, io.type)}`;
 }
 
-/** The classes, their top-level vdevs, and how many blocks landed there. */
-export function classesHtml(S: VdStrings, p: Pool): string {
+/** The classes, their top-level vdevs, and how many blocks landed there; `hit`, the last block's class, is outlined. */
+export function classesHtml(S: VdStrings, p: Pool, hit: ClassName | null = null): string {
   const counts = new Map<ClassName, number>();
   for (const b of p.blocks) counts.set(b.cls, (counts.get(b.cls) ?? 0) + 1);
   const rows = (["normal", "log", "special", "dedup", "embedded_log", "special_embedded_log"] as ClassName[]).map((c) => {
     const vs = classVdevs(p, c);
-    return `<tr class="cl-${c}${vs.length ? "" : " empty"}"><th scope="row"><span class="sw sw-${c}" aria-hidden="true"></span>${clsName(S, c)}</th><td>${vs.length ? vs.map((id) => code(name(p, id))).join(", ") : S.noVdev}</td><td class="num">${counts.get(c) ?? 0}</td></tr>`;
+    return `<tr class="cl-${c}${vs.length ? "" : " empty"}${c === hit ? " hit" : ""}"><th scope="row"><span class="sw sw-${c}" aria-hidden="true"></span>${clsName(S, c)}</th><td>${vs.length ? vs.map((id) => code(name(p, id))).join(", ") : S.noVdev}</td><td class="num">${counts.get(c) ?? 0}</td></tr>`;
   }).join("");
   return `<table class="classes"><thead><tr><th scope="col">${S.thClass}</th><th scope="col">${S.thVdevs}</th><th scope="col">${S.thBlocks}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
+
+/** What each look of the tree means; the same from the start, so an action changes the drawing, never the key. */
+export function legendHtml(S: VdStrings): string {
+  const sw = (cls: string) => `<span class="lg-sw ${cls}" aria-hidden="true"></span>`;
+  const bias = (["normal", "log", "special", "dedup"] as ClassName[]).map((c) => `${sw(`lg-bias sw-${c}`)}${clsName(S, c)}`).join(" ");
+  const items = [
+    `${S.lg_bias}${S.colon}${bias}`,
+    `${sw("lg-path")}${S.lg_path}`,
+    `${sw("lg-hit")}${S.lg_hit}`,
+    `${sw("lg-count")}${S.lg_count}`,
+    `${sw("lg-sel")}${S.lg_sel}`,
+    `${sw("lg-rep")}${S.lg_rep}`,
+  ];
+  return `<p class="lg-title">${S.legendTitle}</p><ul class="vd-legend">${items.map((x) => `<li>${x}</li>`).join("")}</ul>`;
+}
+
+/** The top-level vdevs that hold a copy of a block. */
+export const topsOf = (b: Block | null | undefined) => (b ? [...new Set(b.dvas.map((d) => d.top))] : []);
 
 /** Hot spares and cache devices: beside the tree, not in it. */
 export function auxHtml(S: VdStrings, p: Pool): string {
@@ -214,7 +237,7 @@ export function nodeOptions(S: VdStrings, p: Pool, selected: string): string {
 export function dropLine(S: VdStrings, p: Pool, b: Block, h: Hop): string {
   const tops = [...new Set(b.dvas.map((d) => code(name(p, d.top))))];
   return cap(fill(S.sayDrop, {
-    kind: S[`k_${b.kind}`], cls: fill(S.clsOf, { cls: clsName(S, b.cls) }), dvas: plural(S, b.dvas.length, "dva1", "dvaN"),
+    kind: S[`k_${b.kind}`], cls: fill(S.clsOf, { cls: clsName(S, b.cls) }), dvas: plural(S, b.dvas.length, "copy1", "copyN"),
     tops: list(S, tops), disks: plural(S, new Set(leavesOf(h)).size, "disk1", "diskN"),
   }));
 }

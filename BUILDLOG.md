@@ -2095,3 +2095,58 @@ either). Counted in the built pages, EN, FR and ES alike: 22 GitHub links in the
 all 22 inside the Source notes; the 4 others on the page are the site header and footer.
 D22.1 cites ALG-182 by its bare id. `npm test` (241 pass), `npm run build`,
 `scripts/verify-tree.mjs` against the preview.
+
+## v1.4 RAID-Z room (ALG-187): a question, blocks one after another, a read one step per press
+
+**What changed.** The RAID-Z room, in EN, FR and ES, asks one question ("What happens when a
+disk in my RAID-Z fails?"), answers it in three plain paragraphs, keeps its two figures with
+what to try, then shows the code in five Source notes (D21.1, D23.1). In the map, the reader
+writes blocks of 4 to 128 KiB one after another and sees each stripe take its own width; the
+read of the last block goes one step per press, with the columns read, rebuilt, assumed wrong
+and written back marked on the map. The write-hole figure has four steps and a stepper. Five
+short excerpts are new in `ANALYSIS.md` (RAID-Z room, 6 to 10). The other rooms are unchanged,
+except the Engine room's computed excerpt count (120 → 125).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 47 | 25 |
+| of them in the prose | 25 | 0 |
+| in the figures | 11 | 0 |
+| in excerpts and Source notes | 11 | 25 |
+| Code excerpts | 5 | 5 |
+| Lines of code shown | 135 | 70 |
+
+**Proof.** `npm run build` (typography check included), `npm test` (240 pass),
+`check-permalinks` (ANALYSIS.md 125 excerpts, 927 line references; built site 2286),
+`check-sources` (156 references, 44 pages) and `check-csp` (44 pages, no new hash): all pass.
+Captures in Chromium at 1440 and 390 px (not committed, `shots/`): several blocks on the map,
+a missing child, a child returning bad data stepped through `combrec` to the repair, the
+write-hole stepper; 0 console errors.
+
+**Reviews.** `technical-writer` on the three languages (30 edits): four claims made precise
+(the RAID-Z code never modifies an old stripe when a block changes, though a repair does
+rewrite a column; after a disk dies only blocks with data on it read parity; the smallest
+block takes one disk plus one per parity level; a half-written stripe's space was never
+recorded as used), two staged sentences, glosses for stripe, scrub and resilver, French
+agreement in the figure strings, calques in FR and ES. Not taken: opening the answer with the
+failure (D21.1 puts the problem first). `code-reviewer` on the diff: focus lost when Back
+disables itself, labels hidden as soon as older blocks made the map tall, the write-hole live
+region read only the step number, Clear kept a start sector moved by scrolling, new steps
+below the fold: all fixed.
+
+**Design review fixes (2026-10-23).** Four SHOULDs from the design review, all in the map
+figure: the sentence explaining a write now sits under the size buttons; below 45rem the read
+panel is ordered around the map (damage, map, read buttons, newest step first, then the key),
+so one press and its effect on the map fit on a 390 px screen; the key gains "missing child"
+and "child returning bad data"; the read's first step says what each damaged child holds of
+the block, so damaging a parity-only child or a child with nothing of it explains why nothing
+is rebuilt. A line under the damage heading names the data and parity children. New unit
+tests: `scripts/test/raidz-view.test.mjs` (4 tests, including a full-width block and the
+raidz1 swap). `code-reviewer` on the fixes: no defect; its two suggestions taken (tests, the
+reversed step list noted in D23.1).
+
+**Verification.** `npm test` 244 pass; `npm run build` 44 pages, typography check 0 failures;
+`scripts/verify.mjs` on the whole visit at `b3ef3b5`: 457 captures, 0 console errors, every
+mismatch list empty.

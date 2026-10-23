@@ -2551,3 +2551,58 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   reduced motion), and the legend lists every state from the start, so a step changes the
   drawing and never the key. Caption sentences say "the dnode block" and "the objset"; the
   drawing keeps the short labels.
+
+## v1.4 RAID-Z room (ALG-187)
+
+### D23.1 The RAID-Z room as a question; blocks written one after another, a read one step per press
+
+- **Context.** Second room of the D21.1 roll-out ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 5 excerpts (135 lines of code) and 47 links to GitHub in each language, 25 of
+  them in the prose and 11 in the figure. The issue asks for a figure where the reader writes
+  blocks of different sizes and sees the stripe width follow them, then fails a disk and
+  watches the reconstruction, one step per action.
+- **Question.** "What happens when a disk in my RAID-Z fails?" (« Que se passe-t-il quand un
+  disque de mon RAID-Z lâche ? », « ¿Qué pasa cuando falla un disco de mi RAID-Z? »). The answer
+  keeps D21.1's order, the problem first (the RAID-5 write hole, which shows when a disk dies),
+  then the mechanism (one stripe per block, written to free space), then what happens on a
+  failure (parity rebuilds a missing disk, the parent's checksum finds a disk that lies). The
+  writing review suggested opening with the failure; D21.1's "problem first" wins.
+- **The map** (`RaidzMap`, improved, not rebuilt). The size buttons (4, 8, 32 and 128 KiB) write
+  a new block right after the last one, so the map holds several blocks: the live one in full,
+  numbered by sector, the earlier ones faded and labelled with their letter. Each press shows
+  one new stripe and its width; children the live block does not touch have a faint header.
+  The psize field still edits the live block, `b` is where block A starts, and parity, children
+  or ashift lay every block out again. Older blocks scroll off the top past 24 rows (and past
+  11 blocks, when `b` moves past the dropped one); labels hide only when the live block alone
+  is taller than 26 rows, as before. The counters of `vdev_raidz_map_alloc` move into a closed
+  `<details>`, with `b` added.
+- **The read.** "Read the last block" shows one step per press, from `readPlan()` in
+  `raidz-view.ts`: each step is a line and its marks on the map (columns read or used, columns
+  rebuilt from parity, children assumed wrong, columns written back), with a legend. Attempts
+  of `vdev_raidz_combrec` are one step each (the first 12 and the last 3, the others in one
+  line), and "Skip to the result" shows the rest. The read panel sits beside the map from about
+  1000 px of figure width, so a step's marks stay in view; below that it wraps under the map. A
+  visually hidden live region reads each new step once. The model (`raidz.ts`) is unchanged.
+- **The write hole** (`WriteHole`). Four steps instead of three: the reboot and the disk failure
+  are now separate, and the RAID-Z side gets its own disk failure, where A1 is rebuilt right.
+  With script, Back and Next step through both sides at once and the live region reads the two
+  new captions; without script every step shows, as before.
+- **No code links in the figures.** The readout's "code" links and the read's links are gone;
+  D21.1 keeps GitHub links in Source notes, and the five notes carry them (25 per language).
+- **Code.** Five Source notes, 70 lines (`ANALYSIS.md` RAID-Z room, excerpts 6 to 10: short
+  cuts of excerpts 1, 2, 3 and 5, and the read row, checked against `zfs-2.4.4`). The "three
+  depths" section is gone: its sentence and paragraph repeated the answer, and its detail is
+  in the notes. The raidz1 parity swap and RAID-Z expansion move to "What the figures leave
+  out".
+- **Rejected.** A per-child button on the map to fail a disk: the map is one `role="img"`, and
+  buttons inside it would be hidden from screen readers; the per-child selects stay. Animating
+  the read on a timer, as before: the issue asks for one step per action, and a timer cannot be
+  read at the reader's pace. Placing blocks where a real metaslab would: the allocator is
+  another room; consecutive blocks show the widths without it.
+- **Design review fixes (2026-10-23).** The sentence that explains a write sits right under the
+  size buttons, where the eye already is. Below 45rem the read panel's parts are ordered around
+  the map (damage, map, read buttons, newest step, older steps, key), so one press and its effect
+  fit on a phone screen; the step list shows newest first there (`column-reverse`), while screen
+  readers keep the oldest-first order and the live region announces each new step. The key
+  gains the two damage states, and the first read step says what each damaged child holds of
+  the block, so damaging a parity-only or empty child explains why nothing is rebuilt.

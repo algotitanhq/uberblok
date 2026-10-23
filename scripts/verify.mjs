@@ -421,15 +421,15 @@ for (const lang of ["en", "fr"]) {
 // the write, a read with damaged children, reduced motion, keyboard only.
 const RZ = PAGES.find((p) => p.id === "raidz");
 const RL = {
-  en: { write: "Write the block", read: "Read the block", bad: "returns bad data", missing: "missing" },
-  fr: { write: "Écrire le bloc", read: "Lire le bloc", bad: "données fausses", missing: "absent" },
+  en: { read: "Read the last block", finish: "Skip to the result", bad: "returns bad data", missing: "missing" },
+  fr: { read: "Lire le dernier bloc", finish: "Aller au résultat", bad: "données fausses", missing: "absent" },
 };
 const rzState = (page) =>
   page.evaluate(() => {
     const f = document.querySelector("[data-raidz]");
     const dl = Object.fromEntries([...f.querySelectorAll(".rz-readout > div")].map((d) => [d.querySelector("dt").textContent, d.querySelector("strong").textContent]));
     const roles = [...f.querySelectorAll(".rz-grid .role")].map((r) => r.textContent).join(" ");
-    return { dl, roles, summary: f.querySelector("[data-summary]").textContent, result: f.querySelector("[data-result]").textContent.slice(0, 160) };
+    return { dl, roles, summary: f.querySelector("[data-summary]").textContent, blocks: f.querySelectorAll(".rz-grid .cell[data-block]").length, result: (f.querySelector("[data-steps] li.result")?.textContent ?? "").slice(0, 160) };
   });
 async function setInputs(page, v) {
   const f = page.locator("[data-raidz]");
@@ -450,9 +450,12 @@ for (const lang of ["en", "fr"]) {
     };
     const r = {};
     r.default = await rzState(page);
-    await fig.getByRole("button", { name: L.write, exact: true }).click();
-    await page.waitForTimeout(700);
+    // Write three blocks of different sizes after block A: each takes its own width.
+    for (const n of [4096, 131072, 8192]) await fig.locator(`[data-size="${n}"]`).click();
+    await page.waitForTimeout(1600);
+    r.written = await rzState(page);
     await shot(`raidz-${lang}-${vp}-writing.png`);
+    await fig.getByRole("button", { name: lang === "en" ? "Clear the disks" : "Vider les disques", exact: true }).click();
     await setInputs(page, { nparity: 2, dcols: 12, psize: 8192, ashift: 12, b: 0 });
     r.wideSmall = await rzState(page);
     await shot(`raidz-${lang}-${vp}-wide-raidz2-8k.png`);
@@ -464,13 +467,15 @@ for (const lang of ["en", "fr"]) {
     await hs.nth(0).selectOption("corrupt");
     await hs.nth(3).selectOption("corrupt");
     await fig.getByRole("button", { name: L.read, exact: true }).click();
-    await page.waitForFunction(() => document.querySelector("[data-raidz] [data-result]")?.textContent?.length > 0, null, { timeout: 30000 });
+    await fig.getByRole("button", { name: L.finish, exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("[data-raidz] [data-steps] li.result"), null, { timeout: 30000 });
     r.corrupt = await rzState(page);
     await shot(`raidz-${lang}-${vp}-reconstruction.png`);
     await fig.getByRole("button", { name: lang === "en" ? "Heal all" : "Tout réparer", exact: true }).click();
     await hs.nth(3).selectOption("missing");
     await fig.getByRole("button", { name: L.read, exact: true }).click();
-    await page.waitForFunction(() => document.querySelector("[data-raidz] [data-result]")?.textContent?.length > 0, null, { timeout: 30000 });
+    await fig.getByRole("button", { name: L.finish, exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("[data-raidz] [data-steps] li.result"), null, { timeout: 30000 });
     r.missing = await rzState(page);
     await shot(`raidz-${lang}-${vp}-missing-resilver.png`);
     report.raidz[`${lang}-${vp}`] = r;
@@ -480,12 +485,13 @@ for (const lang of ["en", "fr"]) {
 {
   const { ctx, page } = await open({ ...VIEWPORTS.iphone, reducedMotion: "reduce" }, RZ.en);
   const fig = page.locator("[data-raidz]");
-  await fig.getByRole("button", { name: "Write the block", exact: true }).click();
+  await fig.locator('[data-size="32768"]').click();
   const pending = await page.evaluate(() => document.querySelectorAll("[data-raidz] .cell.pending").length);
   await fig.locator("[data-health] select").nth(2).selectOption("corrupt");
   const t0 = Date.now();
-  await fig.getByRole("button", { name: "Read the block", exact: true }).click();
-  await page.waitForFunction(() => document.querySelector("[data-raidz] [data-result]")?.textContent?.length > 0);
+  await fig.getByRole("button", { name: "Read the last block", exact: true }).click();
+  await fig.getByRole("button", { name: "Skip to the result", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("[data-raidz] [data-steps] li.result"));
   report.reducedMotion.raidz = { pendingAfterWrite: pending, readMs: Date.now() - t0, running: await page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length) };
   await page.screenshot({ path: join(out, "raidz-en-iphone-reduced-motion.png"), fullPage: true });
   report.captures.push("raidz-en-iphone-reduced-motion.png");
@@ -546,8 +552,12 @@ for (const lang of ["en", "fr"]) {
   drive.health = await tabTo(() => document.activeElement?.matches?.("[data-raidz] [data-health] select"));
   await page.keyboard.press("ArrowDown"); // child 0 -> missing
   drive.read = await tabTo((l) => document.activeElement?.closest?.("[data-raidz]") && document.activeElement.textContent.trim() === l, L.read);
-  await page.keyboard.press("Enter");
-  await page.waitForFunction(() => document.querySelector("[data-raidz] [data-result]")?.textContent?.length > 0, null, { timeout: 30000 });
+  await page.keyboard.press("Enter"); // the first step
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => document.querySelector("[data-raidz] [data-steps] li.result"))) break;
+    await page.keyboard.press("Enter"); // Next step, on the same button
+  }
+  await page.waitForFunction(() => document.querySelector("[data-raidz] [data-steps] li.result"), null, { timeout: 30000 });
   drive.state = await rzState(page);
   if (lang === "en") {
     await page.screenshot({ path: join(out, "raidz-en-desktop-keyboard.png") });

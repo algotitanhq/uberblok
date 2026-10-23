@@ -184,6 +184,13 @@ test("the figures carry no link: the room's Source notes show the code (D21.1)",
   }
 });
 
+test("the limit label names the seven eighths only when rounding moves the limit", () => {
+  const S = strings("en");
+  const label = (x) => V.compressBars(S, x, M.compress(x)).match(/<span class="lim">([^<]*)<\/span>/)[1];
+  assert.equal(label({ lsize: 131072, ashift: 12, algo: "lz4", zero: false, out: 1000 }), "limit 112 KiB");
+  assert.match(label({ lsize: 16384, ashift: 13, algo: "lz4", zero: false, out: 1000 }), /^limit 8 KiB, rounded down to a sector \(dashed: seven eighths before rounding, 14 KiB\)$/);
+});
+
 test("compression: each action outlines what it changed, and only that", () => {
   const S = strings("en");
   const x0 = { lsize: 131072, ashift: 12, algo: "lz4", zero: false, out: V.presetOut("text", 131072) };
@@ -223,10 +230,14 @@ test("dedup: a miss, a hit, the quota and an over-quota write each outline their
   // A hit: the entry's refcount and a block pointer; nothing on disk; one more write and one more lookup.
   const s2 = w(s1, "A", false);
   const c2 = V.dedupChanges(s1, s2, false, false);
-  assert.deepEqual(c2, { entry: "A", bp: true, disk: null, counters: ["write", "lookup"], quota: false });
+  // The block it reuses is outlined too: its list of references grew.
+  assert.deepEqual(c2, { entry: "A", bp: true, disk: s1.disk[0].dva, counters: ["write", "lookup"], quota: false });
   const h2 = V.dedupView(S, s2, false, c2);
   assert.equal((h2.match(/<tr class="chg"/g) ?? []).length, 1);
-  assert.equal((h2.match(/<li class="chg"/g) ?? []).length, 1);
+  assert.equal((h2.match(/<li class="chg"/g) ?? []).length, 2);
+  assert.match(h2, /<li class="chg"><code>[^<]*<\/code><span class="ct ct-A">A<\/span><span class="refs">referenced by bp0, bp1/);
+  // Once the line under the buttons says the write, the figure's last step is its first words.
+  assert.match(V.dedupView(S, s2, false, c2, true), new RegExp(`<li class="taken">${S.ds_hit}</li>`));
   // An outlined row or item is also said to a screen reader.
   assert.match(h2, /<tr class="chg"><td><code>[^<]*<\/code><span class="visually-hidden"> \(changed\)<\/span>/);
   // Lifting the quota outlines nothing: the note is gone.
@@ -256,6 +267,14 @@ test("encryption: each action on the file outlines what it changed", () => {
   const sc = V.cryptFileView(S, f, { key: true, flip: false, scrub: M.scrub(f), read: null }, V.cryptChanges("scrub"));
   assert.equal(n(sc, /class="sc ok chg"/g), 5);
   const rd = V.cryptFileView(S, f, { key: false, flip: false, scrub: null, read: V.readAll(f, false) }, V.cryptChanges("read"));
-  assert.match(rd, /class="readout bad chg"/);
+  // A failed read is marked on the block where it stopped, and nothing repeats the line under the buttons.
+  assert.match(rd, /<li class="dat"><div class="bhead"><span class="bname">data block 0<\/span>[\s\S]*?<span class="rd bad chg">/);
+  assert.doesNotMatch(rd, /readout/);
+  assert.equal(n(rd, / chg"/g), 1);
+  // A scrub after a flipped bit outlines only the checksum that failed.
+  const ff = { ...f, data: [f.data[0], M.flipped(f.data[1]), f.data[2]] };
+  const scf = V.cryptFileView(S, ff, { key: true, flip: true, scrub: M.scrub(ff), read: null }, V.cryptChanges("scrub"));
+  assert.equal(n(scf, / chg"/g), 1);
+  assert.match(scf, /class="sc bad chg"/);
   assert.equal(n(V.cryptFileView(S, f, { key: true, flip: false, scrub: null, read: null }), / chg"/g), 0);
 });

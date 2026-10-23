@@ -74,18 +74,21 @@ const L = {
           ZFS writes files in blocks, 128 KiB by default, and a disk stores them in whole sectors of 512 bytes or
           4 KiB. Before a block is written, three optional features act on it, in this order: compression,
           encryption, then deduplication. ZFS keeps a block compressed only if that saves at least an eighth of it,
-          counted in whole sectors; otherwise it stores the block as it is. With compression on, a block of zeros is not written at all, and a block that compresses to 112 bytes or less can go inside its block pointer. A block pointer is the small record a parent block keeps for each child, with the child’s address, size and checksum.
+          counted in whole sectors; otherwise it stores the block as it is.
         </p>
         <p>
-          Deduplication avoids writing a block that is already on disk. With dedup on, ZFS looks the checksum of every
-          block up in a table, the dedup table. If the checksum is there, the new block pointer takes the address of the copy on
-          disk, a reference count goes up, and nothing is written. If it is not, the block is written and a new entry
-          records its address. The price is a lookup on every write, duplicate or not, and a table that grows with the
-          data and has to be updated on disk.
+          Deduplication avoids writing a block that is already on disk. ZFS looks the checksum of every block up in
+          a table, the dedup table. On a match, the new block pointer (the record a parent block keeps of each
+          child’s address and checksum) takes the address of the copy on disk, and a reference count goes up.
+          Otherwise the block is written and gets an entry. The price is a lookup on every write and a
+          table that grows with the data.
         </p>
         <p>
-          To encrypt a block, ZFS needs a salt and an initialization vector (IV), two values that make each block’s encryption different. It also computes a message authentication code (MAC), which proves that the block was not altered. ZFS stores the three in the block pointer, in the place of the third copy’s address and of half of the checksum, with a few bits in a counter that a data block does not need. The other half is a checksum of the encrypted bytes,
-          so a scrub can check every block for damage without the key.
+          To encrypt a block, ZFS uses a salt and an initialization vector (IV), two values that make each block’s
+          encryption different, and computes a message authentication code (MAC), which proves that the block was not
+          altered. All three go in the block pointer, in the place of the third copy’s address, half of the checksum
+          and a few spare bits. The other half is a checksum of the encrypted bytes, so a scrub can check every block
+          without the key.
         </p>
       </div>
     </header>
@@ -101,7 +104,9 @@ const L = {
         <p>
           With compressible data, the output stays under the limit, the solid line at seven eighths of the block
           rounded down to a sector, and the block takes fewer sectors on disk. Already compressed data goes over the
-          limit and is stored as it is. All zeros makes a hole, and almost empty data fits in the block pointer.
+          limit and is stored as it is. With compression on, a block of zeros is not written at all: All zeros
+          makes a hole. A block that compresses to 112 bytes or less goes inside its block pointer instead of on
+          disk: try Almost empty.
         </p>
         <p>
           Then choose a 4 KiB block on 4 KiB sectors. Seven eighths of one sector rounds down to nothing, so the block
@@ -142,7 +147,7 @@ const L = {
         </p>
         <p>
           On the right is a small encrypted file: its dnode block, which describes the file, an indirect block that
-          points to the data, and three data blocks. Press Key loaded to unload the key: the data shows as ciphertext. Scrub: every
+          points to the data, and three data blocks. Press Unload the key: the data shows as ciphertext. Scrub: every
           block still passes. Read the file: the read fails at the first data block, which cannot be decrypted. Flip a
           bit, then scrub again: the damaged block is caught, with or without the key.
         </p>

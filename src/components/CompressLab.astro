@@ -109,7 +109,8 @@ const id = `cl-out-${lang}`;
       if (announce) before = { ...x };
       q("[data-bars]").innerHTML = compressBars(S, x, r, c);
       q("[data-path]").innerHTML = compressPath(S, x, r, c);
-      q("[data-result]").innerHTML = compressResult(S, x, r, c);
+      // Once the line under the controls says the sentence, the figure keeps only the outcome's name.
+      q("[data-result]").innerHTML = compressResult(S, x, r, c, !q("[data-now]").hidden || announce);
       q("[data-table]").innerHTML = compressTable(S, x);
       q("[data-describe]").innerHTML = compressLine(S, x, r);
       controls();
@@ -221,7 +222,8 @@ const id = `cl-out-${lang}`;
     display: grid;
     grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
     gap: var(--space-4);
-    align-items: start;
+    /* The branches' panel is as tall as the result's beside it. */
+    align-items: stretch;
   }
   .cl-grid > :first-child {
     grid-column: 1 / -1;
@@ -314,7 +316,7 @@ const id = `cl-out-${lang}`;
   }
   .panel :global(.path) {
     margin: 0;
-    padding-left: 1.4em;
+    padding-left: 0;
     display: grid;
     gap: var(--space-2);
     font-size: var(--step--1);
@@ -324,9 +326,6 @@ const id = `cl-out-${lang}`;
   }
   .panel :global(.path li.taken) {
     font-weight: 600;
-  }
-  .panel :global(.path li.taken::marker) {
-    color: var(--accent);
   }
   .result :global(.outcome) {
     margin: 0 0 var(--space-2);

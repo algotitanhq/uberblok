@@ -72,22 +72,23 @@ const L = {
       <div class="prose answer">
         <p class="lead">
           ZFS escribe los archivos en bloques, de 128 KiB por defecto, y un disco los guarda en sectores enteros de 512
-          bytes o de 4 KiB. Antes de escribir un bloque, tres funcionalidades opcionales actúan sobre él, en este orden: la
-          compresión, el cifrado y la deduplicación. ZFS solo guarda un bloque comprimido si así ahorra al menos un
-          octavo de su tamaño, contado en sectores enteros; si no, lo guarda tal cual. Con la compresión activada, un
-          bloque de ceros no se escribe, y un bloque que se comprime a 112 bytes o menos puede caber en su puntero de bloque. Un puntero de bloque es la pequeña ficha que un bloque padre guarda para cada hijo, con su dirección, su tamaño y su suma de comprobación.
+          bytes o de 4 KiB. Antes de escribir un bloque, tres funcionalidades opcionales actúan sobre él, en este
+          orden: la compresión, el cifrado y la deduplicación. ZFS solo guarda un bloque comprimido si así ahorra al
+          menos un octavo de su tamaño, contado en sectores enteros; si no, lo guarda tal cual.
         </p>
         <p>
-          La deduplicación evita escribir un bloque que ya está en el disco. Cuando está activada, ZFS busca la suma de
-          comprobación de cada bloque en una tabla, la tabla de deduplicación. Si la encuentra, el nuevo puntero de
-          bloque toma la dirección de la copia que ya está en el disco, un contador de referencias sube y no se escribe
-          nada. Si no, el bloque se escribe y una entrada nueva anota su dirección. El precio es una búsqueda en cada
-          escritura, haya duplicado o no, y una tabla que crece con los datos y que hay que mantener al día en el disco.
+          La deduplicación evita escribir un bloque que ya está en el disco. ZFS busca la suma de comprobación de cada
+          bloque en una tabla, la tabla de deduplicación. Si la encuentra, el nuevo puntero de bloque (la ficha
+          donde un bloque padre anota la dirección y la suma de comprobación de cada hijo) toma la dirección de la
+          copia existente, y un contador de referencias sube. Si no, el bloque se escribe y recibe una
+          entrada. El precio es una búsqueda en cada escritura y una tabla que crece con los datos.
         </p>
         <p>
-          Para cifrar un bloque, ZFS necesita una sal y un vector de inicialización (IV), dos valores que hacen distinto el cifrado de cada bloque. También calcula un código de autenticación (MAC), que demuestra que el bloque no se ha modificado. ZFS guarda los tres en el puntero de bloque, en lugar de la dirección de la tercera copia y de la mitad de la suma de comprobación, con unos pocos bits en un contador que un bloque de datos no necesita. La
-          otra mitad es una suma de comprobación de los bytes cifrados, así que un scrub puede revisar cada bloque sin
-          la clave.
+          Para cifrar un bloque, ZFS usa una sal y un vector de inicialización (IV), dos valores que hacen distinto el
+          cifrado de cada bloque, y calcula un código de autenticación (MAC), que demuestra que el bloque no se ha
+          modificado. Los tres van en el puntero de bloque, en lugar de la dirección de la tercera copia, de la mitad
+          de la suma de comprobación y de unos bits libres. La otra mitad cubre los bytes cifrados, así que un scrub
+          puede revisar cada bloque sin la clave.
         </p>
       </div>
     </header>
@@ -102,8 +103,9 @@ const L = {
         <p>
           Con datos comprimibles, la salida queda bajo el límite, la línea continua a siete octavos del bloque
           redondeados al sector inferior, y el bloque ocupa menos sectores en el disco. Los datos ya comprimidos superan
-          el límite y el bloque se guarda tal cual. Solo ceros da un hueco, y unos datos casi vacíos caben en el
-          puntero de bloque.
+          el límite y el bloque se guarda tal cual. Con la compresión activada, un bloque de ceros no se escribe: Solo
+          ceros da un hueco. Un bloque que se comprime a 112 bytes o menos va dentro de su puntero de bloque en lugar
+          de ir al disco: prueba Casi vacíos.
         </p>
         <p>
           Elige después un bloque de 4 KiB con sectores de 4 KiB. Siete octavos de un sector, redondeados al sector
@@ -145,7 +147,7 @@ const L = {
         </p>
         <p>
           A la derecha, un pequeño archivo cifrado: su bloque de dnodes, que describe el archivo, un bloque indirecto
-          que apunta a los datos y tres bloques de datos. Pulsa «Clave cargada» para descargar la clave: los datos se ven cifrados. Haz un scrub: todos los bloques siguen pasando la comprobación. Lee el archivo: la lectura falla en el primer bloque de datos, que no se
+          que apunta a los datos y tres bloques de datos. Pulsa «Descargar la clave»: los datos se ven cifrados. Haz un scrub: todos los bloques siguen pasando la comprobación. Lee el archivo: la lectura falla en el primer bloque de datos, que no se
           puede descifrar. Invierte un bit y repite el scrub: el bloque dañado aparece, con clave o sin ella.
         </p>
       </div>

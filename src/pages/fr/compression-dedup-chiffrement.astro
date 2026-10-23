@@ -72,22 +72,23 @@ const L = {
       <div class="prose answer">
         <p class="lead">
           ZFS écrit les fichiers par blocs, de 128 Kio par défaut, et un disque les range en secteurs entiers de
-          512 octets ou de 4 Kio. Avant qu’un bloc soit écrit, trois fonctionnalités facultatives agissent sur lui, dans cet
-          ordre : la compression, le chiffrement, puis la déduplication. ZFS ne garde un bloc compressé que si cela
-          économise au moins un huitième de sa taille, compté en secteurs entiers ; sinon, il le range tel quel. Avec la
-          compression active, un bloc de zéros n’est pas écrit du tout, et un bloc qui se compresse en 112 octets ou
-          moins peut tenir dans son pointeur de bloc. Un pointeur de bloc est la petite fiche qu’un bloc parent garde pour chaque enfant, avec son adresse, sa taille et sa somme de contrôle.
+          512 octets ou de 4 Kio. Avant qu’un bloc soit écrit, trois fonctionnalités facultatives agissent sur lui,
+          dans cet ordre : la compression, le chiffrement, puis la déduplication. ZFS ne garde un bloc compressé que
+          si cela économise au moins un huitième de sa taille, compté en secteurs entiers ; sinon, il le range tel quel.
         </p>
         <p>
-          La déduplication évite d’écrire un bloc qui est déjà sur le disque. Quand elle est active, ZFS cherche la
-          somme de contrôle de chaque bloc dans une table, la table de déduplication. S’il l’y trouve, le nouveau
-          pointeur de bloc prend l’adresse de la copie déjà écrite, un compteur de références augmente, et rien n’est
-          écrit. Sinon, le bloc est écrit et une nouvelle entrée note son adresse. Le prix, c’est une recherche à chaque
-          écriture, doublon ou non, et une table qui grossit avec les données et qu’il faut tenir à jour sur le disque.
+          La déduplication évite d’écrire un bloc déjà présent sur le disque. ZFS cherche la somme de contrôle de
+          chaque bloc dans une table, la table de déduplication. S’il l’y trouve, le nouveau pointeur de bloc (la
+          fiche où un bloc parent note l’adresse et la somme de contrôle de chaque enfant) reprend l’adresse de la
+          copie existante, et un compteur de références augmente. Sinon, le bloc est écrit et
+          reçoit une entrée. Le prix : une recherche à chaque écriture et une table qui grossit avec les données.
         </p>
         <p>
-          Pour chiffrer un bloc, ZFS a besoin d’un sel et d’un vecteur d’initialisation (IV), deux valeurs qui rendent le chiffrement de chaque bloc différent. Il calcule aussi un code d’authentification (MAC), qui prouve que le bloc n’a pas été modifié. ZFS range les trois dans le pointeur de bloc, à la place de l’adresse de la troisième copie et de la moitié de la somme de contrôle, avec quelques bits dans un compteur dont un bloc de données n’a pas besoin. L’autre moitié est une somme de contrôle des octets chiffrés : un scrub peut donc vérifier
-          chaque bloc sans la clé.
+          Pour chiffrer un bloc, ZFS utilise un sel et un vecteur d’initialisation (IV), deux valeurs qui rendent le
+          chiffrement de chaque bloc différent, et calcule un code d’authentification (MAC), qui prouve que le bloc
+          n’a pas été modifié. Les trois vont dans le pointeur de bloc, à la place de l’adresse de la troisième copie,
+          d’une moitié de la somme de contrôle et de quelques bits libres. L’autre moitié porte sur les octets
+          chiffrés : un scrub peut donc vérifier chaque bloc sans la clé.
         </p>
       </div>
     </header>
@@ -103,8 +104,9 @@ const L = {
         <p>
           Avec des données compressibles, la sortie reste sous la limite, le trait plein à sept huitièmes du bloc
           arrondis au secteur inférieur, et le bloc prend moins de secteurs sur le disque. Des données déjà compressées
-          dépassent la limite et le bloc est rangé tel quel. Que des zéros donne un trou, et des données presque vides
-          tiennent dans le pointeur de bloc.
+          dépassent la limite et le bloc est rangé tel quel. Avec la compression active, un bloc de zéros n’est pas
+          écrit du tout : Que des zéros donne un trou. Un bloc qui se compresse en 112 octets ou moins va dans son
+          pointeur de bloc plutôt que sur le disque : essayez Presque vides.
         </p>
         <p>
           Choisissez ensuite un bloc de 4 Kio sur des secteurs de 4 Kio. Sept huitièmes d’un secteur, arrondis au
@@ -146,7 +148,7 @@ const L = {
         </p>
         <p>
           À droite, un petit fichier chiffré : son bloc de dnodes, qui décrit le fichier, un bloc indirect qui pointe
-          vers les données, et trois blocs de données. Désactivez « Clé chargée » pour décharger la clé : les données s’affichent chiffrées. Lancez un
+          vers les données, et trois blocs de données. Appuyez sur « Décharger la clé » : les données s’affichent chiffrées. Lancez un
           scrub : chaque bloc passe encore. Lisez le fichier : la lecture échoue au premier bloc de données, qui ne
           peut pas être déchiffré. Inversez un bit, puis relancez le scrub : le bloc abîmé est repéré, avec ou sans la
           clé.

@@ -48,7 +48,7 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
       <h3>{S.fileLabel}</h3>
       <div class="tr-bar" hidden>
         <div class="buttons">
-          <button class="btn" type="button" data-key aria-pressed="true">{S.keyBtn}</button>
+          <button class="btn" type="button" data-key>{S.keyUnload}</button>
           <button class="btn btn--primary" type="button" data-act="scrub">{S.scrubBtn}</button>
           <button class="btn" type="button" data-act="read">{S.readBtn}</button>
           <button class="btn btn--danger" type="button" data-flip aria-pressed="false">{S.flipBtn}</button>
@@ -109,7 +109,8 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
     // What the last action on the file changed: outlined until the next action.
     function renderFile(c: CryptChanges = NO_CRYPT_CHANGES) {
       q("[data-file]").innerHTML = cryptFileView(S, file(), ui, c);
-      q("[data-key]").setAttribute("aria-pressed", String(ui.key));
+      // The button names what it does next, so it never contradicts the key's state above the file.
+      q("[data-key]").textContent = ui.key ? S.keyUnload : S.keyLoad;
       q("[data-flip]").setAttribute("aria-pressed", String(ui.flip));
       if (!reducedMotion()) for (const el of root.querySelectorAll<HTMLElement>("[data-file] .sc, [data-file] .readout")) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: "ease-out" });
     }

@@ -27,9 +27,9 @@ const trModel = await import("../src/lib/transforms.ts");
 export const TRP = { id: "transforms", en: "/en/compression-dedup-encryption/", fr: "/fr/compression-dedup-chiffrement/", es: "/es/compresion-dedup-cifrado/" };
 
 const TRL = {
-  en: { comp: "Compressible", rnd: "Already compressed", zero: "All zeros", tiny: "Almost empty", quota: "Dedup table over its quota", key: "Key loaded", scrub: "Scrub", read: "Read the file", enc: "an encrypted data block", ind: "an indirect block", flip: "Flip a bit in data block 1 on disk" },
-  fr: { comp: "Compressibles", rnd: "Déjà compressées", zero: "Que des zéros", tiny: "Presque vides", quota: "Table de déduplication au-dessus de son quota", key: "Clé chargée", scrub: "Scrub", read: "Lire le fichier", enc: "d’un bloc de données chiffré", ind: "d’un bloc indirect", flip: "Inverser un bit du bloc de données 1 sur disque" },
-  es: { comp: "Comprimibles", rnd: "Ya comprimidos", zero: "Solo ceros", tiny: "Casi vacíos", quota: "Tabla de deduplicación por encima de su cuota", key: "Clave cargada", scrub: "Hacer un scrub", read: "Leer el archivo", enc: "un bloque de datos cifrado", ind: "un bloque indirecto", flip: "Invertir un bit del bloque de datos 1 en el disco" },
+  en: { comp: "Compressible", rnd: "Already compressed", zero: "All zeros", tiny: "Almost empty", quota: "Dedup table over its quota", key: "Unload the key", keyLoad: "Load the key", scrub: "Scrub", read: "Read the file", enc: "an encrypted data block", ind: "an indirect block", flip: "Flip a bit in data block 1 on disk" },
+  fr: { comp: "Compressibles", rnd: "Déjà compressées", zero: "Que des zéros", tiny: "Presque vides", quota: "Table de déduplication au-dessus de son quota", key: "Décharger la clé", keyLoad: "Charger la clé", scrub: "Scrub", read: "Lire le fichier", enc: "d’un bloc de données chiffré", ind: "d’un bloc indirect", flip: "Inverser un bit du bloc de données 1 sur disque" },
+  es: { comp: "Comprimibles", rnd: "Ya comprimidos", zero: "Solo ceros", tiny: "Casi vacíos", quota: "Tabla de deduplicación por encima de su cuota", key: "Descargar la clave", keyLoad: "Cargar la clave", scrub: "Hacer un scrub", read: "Leer el archivo", enc: "un bloque de datos cifrado", ind: "un bloque indirecto", flip: "Invertir un bit del bloque de datos 1 en el disco" },
 };
 const TR_OUT = { text: (l) => Math.round(l * 0.38), random: (l) => l + 64, tiny: () => 90 };
 
@@ -46,7 +46,8 @@ const trRead = (page) => page.evaluate(() => {
     disk: d.querySelectorAll(".disk li").length,
     diff: [...e.querySelectorAll("[data-words] tr.diff th")].map((th) => th.textContent),
     scrub: [...e.querySelectorAll("[data-file] .sc")].map((x) => x.classList.contains("ok")),
-    readout: e.querySelector("[data-file] .readout")?.textContent ?? "",
+    readout: (e.querySelector("[data-file] .readout")?.textContent ?? "") + (e.querySelector("[data-file] .rd")?.textContent ?? ""),
+    keyBtn: e.querySelector("button[data-key]").textContent.trim(),
     plainShown: e.querySelectorAll("[data-file] .plain").length,
     live: [...document.querySelectorAll("[aria-live]")].map((x) => x.textContent.trim()).filter(Boolean),
   };
@@ -100,14 +101,17 @@ export async function verifyTransforms({ browser, open, base, out, report, VIEWP
       // One action in each figure, one outlined effect: all zeros; A written again (a hit); the key unloaded.
       await cl.getByRole("button", { name: L.zero, exact: true }).click();
       await dd.locator('button[data-write="A"]').click();
-      await cr.getByRole("button", { name: L.key }).click();
+      await cr.locator("button[data-key]").click();
       const o = await trOutlines(page);
       report.transforms.outlines[`${lang}-${vp}`] = o;
-      if (o.compress.rows !== 3 || o.compress.branch !== 1 || o.compress.outcome !== 1 || o.dedup.rows.join() !== "A" || o.dedup.bps !== 1 || o.dedup.disk !== 0 || o.dedup.counters.join() !== "write,lookup" || o.crypt.blocks !== 4 || o.crypt.key !== 1 || o.links.some(Boolean) || !o.lineUnderButtons.every(Boolean))
+      // The key button names its next action, so it never contradicts the key's state.
+      const kb = (await trRead(page)).keyBtn;
+      if (kb !== L.keyLoad) bad(`${lang}-${vp}-key-button`, { kb });
+      if (o.compress.rows !== 3 || o.compress.branch !== 1 || o.compress.outcome !== 1 || o.dedup.rows.join() !== "A" || o.dedup.bps !== 1 || o.dedup.disk !== 1 || o.dedup.counters.join() !== "write,lookup" || o.crypt.blocks !== 4 || o.crypt.key !== 1 || o.links.some(Boolean) || !o.lineUnderButtons.every(Boolean))
         bad(`${lang}-${vp}`, { k: "outline after one action per figure", o });
       await shot(dd, `transforms-${lang}-${vp}-dedup-hit.png`);
       await shot(cr, `transforms-${lang}-${vp}-key-off.png`);
-      await cr.getByRole("button", { name: L.key }).click();
+      await cr.locator("button[data-key]").click();
       // Compression: four data at two ashifts, each against the model.
       for (const [lsize, ashift] of [[131072, 12], [131072, 9], [4096, 12], [4096, 9]]) {
         await cl.locator(`button[data-lsize="${lsize}"]`).click();
@@ -146,7 +150,7 @@ export async function verifyTransforms({ browser, open, base, out, report, VIEWP
       await shot(dd, `transforms-${lang}-${vp}-dedup.png`);
       // Encryption: the encrypted bp, the key unloaded, scrub, read; then a flipped bit.
       await cr.getByRole("button", { name: L.enc }).click();
-      await cr.getByRole("button", { name: L.key }).click();
+      await cr.locator("button[data-key]").click();
       await cr.getByRole("button", { name: L.scrub, exact: true }).click();
       const s1 = await trRead(page);
       await cr.getByRole("button", { name: L.read }).click();
@@ -170,7 +174,7 @@ export async function verifyTransforms({ browser, open, base, out, report, VIEWP
     await page.locator("[data-compress]").getByRole("button", { name: "All zeros" }).click();
     await page.locator('[data-dedup] button[data-write="B"]').click();
     await page.locator("[data-crypt]").getByRole("button", { name: "an indirect block" }).click();
-    await page.locator("[data-crypt]").getByRole("button", { name: "Key loaded" }).click();
+    await page.locator("[data-crypt] button[data-key]").click();
     const o = await trOutlines(page);
     report.reducedMotion.transforms = { running: await page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length), outlined: o.compress.rows + o.dedup.bps + o.crypt.blocks };
     if (report.reducedMotion.transforms.running || !report.reducedMotion.transforms.outlined) bad("reduced-motion", report.reducedMotion.transforms);

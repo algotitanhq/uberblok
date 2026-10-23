@@ -175,9 +175,47 @@
 :is(.cl, .dd, .cr) :is(li, tr).chg {
   outline-offset: -2px;
 }
-/* In the compression figure the outlined rows and branch have no box of their own: the outline stays clear of their text. */
-.cl :is(.row, .outcome, li).chg {
+/* In the compression figure the bar rows and the branches get a little room of
+   their own, so the outline wraps the label and the step number, never cuts
+   through them. The numbers are drawn inside each branch's box for that. */
+.cl .bars .row {
+  padding: 4px 6px;
+  margin-inline: -6px;
+}
+.cl .path {
+  list-style: none;
+  padding-left: 0;
+  counter-reset: step;
+}
+.cl .path li {
+  counter-increment: step;
+  position: relative;
+  padding: 2px 4px 2px 1.8em;
+}
+.cl .path li::before {
+  content: counter(step) ".";
+  position: absolute;
+  left: 0.4em;
+  font-variant-numeric: tabular-nums;
+}
+.cl .path li.taken::before {
+  color: var(--accent);
+}
+.cl :is(.row, li).chg {
+  outline-offset: 0;
+}
+.cl .outcome.chg {
   outline-offset: 4px;
+}
+/* The read that failed, marked on its block; a failed checksum the scrub found. */
+.cr .rd.bad {
+  color: var(--bad);
+  font-weight: 600;
+}
+.cr .sc.bad.chg,
+.cr .rd.chg {
+  outline-width: 3px;
+  padding: 0 0.2em;
 }
 /* Dedup. */
 .dd .counters {
@@ -344,6 +382,18 @@
 .cr .readout.bad {
   background: var(--bad-soft);
   border-left: 3px solid var(--bad);
+}
+/* On a phone each group's label takes its own line, above its buttons, and the
+   DDT drops the physical birth: the block pointers show it. */
+@media (max-width: 30rem) {
+  :is(.cl, .dd, .cr) .buttons > .glabel {
+    flex-basis: 100%;
+    min-width: 0;
+    margin-right: 0;
+  }
+  .dd .ddt .birth {
+    display: none;
+  }
 }
 @media (max-width: 48rem) {
   .dd .dd-grid {

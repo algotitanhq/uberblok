@@ -1929,6 +1929,50 @@ opened by find-in-page, one panel per page, print: fixed or documented.
 **Debts.** The other rooms and the FR/ES copy of this one keep the old format until the pilot
 is approved. The figures' own "see the code" links stay inside the figures.
 
+## v1.4 copy-on-write follow-up (ALG-183): FR and ES, teaching figures, panel fixes
+
+**What changed.** The French and Spanish copy-on-write rooms are in the D21.1 format, adapted
+from the English pilot. The text of the three languages went past the `technical-writer`
+subagent against the "punchy" rule and D21.1: in all three, the answer no longer says ZFS
+"never writes over a block in use" (a mirror repair does), the uberblock is "written last"
+rather than "one write", fsync'd writes replayed from the ZIL are named in the answer, txg is
+glossed before the figure, and dnode, nopwrite and deadlist are glossed. The English answer
+lost its run of short sentences, and FR and ES lost their calques. The figures teach step by step (D21.2), and the
+Source panel takes the pilot's design review (D21.2).
+
+**Measures** (built page, `<article>` only; the figures' own links were script-made and are gone):
+
+| | EN `main` | EN branch | FR `main` | FR branch | ES `main` | ES branch |
+|---|---|---|---|---|---|---|
+| GitHub links in the article | 14 | 14 | 32 | 14 | 32 | 14 |
+| of them in the prose | 0 | 0 | 20 | 0 | 20 | 0 |
+| Code excerpts | 4 | 4 | 3 | 4 | 3 | 4 |
+| Lines of code shown | 34 | 34 | 93 | 34 | 93 | 34 |
+
+**Proof.** `npm run build` (typography check included), `npm test` (240 pass),
+`check-permalinks` (ANALYSIS.md 120 excerpts, 917 line references; built site 2355),
+`check-sources` (156 references, 0 problems), `check-csp` (44 pages) and `check-plate`: all pass.
+`scripts/audit.mjs` over the whole visit on the final head: 42 pages, 0 problems.
+`scripts/verify.mjs` before the last figure fix: 457 captures, 0 console errors, keyboard
+drive of both figures in EN and FR. Panel captures in Chromium (not committed, `shots/`) in the
+three languages at 1440 and 1024 px, dark and light, and inline at 390: at 1024 the notes stack
+(one 422 px column), the symbol heading is hidden, no sideways scroll. A scripted check of the
+review's two figure bugs: after a power cut and three more steps the new D2 gets its own
+address and every new edge is drawn; flipping D1 twice leaves it damaged and the read repairs it.
+
+**Reviews.** `technical-writer` (20 edits, all taken but one: "every five seconds" for the
+txg, where "a few seconds" stays, since a txg also closes on dirty data). `code-reviewer` on the
+diff: a reused block key after a power cut, damage undone by a second press, the badge
+outlined with the picked block, a comment: fixed.
+
+**Design review (two SHOULDs, fixed).** The picked block has an ink ring and its own key line,
+so the accent outline means a new copy only: at the start and after a power cut no picked card
+has an accent stroke (measured on the computed style, EN, FR, ES). The stacked cards' labels
+measure 13.6 CSS px at 1440 and 9.5 px at 390 (from 7.7), unsqueezed at 1440 in the three
+languages. `npm run build` and `npm test` (240 tests) pass.
+
+**Debts.** None new. The other rooms follow in their own issues and rebase onto this one.
+
 ## v1.4 tree room (ALG-185): a question, and a figure that climbs one row per step
 
 **What changed.** The tree and the uberblock room, in EN, FR and ES, asks one question ("What

@@ -2432,6 +2432,44 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   paragraph being read. Opening GitHub in a new tab: the feedback asked for the code beside the
   text.
 
+## v1.4 copy-on-write follow-up (ALG-183): FR and ES, teaching figures, panel fixes
+
+### D21.2 The figures teach by acting; the panel after its design review
+
+- **Context.** The roll-out of D21.1 to every room starts here. This issue also carries the
+  pilot's design debt (two SHOULDs, four NITs on `SourceNote`/`SourcePanel`) and asks for figures
+  where "the reader acts and the figure carries the explanation". It is the only roll-out issue
+  that touches shared code, so the other rooms rebase onto it.
+- **FR and ES.** Adapted from the English room, not translated line by line: vouvoiement in
+  French, tuteo in Spanish (as in the rest of the site), French spacing by D1.9. The same four
+  excerpts and the same notes' line ranges in the three languages, so `ANALYSIS.md` gets no new
+  entry and the Engine room's count stays at 120.
+- **Figures.** `CowTree` and `MirrorHeal` are improved, not rebuilt. Each action now shows one
+  effect in the drawing: the picked block is outlined (and can be clicked; the radios stay the
+  keyboard path); a snapshot puts an S on every block it reaches; after a power cut the blocks
+  written for the next txg stay drawn, in red and under the tree the pool came back to, until
+  the next action; a legend names the four looks. In `MirrorHeal` each damage says what it did in
+  one line, and the expected checksum lights up while a block is compared. The narration is
+  plain and carries no code links: D21.1 keeps GitHub links in Source notes only, and the
+  figures' steps are the ones the four notes show. Without script the figures show their text
+  version, as before.
+- **Panel.** Below a 36rem panel body (windows from 1024 px to about 1350 px) a note's line
+  range sits above its text, so the text keeps the panel's width; the code still scrolls
+  sideways. The shadow is a theme token, `--panel-shadow`, faint in light. The open note's pill
+  takes an accent fill; an inline note has a 2 px rule on its left; inside a note the Excerpt's
+  symbol heading is hidden, since the note's label names it.
+- **Rejected.** Making `--line-strong` stronger for the pills, as the review suggested: every
+  figure card and button on the site uses it, so the pill gets its own mix
+  (`--fg-faint` 65% into `--line-strong`, about 3:1) and no other room changes. Removing the
+  power-cut blocks at once (as before): the reader could not see that they were written and
+  are simply unreachable.
+- **After the design review (ALG-183).** The picked block wore the accent outline that the key
+  calls "new copy", so a picked old block looked new. The pick now has a ring of its own in the
+  ink colour, with its own line in the key; the accent outline means a new copy only. The ghost
+  labels of a stacked card ("R · snapshot") go from 10 to 11 units, 12 below 480 px (9.5 CSS px
+  on a 390 px phone, from 7.7). They may run over the front card's top edge, short of the next
+  card; a longer one is squeezed with `textLength` rather than made smaller.
+
 ## v1.4 tree room (ALG-185)
 
 ### D22.1 The tree room as a question, and a figure that climbs one level per step

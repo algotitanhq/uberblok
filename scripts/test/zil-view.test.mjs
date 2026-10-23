@@ -17,7 +17,7 @@ register(
       }`,
     ),
 );
-const { eventLine, summary, describe, decision, writes, memory, disk, frameAt } = await import("../../src/lib/zil-view.ts");
+const { eventLine, summary, describe, decision, writes, memory, disk, frameAt, targets } = await import("../../src/lib/zil-view.ts");
 const { ZIL_STRINGS } = await import("../../src/lib/zil-strings.ts");
 const { fr } = await import("../../src/lib/fr.ts");
 const Z = await import("../../src/lib/zil.ts");
@@ -213,7 +213,99 @@ test("the first commit drawn frame by frame: zh_log stays a hole until the txg s
     assert.equal(f.header.log, k < head ? null : 1, `step ${k}`);
     assert.deepEqual(f.pending, k < drop ? [1] : [], `step ${k}`);
     assert.deepEqual(f.recs, []);
-    // The write is in memory until txg 100 syncs, then in the tree.
-    assert.match(text(writes(t, S, f)), k < head - 1 ? /in memory/ : /in the tree/, `step ${k}`);
+    // The write is in memory until txg 100 syncs, then in the pool.
+    assert.match(text(writes(t, S, f)), k < head - 1 ? /in memory/ : /in the pool/, `step ${k}`);
+  }
+});
+
+test("a txg sync drawn step by step: the writes reach the pool first, then one log block is freed per step", () => {
+  const S = strings("en");
+  const t = Z.empty();
+  Z.write(t, 4096, { dsync: false, direct: false });
+  Z.fsync(t);
+  Z.write(t, 4096, { dsync: false, direct: false });
+  Z.fsync(t);
+  const before = Z.clone(t);
+  const ev = Z.sync(t);
+  assert.deepEqual(ev.map((e) => e.k), ["sync", "free", "free", "head"]);
+  const cells = (f) => [...disk(t, S, f).matchAll(/class="cell (\w+)" data-cell="(\d+)"/g)].map((m) => `${m[2]}:${m[1]}`);
+  for (let k = 0; k < ev.length - 1; k++) {
+    const f = frameAt(before, t, ev, k);
+    assert.match(text(writes(t, S, f)).split("w2:")[1], /in the pool/, `step ${k}`);
+    // Step 1 frees b1, step 2 frees b2; b3 stays, allocated and not written.
+    assert.deepEqual(cells(f), [`1:${k >= 1 ? "freed" : "written"}`, `2:${k >= 2 ? "freed" : "written"}`, "3:end"], `step ${k}`);
+    assert.equal(f.header.log, 1, `step ${k}`);
+  }
+});
+
+test("a mount drawn step by step: one write replayed per step, the chain shown until the log is destroyed", () => {
+  const S = strings("en");
+  const t = Z.empty();
+  Z.write(t, 4096, { dsync: false, direct: false });
+  Z.fsync(t);
+  Z.write(t, 4096, { dsync: false, direct: false });
+  Z.fsync(t);
+  Z.write(t, 4096, { dsync: false, direct: false });
+  Z.fsync(t);
+  Z.crash(t);
+  Z.importPool(t);
+  const before = Z.clone(t);
+  const ev = Z.mount(t);
+  assert.deepEqual(ev.map((e) => e.k), ["replay", "replay", "destroy"]);
+  for (let k = 0; k < ev.length - 1; k++) {
+    const f = frameAt(before, t, ev, k);
+    const w = text(writes(t, S, f));
+    assert.match(w.split("w2:")[1], /replayed/, `step ${k}`);
+    assert.match(w.split("w3:")[1], k >= 1 ? /replayed/ : /in the log/, `step ${k}`);
+    // The claimed chain stays drawn, with its records, until the last step destroys the log.
+    assert.match(disk(t, S, f), /data-seq="1"/, `step ${k}`);
+    assert.match(disk(t, S, f), /Claimed in txg<\/dt><dd>101/, `step ${k}`);
+  }
+  assert.doesNotMatch(disk(t, S), /data-seq=/);
+});
+
+test("every step rings a part of the figure that the step's drawing has", () => {
+  const S = strings("en");
+  const t = Z.empty();
+  t.pool = { slog: "slog" };
+  const runs = [];
+  const step = (f) => {
+    const before = Z.clone(t);
+    runs.push([before, f(), Z.clone(t)]);
+  };
+  step(() => Z.write(t, 4096, { dsync: false, direct: false }));
+  step(() => Z.fsync(t));
+  step(() => Z.write(t, 131072, { dsync: false, direct: false }));
+  step(() => Z.fsync(t));
+  step(() => Z.write(t, 4096, { dsync: true, direct: false }));
+  step(() => Z.write(t, 4096, { dsync: false, direct: false }));
+  step(() => Z.sync(t));
+  step(() => Z.write(t, 4096, { dsync: false, direct: false }));
+  step(() => Z.fsync(t));
+  step(() => Z.crash(t));
+  step(() => Z.importPool(t));
+  step(() => Z.mount(t));
+  // Selectors are checked by the attribute they look for, on the HTML the step is drawn with.
+  for (const [before, ev, after] of runs) {
+    for (let k = 0; k < ev.length; k++) {
+      const f = k < ev.length - 1 ? frameAt(before, after, ev, k) : undefined;
+      const html = writes(after, S, f) + memory(after, S, f) + disk(after, S, f);
+      const found = targets(ev[k]).some((sel) => {
+        const attrs = [...sel.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)];
+        if (!attrs.length) return sel === "[data-memory]" || /class="[^"]*\bw\b[^"]*"/.test(html);
+        const [, name, value] = attrs[attrs.length - 1];
+        return html.includes(value === undefined ? name : `${name}="${value}"`);
+      });
+      assert.ok(found, `${ev[k].k} at step ${k}: ${targets(ev[k]).join(", ")}`);
+    }
+  }
+});
+
+test("the figure carries no link: the code is in the Source notes", () => {
+  for (const lang of ["en", "fr", "es"]) {
+    const S = strings(lang);
+    const s = busy();
+    const html = writes(s, S) + memory(s, S) + disk(s, S) + describe(s, S) + decision(s, S, 131072, { dsync: true, direct: true });
+    assert.doesNotMatch(html, /<a\b/);
   }
 });

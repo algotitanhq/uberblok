@@ -1072,19 +1072,25 @@ for (const lang of ["en", "fr"]) {
 // large write with and without SLOG, logbias=throughput, a crash before the
 // txg sync then replay, a crash after it, a write never fsynced) replayed in
 // the page, with motion, against the model (src/lib/zil.ts): every write's
-// state and status, the header and the chain drawn after each step must be the
-// model's. Then the decision panel for every combination of the buttons.
+// state and status, the header and the chain drawn after each action (its steps
+// shown with Show every step, D27.1) must be the model's. Then the decision
+// panel for every combination of the buttons.
 const ZR = PAGES.find((p) => p.id === "zil");
 const ZL = {
-  en: { waits: /waits for txg 100 to sync/, viaSync: /through the txg sync that creating the log forced/, claim0yes: /0 records\. ZIL_REPLAY_NEEDED: yes/, returns: /fsync\(\) returns/, wreturns: /write\(\) returns/, claim1: /1 record\. ZIL_REPLAY_NEEDED: yes/, claim0: /0 records\. ZIL_REPLAY_NEEDED: no/, replay: /Replay #1/, lost: /neither synced nor logged: 1 write/ },
-  fr: { waits: /attend la synchronisation du txg 100/, viaSync: /par la synchronisation de txg que la création du journal a imposée/, claim0yes: /0 enregistrement\. ZIL_REPLAY_NEEDED : oui/, returns: /fsync\(\) rend la main/, wreturns: /write\(\) rend la main/, claim1: /1 enregistrement\. ZIL_REPLAY_NEEDED : oui/, claim0: /0 enregistrement\. ZIL_REPLAY_NEEDED : non/, replay: /Rejeu #1/, lost: /ni synchronisé ni journalisé : 1 écriture/ },
+  en: { waits: /waits for txg 100 to sync/, viaSync: /because creating the log synced its txg/, claim0yes: /0 records\. The walk ends[^|]*Replay needed: yes/, returns: /fsync\(\) returns/, wreturns: /write\(\) returns/, claim1: /1 record\. The walk ends[^|]*Replay needed: yes/, claim0: /0 records\. The walk ends[^|]*Replay needed: no/, replay: /Record #1 belongs to txg \d+, which never synced/, lost: /neither synced nor logged: 1 write/ },
+  fr: { waits: /attend donc que le txg 100 soit synchronisé/, viaSync: /parce que la création du journal a synchronisé leur txg/, claim0yes: /0 enregistrement\. Le parcours[^|]*Rejeu nécessaire\s?: oui/, returns: /fsync\(\) rend la main/, wreturns: /write\(\) rend la main/, claim1: /1 enregistrement\. Le parcours[^|]*Rejeu nécessaire\s?: oui/, claim0: /0 enregistrement\. Le parcours[^|]*Rejeu nécessaire\s?: non/, replay: /L’enregistrement #1 appartient au txg \d+, jamais synchronisé/, lost: /ni synchronisée ni journalisée\s?: 1 écriture/ },
 };
 const zilState = (page) =>
   page.evaluate(() => {
     const f = document.querySelector("[data-zl]");
     return {
       writes: [...f.querySelectorAll(".writes .w")].map((w) => [w.querySelector(".wr").textContent, [...w.classList].find((c) => c !== "w")]),
-      header: [...f.querySelectorAll(".hdr dd")].map((d) => d.textContent.trim()),
+      // The header in plain words (D27.1): the block, the claim txg (a number or "not claimed"),
+      // replay needed (yes or no, in the page's language), the last replayed record.
+      header: [...f.querySelectorAll(".hdr dd")].map((d, i) => {
+        const t = d.textContent.trim();
+        return i === 1 ? (/^\d+$/.test(t) ? t : "0") : i === 2 ? (/^(yes|oui|sí)$/.test(t) ? "1" : "0") : t;
+      }),
       chain: [...f.querySelectorAll(".chain .blk")].map((b) => [b.querySelector(".bid").textContent, [...b.classList].find((c) => c !== "blk")]),
       data: f.querySelectorAll(".cell.data").length,
       log: [...f.querySelectorAll("[data-log] li")].map((l) => l.textContent.trim().replace(/\s+/g, " ")).join(" | "),
@@ -1092,7 +1098,7 @@ const zilState = (page) =>
   });
 const zilWant = (m) => ({
   writes: m.writes.map((w) => [w.state, w.status]),
-  header: [m.header.log === null ? null : `b${m.header.log}`, String(m.header.claimTxg), m.header.replayNeeded ? "ZIL_REPLAY_NEEDED" : "0", String(m.header.replaySeq)],
+  header: [m.header.log === null ? null : `b${m.header.log}`, String(m.header.claimTxg), m.header.replayNeeded ? "1" : "0", String(m.header.replaySeq)],
   chain: m.phase !== "running" ? m.disk.map((d) => [`b${d.blk.id}`, d.written ? "written" : "end"])
     : m.kept && !m.lwbs.length ? [[`b${m.kept.id}`, "end"]]
     : m.lwbs.filter((l) => l.blk).map((l) => [`b${l.blk.id}`, l.state === "FLUSH_DONE" ? "written" : "end"]),
@@ -1128,7 +1134,7 @@ for (const lang of ["en", "fr"]) {
       const logs = [];
       for (const step of sq.steps) {
         await fig.locator(`[data-act="${step}"]`).click();
-        await page.waitForFunction(() => !document.querySelector("[data-zl]").hasAttribute("data-busy"), null, { timeout: 60000 });
+        if ((await fig.locator('[data-step="skip"]').getAttribute("aria-disabled")) === "false") await fig.locator('[data-step="skip"]').click();
         ({ write: () => zilModel.write(m, size, flags), fsync: () => zilModel.fsync(m), sync: () => zilModel.sync(m), crash: () => zilModel.crash(m), import: () => zilModel.importPool(m), mount: () => zilModel.mount(m) })[step]();
         const got = await zilState(page);
         const want = zilWant(m);

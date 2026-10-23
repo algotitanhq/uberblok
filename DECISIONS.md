@@ -2651,6 +2651,53 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   gains the two damage states, and the first read step says what each damaged child holds of
   the block, so damaging a parity-only or empty child explains why nothing is rebuilt.
 
+## v1.4 ARC room (ALG-193)
+
+### D25.1 The ARC room as a question, and a figure that reads one block per press
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)),
+  fifth room. It had 8 excerpts (199 lines of code) and 49 links to GitHub in each language, 37
+  of them in the prose, plus a "code" link after every line of the figure's log. A scan read its
+  12 blocks in one press, so the reader saw the end state and a log of 30 lines, not the blocks
+  moving one by one.
+- **Question.** "Why doesn't a big read empty my cache?" (« Pourquoi une grosse lecture ne
+  vide-t-elle pas mon cache ? », « ¿Por qué una lectura grande no vacía mi caché? »). The
+  operator's worry about a backup or a scan; the answer goes from the plain LRU problem to the
+  two lists, the shares, and the ghost lists that move them.
+- **Figure.** `ArcLab` is improved, not rebuilt; the model (`src/lib/arc.ts`) is unchanged.
+  Next read is the first button, in the DOM and on screen, and reads one block per press. Scan 12
+  new blocks and Read the hot set again read their first block at once and queue the others,
+  which Next read then reads 1 ms apart, as `readAll` did in one go, so every state is the one the
+  hand-checked sequence of `ANALYSIS.md` gives. With nothing queued, Next read reads a new block;
+  a line above the narration says what it will read next. Read the rest finishes a queue in one
+  press, for a reader who has seen enough. Each read outlines the block read (accent), the blocks
+  it pushed out (dashed) and the balance line when `arc_pd` moved; the outlines are static, so
+  they read under reduced motion. Each list has a one-line plain role under its name. The
+  narration, in a live region, says the read in one or three short sentences; the log below gives
+  the detail. Both are plain and carry no code links (D21.1); `arc_pd` stays named once, on the
+  balance line, since the Source notes show it. Without script the board and the text version are
+  shown, as before; the two new legend items need the outlines, so they are hidden too.
+- **Phone.** As in the TXG room (D24.1), below 40rem Next read and the narration sit in a bar
+  that sticks to the bottom of the screen while the figure is in view, and after a read the block
+  read is scrolled into view above the bar. The figure is a flex column, and the bar is moved
+  below the board with `order` only, so it stays first in the Tab order on every screen.
+- **Code.** Eight Source notes, 70 lines, all new short cuts in `ANALYSIS.md` (ARC room, 10 to
+  17), checked against `zfs-2.4.4`. The "three depths" section and the L2ARC coda are gone: their
+  detail is in the notes, and the L2ARC is the last step of "In the code". The paragraph on when a
+  pass runs and how `arc_c` grows moved to "What the figure leaves out", without links.
+- **Rejected.** Keeping a scan in one press and only outlining: twelve outlined blocks show no
+  order. A Play button: the reader would watch the scan rather than read it, and the TXG room's
+  Play exists because time passes there between events; here nothing happens between reads.
+  Putting the bar after the board in the DOM so it sticks on phones without `order`: on desktop
+  Tab would reach Next read only after every block.
+- **After the Design review.** On desktop the bar sits about 400 px above the board, so a reader
+  who scrolled just far enough to see Next read did not see the block it read. `show()` now runs
+  on every width: on a wide screen it scrolls just enough to bring the block read into view, never
+  past the top of the bar, so Next read stays on screen (measured at 1280×720 to 1920×1080 in the
+  three languages). Rejected: moving the second button row and the gap choice below the board;
+  the controls would sit apart from the button they qualify. The nine-step tour paragraph is split
+  at its three phases: the scan, the ghost hits, the 10 ms re-read.
+
 ## v1.4 metaslabs room (ALG-197)
 
 ### D27.1 The metaslabs room as a question, and a figure that outlines what each action changed

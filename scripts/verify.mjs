@@ -700,6 +700,8 @@ for (const lang of ["en", "fr"]) {
   await page.goto(base + SN[lang]);
   const L = SNL[lang];
   async function tabTo(pred, arg) {
+    // Selecting a block moves focus to its first action: it may already be there.
+    if (await page.evaluate(pred, arg)) return true;
     for (let i = 0; i < 300; i++) {
       await page.keyboard.press("Tab");
       if (await page.evaluate(pred, arg)) return true;
@@ -719,6 +721,7 @@ for (const lang of ["en", "fr"]) {
   await page.waitForFunction(() => document.querySelector("[data-snaps] [data-log] li.synced"));
   drive.chip = await tabTo(pChip, "D11");
   await page.keyboard.press("Enter");
+  drive.focusInQuick = await page.evaluate(() => !!document.activeElement?.closest?.("[data-quick]"));
   drive.overwrite = await tabTo(pText, L.ow("fs"));
   await page.keyboard.press("Enter");
   drive.sync2 = await tabTo(pSync);

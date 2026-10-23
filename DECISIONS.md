@@ -2692,3 +2692,28 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   board: the log already steps through them, and a timer cannot be read at the reader's pace.
   "lâcher" and "soltar" for "let go of" (the writing review called them calques): the French and
   Spanish say "abandonner" and "descartar", in the prose and the figure alike.
+
+### D28.2 Snapshots room, design review: the answer first, the actions under the board
+
+- **Context.** The Design/UX review of PR #15 ([ALG-195](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-195)):
+  one blocker, two shoulds, four nits, all fixed in this PR (one pass, [ALG-215](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-215)).
+- **The plain answer opens with the answer.** "A snapshot keeps every block that existed when it
+  was taken": deleting a file you had at your last snapshot frees nothing until the last
+  snapshot holding its blocks is destroyed. Then the birth txg against the latest snapshot and
+  the deadlist, then destroy and clones. The setup (why ZFS cannot search every snapshot or
+  count references) is dropped from the answer; the Source notes carry it. About 70 words a
+  paragraph, in EN, FR and ES.
+- **Actions under the board.** Overwrite, Delete and Cancel for the selected block moved from the
+  "Which snapshots hold this block?" panel to one row right under the board ("B8 selected:
+  [Overwrite in fs] [Delete in fs]"), sticky at the bottom of the screen while the board is in
+  view, so on a phone the row is on screen when the reader taps a block. Focus goes to the first
+  action after a selection. The panel keeps the explanation only, so its prediction ("If fs let
+  go of it now: …") is one sentence again (it had been split by a flex container). Rejected:
+  actions inside the selected dataset's card, since a block shared by fs and the clone sits in
+  several cards and the row would jump between them.
+- **Selected and focused look different.** Selection is an inner 3 px ring and a tinted fill;
+  keyboard focus stays the outline outside the chip. The legend gains "selected".
+- **Smaller fixes.** The pending destroy and clone tags are `--step--1` and do not wrap; "What
+  the sync did" says "Nothing synced yet: press Sync txg 11." until the first sync; the first
+  "what to try" paragraph starts with "Select B in fs…", and the opening state is told only by
+  the line under the buttons.

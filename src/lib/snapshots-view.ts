@@ -187,15 +187,34 @@ export function ownerPanel(s: State, S: SnStrings, id: number | null, live: bool
     if (!h || !refs.includes(h.id) || b.slot < 0) continue;
     const w = wouldKill(s, h, id);
     const cmp = fill(w.freed ? S.oWouldFree : S.oWouldDead, { ds: code(h.name), birth: b.birth, prev: h.prevSnapTxg, key: w.key ?? "" });
-    const p = s.pending.changes[dir]?.[b.slot];
-    let acts = "";
-    if (live)
-      acts = p
-        ? ` <span class="tag ${p}">${fill(p === "write" ? S.tagWrite : S.tagDelete, { txg: s.txg })}</span> <button type="button" class="btn sm" data-cancel="${dir}:${b.slot}">${S.cancel}</button>`
-        : ` <span class="acts"><button type="button" class="btn sm" data-change="${dir}:${b.slot}:write">${fill(S.overwrite, { ds: h.name })}</button><button type="button" class="btn sm" data-change="${dir}:${b.slot}:delete">${fill(S.delete, { ds: h.name })}</button></span>`;
-    out.push(`<p class="would">${cmp}${acts}</p>`);
+    // The sentence alone: the buttons that act on it sit under the board (quickRow).
+    out.push(`<p class="would"><span>${cmp}</span></p>`);
   }
   return out.join("");
+}
+
+/** The selected block's actions, in one row right under the board: overwrite or delete
+    it in each head that uses it, or cancel the change waiting in the open txg. */
+export function quickRow(s: State, S: SnStrings, id: number | null): string {
+  if (id === null || !s.blocks[id]) return `<span class="muted">${S.qPick}</span>`;
+  const b = s.blocks[id];
+  const name = blockName(b);
+  if (b.freed !== undefined) return fill(S.qFreed, { name, txg: b.freed });
+  if (b.slot < 0) return fill(S.qRoot, { name });
+  const refs = referencedBy(s, id);
+  const acts: string[] = [];
+  for (const dir of ["fs", "clone"] as const) {
+    const h = head(s, dir);
+    if (!h || !refs.includes(h.id)) continue;
+    const p = s.pending.changes[dir]?.[b.slot];
+    acts.push(
+      p
+        ? `<span class="tag ${p}">${fill(p === "write" ? S.tagWrite : S.tagDelete, { txg: s.txg })}</span><button type="button" class="btn sm" data-cancel="${dir}:${b.slot}">${S.cancel}</button>`
+        : `<button type="button" class="btn sm" data-change="${dir}:${b.slot}:write">${fill(S.overwrite, { ds: h.name })}</button><button type="button" class="btn sm" data-change="${dir}:${b.slot}:delete">${fill(S.delete, { ds: h.name })}</button>`,
+    );
+  }
+  if (!acts.length) return fill(S.qNone, { name });
+  return `<span class="q-name">${fill(S.qSel, { name })}</span>${acts.join("")}`;
 }
 
 /** The blocks a sync changed: born, kept on a deadlist, or freed. */

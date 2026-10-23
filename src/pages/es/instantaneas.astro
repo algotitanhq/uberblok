@@ -50,31 +50,23 @@ const L = {
       <h1>¿Por qué borrar un archivo no me devuelve espacio?</h1>
       <div class="prose answer">
         <p class="lead">
-          Una instantánea es una copia de solo lectura de un sistema de archivos tal como estaba en un momento dado. ZFS
-          toma una al instante, sea cual sea el tamaño, porque nunca modifica un bloque en su sitio: un cambio va a un
-          bloque nuevo, así que a la instantánea le basta con guardar la cima del árbol de bloques tal como estaba.
-          Después, cada vez que el sistema de archivos vivo sobrescribe o borra algo, ZFS descarta un bloque
-          antiguo y tiene que decidir si alguna instantánea lo sigue necesitando. Recorrer todas las instantáneas cada vez
-          sería lento, y llevar un contador en cada bloque exigiría escrituras de más para ponerlo al día en cada instantánea y en
-          cada liberación.
+          Una instantánea guarda todos los bloques que existían cuando se tomó. Si el archivo ya estaba en tu
+          última instantánea, borrarlo solo lo quita del sistema de archivos vivo: sus bloques siguen en el disco para
+          la instantánea, y el espacio vuelve cuando se destruye la última instantánea que los retiene. Tomar una
+          instantánea casi no cuesta nada, porque ZFS nunca modifica un bloque en su sitio.
         </p>
         <p>
-          ZFS escribe por lotes llamados grupos de transacciones, o txg, numerados en orden. Cada bloque guarda el txg en
-          el que se escribió, que se llama su txg de nacimiento. El sistema de archivos guarda también el txg de su
-          última instantánea. Cuando
-          descarta un bloque, ZFS compara esos dos números. Un bloque nacido después de la última instantánea no está en
-          ninguna, así que su espacio se libera. Un bloque nacido en el txg de la instantánea o antes sigue en ella, así que
-          ZFS lo guarda en una lista de los bloques que el sistema de archivos ya no usa, llamada su deadlist. Por eso borrar un
-          archivo que ya tenías en tu última instantánea no libera nada: la instantánea todavía retiene sus bloques.
+          ZFS escribe por lotes llamados grupos de transacciones, o txg, numerados en orden, y cada bloque guarda el txg
+          en el que se escribió, su txg de nacimiento. Cuando el sistema de archivos descarta un bloque, ZFS compara ese
+          nacimiento con el txg de su última instantánea. Un bloque nacido después no está en ninguna y se libera. Los
+          demás van a la deadlist del sistema de archivos, la lista de bloques que ya no usa pero que alguna instantánea
+          todavía retiene.
         </p>
         <p>
-          El espacio vuelve cuando se destruye la última instantánea que retiene esos bloques. La deadlist está dividida
-          por los txg de las instantáneas, así que ZFS sabe entre qué dos instantáneas nació cada bloque. Cuando destruyes
-          una instantánea, las partes que solo ella retenía se liberan enteras, sin mirar los bloques uno por uno. Un
-          clon, un sistema de archivos en el que se puede escribir creado a partir de una instantánea, usa la misma comparación. Al
-          principio comparte todos sus bloques con esa instantánea, y los bloques que escribe después son suyos. La
-          instantánea no se puede destruir
-          mientras exista el clon.
+          La deadlist está dividida por los txg de las instantáneas, así que destruir una libera enteras las partes que
+          solo ella retenía, sin mirar los bloques uno por uno. Un clon, un sistema de archivos en el que se puede
+          escribir creado a partir de una instantánea, comparte al principio todos sus bloques con ella y usa la misma
+          comparación para lo que escribe después. La instantánea no se puede destruir mientras exista el clon.
         </p>
       </div>
     </header>
@@ -83,14 +75,6 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Toma una instantánea, cambia bloques, destrúyela</h2>
       <div class="prose">
         <p>
-          <code>fs</code> es un sistema de archivos con sitio para cuatro bloques de datos, de la A a la D, bajo un
-          bloque raíz; D empieza vacío. El
-          número pequeño de cada bloque es su txg de nacimiento: A<sub>8</sub> nació en el txg 8. La figura empieza
-          después de tres txg: A, B y C escritos en el txg 8, la instantánea <code>fs@s1</code> tomada en el txg 9, y A
-          sobrescrito en el txg 10. El antiguo A<sub>8</sub> y la antigua raíz R<sub>8</sub> están rayados:
-          <code>fs</code> ya no los usa, pero <code>fs@s1</code> sí.
-        </p>
-        <p>
           Selecciona B en <code>fs</code>, sobrescríbelo y sincroniza. La línea bajo los botones dice qué bloques
           antiguos se liberaron y cuáles se guardaron para una instantánea, y un anillo los marca en el tablero. Toma una
           instantánea y sobrescribe B otra vez: pasa lo mismo, ahora frente a la instantánea nueva. Cada instantánea dice
@@ -98,8 +82,10 @@ const L = {
           sobrescribe un bloque en el clon: el bloque antiguo se queda, porque la instantánea todavía lo retiene.
         </p>
         <p>
-          Selecciona cualquier bloque para ver qué instantáneas lo retienen. Bajo la figura, cada sincronización aparece
-          paso a paso, con los dos números que comparó.
+          <code>fs</code> tiene sitio para cuatro bloques de datos, de la A a la D, bajo un bloque raíz. El número pequeño
+          de cada bloque es su txg de nacimiento: A<sub>8</sub> nació en el txg 8. Selecciona cualquier bloque para ver
+          qué instantáneas lo retienen. Bajo la figura, cada sincronización aparece paso a paso, con los dos números que
+          comparó.
         </p>
       </div>
       <SnapshotLab lang={lang} />

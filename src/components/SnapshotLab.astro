@@ -14,7 +14,7 @@ import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
 import { fr } from "../lib/fr";
 import { opening } from "../lib/snapshots";
-import { board, describe, summary, waiting, ownerPanel, type SnStrings } from "../lib/snapshots-view";
+import { board, describe, summary, waiting, ownerPanel, quickRow, type SnStrings } from "../lib/snapshots-view";
 
 interface Props {
   lang: Lang;
@@ -122,6 +122,13 @@ const S0 = {
     didOpening: "fs@s1 was taken in txg 9, then A was overwritten in txg 10. The old A<sub>8</sub> and the old root R<sub>8</sub> are hatched: fs no longer uses them, but fs@s1 does, so they are kept.",
     legendPin: "kept only for snapshots",
     legendHit: "changed by the last sync",
+    legendSel: "selected",
+    qPick: "Select a block on the board to overwrite or delete it.",
+    qSel: "{name} selected:",
+    qNone: "{name} selected. Neither fs nor the clone uses it now; only snapshots hold it, so there is nothing to change.",
+    qRoot: "{name} selected. A root is rewritten by itself when a block under it changes.",
+    qFreed: "{name} selected. It was freed in txg {txg}.",
+    logEmpty: "Nothing synced yet: press Sync txg {txg}.",
   },
   fr: {
     figure: "fs, ses instantanés et un clone : chacun un bloc racine au-dessus de quatre blocs de données, avec sa deadlist, les blocs qu’il a abandonnés et qu’un instantané détient encore",
@@ -224,6 +231,13 @@ const S0 = {
     didOpening: "fs@s1 a été pris au txg 9, puis A a été réécrit au txg 10. L’ancien A<sub>8</sub> et l’ancienne racine R<sub>8</sub> sont hachurés : fs ne s’en sert plus, mais fs@s1 si, donc ils sont gardés.",
     legendPin: "gardé seulement pour des instantanés",
     legendHit: "changé par la dernière synchronisation",
+    legendSel: "sélectionné",
+    qPick: "Sélectionnez un bloc sur le plateau pour le réécrire ou le supprimer.",
+    qSel: "{name} sélectionné :",
+    qNone: "{name} sélectionné. Ni fs ni le clone ne s’en servent maintenant ; seuls des instantanés le détiennent, il n’y a donc rien à modifier.",
+    qRoot: "{name} sélectionné. Une racine est réécrite d’elle-même quand un bloc en dessous change.",
+    qFreed: "{name} sélectionné. Il a été libéré au txg {txg}.",
+    logEmpty: "Rien n’est encore synchronisé : appuyez sur Synchroniser le txg {txg}.",
   },
   es: {
     figure: "fs, sus instantáneas y un clon: cada uno un bloque raíz sobre cuatro bloques de datos, con su deadlist, los bloques que descartó y que una instantánea aún retiene",
@@ -326,6 +340,13 @@ const S0 = {
     didOpening: "fs@s1 se tomó en el txg 9 y luego A se sobrescribió en el txg 10. El antiguo A<sub>8</sub> y la antigua raíz R<sub>8</sub> están rayados: fs ya no los usa, pero fs@s1 sí, así que se guardan.",
     legendPin: "guardado solo para instantáneas",
     legendHit: "cambiado por la última sincronización",
+    legendSel: "seleccionado",
+    qPick: "Selecciona un bloque del tablero para sobrescribirlo o borrarlo.",
+    qSel: "{name} seleccionado:",
+    qNone: "{name} seleccionado. Ni fs ni el clon lo usan ahora; solo lo retienen instantáneas, así que no hay nada que cambiar.",
+    qRoot: "{name} seleccionado. Una raíz se reescribe sola cuando cambia un bloque debajo de ella.",
+    qFreed: "{name} seleccionado. Se liberó en el txg {txg}.",
+    logEmpty: "Todavía no se ha sincronizado nada: pulsa Sincronizar el txg {txg}.",
   },
 }[lang];
 const S = Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])) as SnStrings;
@@ -348,12 +369,14 @@ const sum = summary(s0, S);
   <p class="visually-hidden" data-summary>{sum}</p>
   <p class="visually-hidden" data-say aria-live="polite"></p>
   <div class="sn-board" data-board set:html={board(s0, S, false)} />
+  <div class="sn-quick" data-quick role="group" hidden set:html={quickRow(s0, S, null)} />
   <ul class="sn-legend" aria-hidden="true">
     <li><span class="chip">A<sub>8</sub></span>{S.legendBirth}</li>
     <li><span class="chip root">R<sub>8</sub></span>{S.legendRoot}</li>
     <li><span class="chip c">A<sub>12</sub></span>{S.legendClone}</li>
     <li><span class="chip pin">A<sub>8</sub></span>{S.legendPin}</li>
     <li><span class="chip hit">A<sub>8</sub></span>{S.legendHit}</li>
+    <li><span class="chip sel">A<sub>8</sub></span>{S.legendSel}</li>
     <li><span class="chip gone">A<sub>8</sub></span>{S.legendFreed}</li>
   </ul>
   <noscript><p class="muted">{t.noScript}</p></noscript>
@@ -364,6 +387,7 @@ const sum = summary(s0, S);
     </section>
     <section class="sn-log" aria-labelledby={`sn-log-${lang}`}>
       <h3 id={`sn-log-${lang}`}>{S.logLabel}</h3>
+      <p class="muted" data-log-empty>{S.logEmpty.replace("{txg}", String(s0.txg))}</p>
       <ol data-log></ol>
     </section>
   </div>
@@ -376,13 +400,14 @@ const sum = summary(s0, S);
 <script>
   import { strings, fill, wait, reducedMotion } from "../lib/svg";
   import { opening, sync, change, cancelChange, ask, cancelTask, taskRefusal, type State, type Change, type Dir } from "../lib/snapshots";
-  import { board, describe, summary, waiting, ownerPanel, eventLine, didLine, touched, type SnStrings } from "../lib/snapshots-view";
+  import { board, describe, summary, waiting, ownerPanel, quickRow, eventLine, didLine, touched, type SnStrings } from "../lib/snapshots-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-snaps]")) {
     const S = strings<SnStrings>(root);
     const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
     const boardEl = q("[data-board]");
     const ownerEl = q("[data-owner]");
+    const quickEl = q("[data-quick]");
     const logEl = q("[data-log]");
     // One live region, one announcement per action: what the action did, in one text.
     const say = (text: string) => (q("[data-say]").textContent = text.replace(/\s+/g, " ").trim());
@@ -412,6 +437,12 @@ const sum = summary(s0, S);
         if (c.tagName === "BUTTON") c.setAttribute("aria-pressed", String(on));
       }
       ownerEl.innerHTML = ownerPanel(s, S, selected, true);
+      quickEl.innerHTML = quickRow(s, S, selected);
+      // Landing on an action reads which block it acts on: "B8 selected:, group".
+      quickEl.setAttribute("aria-label", (quickEl.querySelector(".q-name")?.textContent ?? quickEl.textContent ?? "").trim());
+      const emptyLog = q("[data-log-empty]");
+      emptyLog.hidden = logEl.childElementCount > 0;
+      emptyLog.textContent = fill(S.logEmpty, { txg: s.txg });
       q("[data-txg]").textContent = String(s.txg);
       syncBtn.textContent = fill(S.sync, { txg: s.txg });
       const why = taskRefusal(s, { kind: "snapshot" });
@@ -423,7 +454,13 @@ const sum = summary(s0, S);
       if (focusKey) {
         const el = root.querySelector<HTMLElement>(focusKey);
         if (el) el.focus({ preventScroll: true });
-        else if (focusKey.startsWith("[data-change") || focusKey.startsWith("[data-cancel=")) ownerEl.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+        else {
+          // The control was replaced: a change by its Cancel, a Cancel by the Overwrite of the
+          // same dataset and slot, an empty slot's Write by the Sync button.
+          const m = focusKey.match(/^\[data-(change|cancel)="(\w+):(\d+)/);
+          const alt = m ? (m[1] === "change" ? `[data-cancel="${m[2]}:${m[3]}"]` : `[data-change="${m[2]}:${m[3]}:write"]`) : focusKey.startsWith("[data-write") ? "[data-act=sync]" : null;
+          if (alt) (root.querySelector<HTMLElement>(alt) ?? quickEl.querySelector<HTMLElement>("button"))?.focus({ preventScroll: true });
+        }
       }
     }
 
@@ -446,6 +483,7 @@ const sum = summary(s0, S);
       q("[data-did]").innerHTML = didLine(s, S, ev);
       render();
       logEl.replaceChildren();
+      q("[data-log-empty]").hidden = true;
       if (!reducedMotion()) {
         for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]:not([data-at^='only:'])")) {
           const k = `${c.dataset.b}|${c.dataset.at}`;
@@ -507,12 +545,16 @@ const sum = summary(s0, S);
       } else if (d.cancelTask !== undefined) cancelTask(s, Number(d.cancelTask));
       else return;
       render();
+      // The actions for the selected block sit right under the board: from the keyboard, focus
+      // the first one (a pointer click, e.detail > 0, leaves focus where it is).
+      if (d.b !== undefined && (e as MouseEvent).detail === 0) quickEl.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
       say((d.b !== undefined ? ownerEl : d.act === "reset" ? q("[data-summary]") : q("[data-waiting]")).textContent ?? "");
     });
 
     render(null);
     q(".sn-bar").hidden = false;
     q(".sn-panels").hidden = false;
+    quickEl.hidden = false;
   }
 </script>
 
@@ -781,9 +823,11 @@ const sum = summary(s0, S);
     min-width: 2.4rem;
     font-size: 0.78rem;
   }
+  /* Selected: a thick inner ring and a tinted fill, so it never reads as the
+     keyboard focus ring (an outline outside the chip). */
+  .chip.sel,
   .sn-board :global(.chip.sel) {
-    outline: 2px solid var(--fg);
-    outline-offset: 1px;
+    box-shadow: inset 0 0 0 3px var(--fg);
     background-color: var(--accent-soft);
   }
   .sn-board :global(.pending .chip) {
@@ -798,12 +842,16 @@ const sum = summary(s0, S);
   .sn-board :global(.tag.delete) {
     color: var(--bad);
   }
+  .sn-board :global(.tag.task) {
+    font-size: var(--step--1);
+    white-space: nowrap;
+    max-width: none;
+  }
   .sn-board :global(.refuse) {
     font-size: var(--step--1);
     color: var(--fg-muted);
   }
-  .sn-board :global(.btn.sm),
-  .sn-owner :global(.btn.sm) {
+  .sn-board :global(.btn.sm) {
     padding: 0.35em 0.9em;
   }
   .sn-board :global(.freed) {
@@ -812,6 +860,44 @@ const sum = summary(s0, S);
     gap: var(--space-2);
     align-items: center;
     margin-top: var(--space-3);
+  }
+  .sn-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+    min-height: 44px;
+    margin-top: var(--space-3);
+    font-size: var(--step--1);
+    /* On a long board (a phone) the row stays on screen while the board is. */
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    padding: var(--space-2) 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+  /* The sticky row must not cover the chip that has focus. */
+  :global(html:has([data-snaps])) {
+    scroll-padding-bottom: 7rem;
+  }
+  .sn-quick[hidden] {
+    display: none;
+  }
+  .sn-quick :global(sub) {
+    font-size: 0.72em;
+  }
+  .sn-quick :global(.q-name) {
+    font-weight: 600;
+  }
+  .sn-quick :global(.btn.sm) {
+    padding: 0.35em 0.9em;
+  }
+  .sn-quick :global(.tag) {
+    color: var(--accent);
+  }
+  .sn-quick :global(.tag.delete) {
+    color: var(--bad);
   }
   .sn-legend {
     list-style: none;
@@ -860,21 +946,6 @@ const sum = summary(s0, S);
     font-size: var(--step--1);
     margin-top: var(--space-2);
     max-width: 40rem;
-  }
-  .sn-owner :global(.would) {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    align-items: center;
-  }
-  .sn-owner :global(.acts) {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-  .sn-owner :global(.tag) {
-    font-size: 0.75rem;
-    color: var(--accent);
   }
   .sn-log ol {
     margin: 0;

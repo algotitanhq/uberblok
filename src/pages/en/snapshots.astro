@@ -51,27 +51,22 @@ const L = {
       <h1>Why doesn’t deleting a file give me my space back?</h1>
       <div class="prose answer">
         <p class="lead">
-          A snapshot is a read-only copy of a filesystem as it was at one moment. ZFS takes one in an instant, whatever
-          the size, because it never changes a block in place: a change goes to a new block, so the snapshot only has to
-          keep the top of the tree of blocks as it was. Later, each time the live filesystem overwrites or
-          deletes something, ZFS lets go of an old block and has to decide whether a snapshot still needs it. Searching
-          every snapshot each time would be slow, and a counter on every block would need extra writes to keep those
-          counters up to date at every snapshot and every free.
+          A snapshot keeps every block that existed when it was taken. If the file was already there at your
+          last snapshot, deleting it only takes it out of the live filesystem: its blocks stay on disk for the snapshot,
+          and the space comes back when the last snapshot that holds them is destroyed. Taking a snapshot costs almost
+          nothing, because ZFS never changes a block in place.
         </p>
         <p>
-          ZFS writes in batches called transaction groups, or txgs, numbered in order. Every block records the txg it
-          was written in, called its birth txg. The filesystem also records the txg of its latest snapshot. When the filesystem
-          lets go of a block, ZFS compares the two numbers. A block born after the latest snapshot is in no snapshot, so
-          its space is freed. A block born in the snapshot's txg or before is still in it, so ZFS keeps it on a list of the blocks
-          the filesystem no longer uses, called its deadlist. This is why deleting a file you already had when you took
-          your last snapshot frees nothing: the snapshot still holds its blocks.
+          ZFS writes in batches called transaction groups, or txgs, numbered in order, and every block records the txg
+          it was written in, its birth txg. When the filesystem lets go of a block, ZFS compares that birth with the txg
+          of its latest snapshot. A block born after it is in no snapshot and is freed. Any other block goes on the
+          filesystem's deadlist, the list of blocks it no longer uses but a snapshot still holds.
         </p>
         <p>
-          The space comes back when the last snapshot that holds those blocks is destroyed. The deadlist is split by the
-          txgs of the snapshots, so ZFS knows between which two snapshots each block was born. When you destroy a
-          snapshot, the parts that only it held are freed whole, without looking at the blocks one by one. A clone, a
-          writable filesystem made from a snapshot, uses the same comparison. At first it shares every block with that
-          snapshot, and the blocks it writes later are its own. The snapshot cannot be destroyed while the clone exists.
+          The deadlist is split by the txgs of the snapshots, so destroying one frees whole the parts only it held,
+          without checking the blocks one by one. A clone, a writable filesystem made from a snapshot, shares every
+          block with that snapshot at first and uses the same comparison for what it writes later. The snapshot cannot
+          be destroyed while the clone exists.
         </p>
       </div>
     </header>
@@ -80,12 +75,6 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Take a snapshot, change blocks, destroy it</h2>
       <div class="prose">
         <p>
-          <code>fs</code> is a filesystem with room for four data blocks, A to D, under one root block; D starts empty. The small number on each
-          block is its birth txg: A<sub>8</sub> was born in txg 8. The figure opens after three txgs: A, B and C written
-          in txg 8, the snapshot <code>fs@s1</code> taken in txg 9, and A overwritten in txg 10. The old A<sub>8</sub> and
-          the old root R<sub>8</sub> are hatched: <code>fs</code> no longer uses them, but <code>fs@s1</code> does.
-        </p>
-        <p>
           Select B in <code>fs</code>, overwrite it and sync. The line under the buttons says which old blocks were freed
           and which were kept for a snapshot, and a ring marks them on the board. Take a snapshot and overwrite B again to
           see the same comparison, this time with the new snapshot. Each snapshot says what destroying it would free: destroy
@@ -93,8 +82,9 @@ const L = {
           because the snapshot still holds it.
         </p>
         <p>
-          Select any block to see which snapshots hold it. Under the figure, each sync is listed step by step, with the
-          two numbers it compared.
+          <code>fs</code> has room for four data blocks, A to D, under one root block. The small number on each block is
+          its birth txg: A<sub>8</sub> was born in txg 8. Select any block to see which snapshots hold it. Under the
+          figure, each sync is listed step by step, with the two numbers it compared.
         </p>
       </div>
       <SnapshotLab lang={lang} />

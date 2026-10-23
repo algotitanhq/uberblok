@@ -15,7 +15,7 @@ register(
       }`,
     ),
 );
-const { board, didLine, touched, describe } = await import("../../src/lib/snapshots-view.ts");
+const { board, didLine, touched, describe, quickRow, ownerPanel } = await import("../../src/lib/snapshots-view.ts");
 const { opening, ask, change, sync, SLOTS } = await import("../../src/lib/snapshots.ts");
 
 // Every key fills as its own name, with its placeholders kept, so the tests read the structure.
@@ -51,4 +51,41 @@ test("the line under the controls names what a destroy freed", () => {
   const ev = sync(s);
   const line = didLine(s, S, ev).replace(/<[^>]+>/g, "");
   assert.equal(line, "Txg 11 is synced. fs@s1 is gone. Freed: A8 and R8.");
+});
+
+test("the row under the board holds the selected block's actions; the panel keeps the sentence whole", () => {
+  const s = opening();
+  const b = s.roots[s.datasets.find((d) => d.id === "fs").bp][1];
+  const row = quickRow(s, S, b);
+  assert.match(row, /data-change="fs:1:write"/);
+  assert.match(row, /data-change="fs:1:delete"/);
+  const panel = ownerPanel(s, S, b, true);
+  assert.doesNotMatch(panel, /<button/);
+  assert.match(panel, /<p class="would"><span>[^<]*(<code>[^<]*<\/code>[^<]*)*<\/span><\/p>/);
+  change(s, "fs", 1, "delete");
+  assert.match(quickRow(s, S, b), /data-cancel="fs:1"/);
+  assert.equal(quickRow(s, S, null), '<span class="muted">qPick</span>');
+});
+
+test("the row offers each head's actions for a shared block, and says why there is none otherwise", () => {
+  const s = opening();
+  const fs = () => s.datasets.find((d) => d.id === "fs");
+  const a8 = s.roots[s.datasets.find((d) => d.id === "s1").bp][0];
+  assert.equal(quickRow(s, S, a8), "qNone");
+  assert.equal(quickRow(s, S, fs().bp), "qRoot");
+  ask(s, { kind: "clone", origin: "s1" });
+  sync(s);
+  const b8 = s.roots[fs().bp][1];
+  const order = [...quickRow(s, S, b8).matchAll(/data-(change|cancel)="([^"]+)"/g)].map((m) => m[2]);
+  assert.deepEqual(order, ["fs:1:write", "fs:1:delete", "clone:1:write", "clone:1:delete"]);
+  change(s, "clone", 1, "delete");
+  const after = [...quickRow(s, S, b8).matchAll(/data-(change|cancel)="([^"]+)"/g)].map((m) => m[2]);
+  assert.deepEqual(after, ["fs:1:write", "fs:1:delete", "clone:1"]);
+  change(s, "fs", 3, "write");
+  sync(s);
+  const d = s.roots[fs().bp][3];
+  change(s, "fs", 3, "write");
+  sync(s);
+  assert.notEqual(s.blocks[d].freed, undefined);
+  assert.equal(quickRow(s, S, d), "qFreed");
 });

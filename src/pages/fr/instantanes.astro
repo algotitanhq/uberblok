@@ -50,30 +50,23 @@ const L = {
       <h1>Pourquoi supprimer un fichier ne me rend-il pas de place ?</h1>
       <div class="prose answer">
         <p class="lead">
-          Un instantané est une copie en lecture seule d’un système de fichiers tel qu’il était à un moment donné. ZFS
-          en prend un en un instant, quelle que soit la taille, parce qu’il ne modifie jamais un bloc sur place : une
-          modification va dans un nouveau bloc, et l’instantané n’a qu’à garder le haut de l’arbre des blocs tel qu’il
-          était. Ensuite, chaque fois que le système de fichiers vivant réécrit ou supprime quelque chose,
-          ZFS abandonne un ancien bloc et doit savoir si un instantané en a encore besoin. Parcourir tous les instantanés à
-          chaque fois serait lent, et tenir un compteur sur chaque bloc demanderait des écritures en plus pour le
-          mettre à jour à chaque instantané et à chaque libération.
+          Un instantané garde tous les blocs qui existaient au moment où il a été pris. Si le fichier était
+          déjà là à votre dernier instantané, le supprimer ne fait que le retirer du système de fichiers vivant : ses
+          blocs restent sur le disque pour l’instantané, et la place revient quand le dernier instantané qui les détient
+          est détruit. Prendre un instantané ne coûte presque rien, parce que ZFS ne modifie jamais un bloc sur place.
         </p>
         <p>
-          ZFS écrit par lots appelés groupes de transactions, ou txg, numérotés dans l’ordre. Chaque bloc garde le
-          numéro du txg où il a été écrit, qu’on appelle son txg de naissance. Le système de fichiers retient aussi le
-          txg de son dernier instantané. Quand il abandonne un bloc, ZFS compare ces deux nombres. Un bloc né après le dernier instantané n’est
-          dans aucun instantané : sa place est libérée. Un bloc né dans le txg de l’instantané ou avant y est encore, alors
-          ZFS le garde dans une liste des blocs dont le système de fichiers ne se sert plus, qu’on appelle sa deadlist. Voilà pourquoi
-          supprimer un fichier que vous aviez déjà au dernier instantané ne libère rien : l’instantané détient encore
-          ses blocs.
+          ZFS écrit par lots appelés groupes de transactions, ou txg, numérotés dans l’ordre, et chaque bloc garde le
+          txg où il a été écrit, son txg de naissance. Quand le système de fichiers abandonne un bloc, ZFS compare cette
+          naissance au txg de son dernier instantané. Un bloc né après n’est dans aucun instantané et il est libéré. Les
+          autres vont dans la deadlist du système de fichiers, la liste des blocs dont il ne se sert plus mais qu’un
+          instantané détient encore.
         </p>
         <p>
-          La place revient quand le dernier instantané qui détient ces blocs est détruit. La deadlist est découpée selon
-          les txg des instantanés, si bien que ZFS sait entre quels instantanés successifs chaque bloc est né. Quand vous
-          détruisez un instantané, les parties que lui seul détenait sont libérées en entier, sans examiner les blocs un
-          par un. Un clone, un système de fichiers accessible en écriture créé à partir d’un instantané, utilise la même
-          comparaison. Au départ, il partage tous ses blocs avec cet instantané, et les blocs qu’il écrit ensuite sont à
-          lui. L’instantané ne peut pas être détruit tant que le clone existe.
+          La deadlist est découpée selon les txg des instantanés : en détruire un libère d’un coup les parties que lui
+          seul détenait, sans examiner les blocs un par un. Un clone, un système de fichiers modifiable créé à partir
+          d’un instantané, partage d’abord tous ses blocs avec lui et applique la même comparaison à ce qu’il écrit
+          ensuite. L’instantané ne peut pas être détruit tant que le clone existe.
         </p>
       </div>
     </header>
@@ -81,14 +74,6 @@ const L = {
     <section class="section" aria-labelledby="lab">
       <h2 id="lab"><span class="n">1</span> Prendre un instantané, modifier des blocs, le détruire</h2>
       <div class="prose">
-        <p>
-          <code>fs</code> est un système de fichiers qui a de la place pour quatre blocs de données, A à D, sous un bloc
-          racine ; D est vide au départ. Le petit
-          nombre sur chaque bloc est son txg de naissance : A<sub>8</sub> est né au txg 8. La figure s’ouvre après trois
-          txg : A, B et C écrits au txg 8, l’instantané <code>fs@s1</code> pris au txg 9, et A réécrit au txg 10.
-          L’ancien A<sub>8</sub> et l’ancienne racine R<sub>8</sub> sont hachurés : <code>fs</code> ne s’en sert plus,
-          mais <code>fs@s1</code> si.
-        </p>
         <p>
           Sélectionnez B dans <code>fs</code>, réécrivez-le et synchronisez. La ligne sous les boutons dit quels anciens
           blocs ont été libérés et lesquels ont été gardés pour un instantané, et un anneau les marque sur le plateau.
@@ -98,8 +83,10 @@ const L = {
           l’instantané le détient encore.
         </p>
         <p>
-          Sélectionnez n’importe quel bloc pour voir quels instantanés le détiennent. Sous la figure, chaque
-          synchronisation est détaillée étape par étape, avec les deux nombres comparés.
+          <code>fs</code> a de la place pour quatre blocs de données, A à D, sous un bloc racine. Le petit nombre sur
+          chaque bloc est son txg de naissance : A<sub>8</sub> est né au txg 8. Sélectionnez n’importe quel bloc pour
+          voir quels instantanés le détiennent. Sous la figure, chaque synchronisation est détaillée étape par étape,
+          avec les deux nombres comparés.
         </p>
       </div>
       <SnapshotLab lang={lang} />

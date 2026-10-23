@@ -18,11 +18,56 @@ register(
     ),
 );
 const { eventLine, summary, describe, decision, writes, memory, disk, frameAt, targets } = await import("../../src/lib/zil-view.ts");
-const { parse } = await import("ultrahtml");
-const { querySelectorAll } = await import("ultrahtml/selector");
 const { ZIL_STRINGS } = await import("../../src/lib/zil-strings.ts");
 const { fr } = await import("../../src/lib/fr.ts");
 const Z = await import("../../src/lib/zil.ts");
+
+// A small HTML tree and selector matcher, enough for the selectors targets() returns
+// (tag, class, attribute, descendant, child, :last-child). No package: CI runs the tests
+// before npm ci.
+const VOID = new Set(["br", "hr", "img", "input", "meta", "link", "wbr", "col", "area", "source"]);
+function parse(html) {
+  const root = { tag: "#root", attrs: {}, children: [], parent: null };
+  let cur = root;
+  for (const m of html.matchAll(/<(\/?)([a-zA-Z][\w-]*)((?:\s+[^\s=>\/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>/g)) {
+    const [, close, name, rest, self] = m;
+    const tag = name.toLowerCase();
+    if (close) {
+      for (let n = cur; n !== root; n = n.parent) if (n.tag === tag) { cur = n.parent; break; }
+      continue;
+    }
+    const attrs = {};
+    for (const a of rest.matchAll(/([^\s=>\/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)) attrs[a[1]] = a[2] ?? a[3] ?? a[4] ?? "";
+    const el = { tag, attrs, children: [], parent: cur };
+    cur.children.push(el);
+    if (!self && !VOID.has(tag)) cur = el;
+  }
+  return root;
+}
+function matches(el, compound) {
+  if (el.tag === "#root") return false;
+  const tag = compound.match(/^[a-z][\w-]*/i);
+  if (tag && el.tag !== tag[0].toLowerCase()) return false;
+  for (const [, c] of compound.matchAll(/\.([\w-]+)/g)) if (!(el.attrs.class ?? "").split(/\s+/).includes(c)) return false;
+  for (const [, n, v] of compound.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)) if (!(n in el.attrs) || (v !== undefined && el.attrs[n] !== v)) return false;
+  if (compound.includes(":last-child") && el.parent.children.at(-1) !== el) return false;
+  return true;
+}
+function select(root, sel) {
+  const parts = sel.replace(/\s*>\s*/g, " > ").trim().split(/\s+/);
+  // Walk the selector right to left from each element.
+  const fits = (el, i) => {
+    if (!matches(el, parts[i])) return false;
+    if (i === 0) return true;
+    if (parts[i - 1] === ">") return el.parent && fits(el.parent, i - 2);
+    for (let p = el.parent; p; p = p.parent) if (fits(p, i - 1)) return true;
+    return false;
+  };
+  const out = [];
+  const walk = (n) => { for (const c of n.children) { if (fits(c, parts.length - 1)) out.push(c); walk(c); } };
+  walk(root);
+  return out;
+}
 
 const strings = (lang) => ({
   ...Object.fromEntries(Object.entries(ZIL_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])),
@@ -293,12 +338,11 @@ test("every step rings a part of the figure that the step's drawing has", () => 
   step(() => Z.importPool(t));
   step(() => Z.mount(t));
   // Selectors are run on the HTML the step is drawn with, inside the figure's own containers.
-  // ultrahtml has no :last-child; a list with a child has a last child, so it is dropped.
   for (const [before, ev, after] of runs) {
     for (let k = 0; k < ev.length; k++) {
       const f = k < ev.length - 1 ? frameAt(before, after, ev, k) : undefined;
       const doc = parse(`<div data-writes>${writes(after, S, f)}</div><div data-memory>${memory(after, S, f)}</div><div data-disk>${disk(after, S, f)}</div>`);
-      const found = targets(ev[k]).some((sel) => querySelectorAll(doc, sel.replace(":last-child", "")).length > 0);
+      const found = targets(ev[k]).some((sel) => select(doc, sel).length > 0);
       assert.ok(found, `${ev[k].k} at step ${k}: ${targets(ev[k]).join(", ")}`);
     }
   }

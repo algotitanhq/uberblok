@@ -145,7 +145,7 @@ const t = UI[Astro.props.lang];
     padding: 0 var(--space-5) var(--space-7);
     background: var(--bg);
     border-left: 1px solid var(--line-strong);
-    box-shadow: -16px 0 40px rgb(0 0 0 / 0.22);
+    box-shadow: var(--panel-shadow);
   }
   .source-panel[hidden] {
     display: none;
@@ -159,6 +159,17 @@ const t = UI[Astro.props.lang];
     from {
       transform: translateX(1.5rem);
       opacity: 0;
+    }
+  }
+  /* A narrow panel (from 1024 px up to a window of about 1350 px) stacks each note's line range above
+     its text, so the text keeps the panel's width. */
+  .body {
+    container-type: inline-size;
+  }
+  @container (max-width: 36rem) {
+    .body :global(.excerpt .notes li) {
+      grid-template-columns: 1fr;
+      gap: 0;
     }
   }
   .head {

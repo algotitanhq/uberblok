@@ -213,7 +213,8 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       for (const x of root.querySelectorAll(".hit")) x.classList.remove("hit", "hit-first");
       const els = e ? targets(e).flatMap((sel) => [...root.querySelectorAll(sel)]) : [];
       for (const x of els) x.classList.add("hit");
-      els[0]?.classList.add("hit-first");
+      // The part show() scrolls to when the ringed parts do not fit together: the first one drawn.
+      els.find((x) => { const r = x.getBoundingClientRect(); return r.width || r.height; })?.classList.add("hit-first");
       q(".khit").hidden = !els.length;
       return els;
     }

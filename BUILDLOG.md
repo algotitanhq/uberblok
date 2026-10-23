@@ -2368,3 +2368,28 @@ message was not announced again; the ring's key stayed after a setting changed. 
 
 **Debts.** `scripts/verify.mjs` still checks this room against the model in EN and FR only;
 `verify-zil.mjs` covers ES.
+
+### Design/UX fixes (ALG-199)
+
+The three items of the Design/UX review are fixed (D30.1).
+- **SHOULD:** at a replay the write is ringed first, and after a step the figure scrolls to fit
+  every ringed part above the bar when they fit together, otherwise the first one.
+- **NIT:** the narration of an allocation keeps only where the block went and why ("…, because
+  there is no SLOG"), and the log keeps every class tried. On a 360 × 740 phone the bar goes from
+  27 % of the screen to 19–22 % at those steps.
+- **NIT:** without script, "This figure needs JavaScript…" has the text version's top margin and
+  small size.
+
+`verify-zil.mjs` now also runs at 360 × 740. It checks that the first ringed part is on screen
+after every press, and all ringed parts when they fit, on desktop too. It also checks that the
+step bar stays under a quarter of a phone screen. `code-reviewer` on the diff: two NITs, both
+fixed. The part marked first is the first one drawn, and an empty selection no longer passes
+the check.
+
+**Proof.** `npm test` 264 pass, `npm run build` 0 errors, `verify-zil.mjs` EN, FR and ES at
+1280, 390 and 360 px: 59 captures, 0 problems. Captures read by eye: ES 360 at `zfs mount`
+step 1 (w2 and its ring on screen), ES 360 at fsync step 7, EN 1440 without script. Only
+`ZilLab` and `zil-*` changed, so the whole-site run was not repeated.
+
+**Debt.** The `zpool import` narration, a single step, is still 24 % of a 360 px screen in FR
+and ES.

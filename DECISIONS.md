@@ -2792,6 +2792,13 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   Show every step and after the last step it stays in the bar, which is on screen, and a press
   there says the action is over and to choose the next one above. Moving the focus back to the
   action buttons was rejected: on a phone they are a screen away from the ring.
+- **Scrolling to the ring, and a short narration (Design/UX review).** When a step rings
+  several parts, the figure scrolls to fit all of them above the bar if they fit together, and
+  otherwise to the first one, which is the part the narration names: at a replay, the write in
+  the application's file comes before the record in the chain, since on a phone the file panel
+  sits far above it. The narration says where a log block went and why it is not on the SLOG;
+  the log under the figure keeps every class tried. The full list made the bar a quarter of a
+  phone screen.
 - **What to try.** The first `fsync()` on a dataset with no log creates the log, which takes a
   txg sync, so nothing is logged; the text says so and asks for a second `write()` and `fsync()`
   before the power cut, so that the mount has a record to replay. The 128 KiB example says it

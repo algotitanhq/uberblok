@@ -34,7 +34,7 @@ const state = (page) =>
     const rs = [...f.querySelectorAll(".hit")].map((x) => x.getBoundingClientRect()).filter((x) => x.width || x.height);
     const top = Math.min(...rs.map((x) => x.top));
     const bottom = Math.max(...rs.map((x) => x.bottom));
-    const fits = bottom - top <= floor - 16;
+    const fits = rs.length > 0 && bottom - top <= floor - 16;
     const b = f.querySelector('[data-step="next"]').getBoundingClientRect();
     return {
       hits: f.querySelectorAll(".hit").length,

@@ -2031,3 +2031,67 @@ quiescing stage (FLIP), at its old place. `show()` now subtracts the glide's cur
 scrolls by the difference itself, and aligns a part taller than the room above the bar on its
 top, reading the offset from the card even when the outline is on a part inside it. Measured over 14 presses at 360×740 and 390×844 in EN, FR and ES: the outline is fully
 above the bar every time.
+
+## v1.4 tree room (ALG-185): a question, and a figure that climbs one row per step
+
+**What changed.** The tree and the uberblock room, in EN, FR and ES, asks one question ("What
+if the power fails while ZFS is writing?"), answers it in three plain paragraphs, keeps its
+figure with what to try, then shows the code in seven Source notes (D21.1, D22.1). In the
+figure, Next step now writes the new tree one row per step, data first and the objset last,
+before the four beats of the commit: a new copy is an outline while in memory and fills in
+when written, and the pointer to a child not yet written is dotted until the child lands
+(`zio_write_compress` holds a parent until its children are ready). The 3D view draws the
+same states. Six short excerpts are new in `ANALYSIS.md` (tree room, 12 to 17). The other
+rooms are unchanged, except the Engine room's computed excerpt count (120 → 126) and the
+copy-on-write page, whose CSS now comes in two `<style>` blocks (the Source note styles are
+shared with the tree room; same rules).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 58 | 22 |
+| of them in the prose | 27 | 0 |
+| in Source notes (excerpt captions and notes) | 25 | 22 |
+| in the figure ("code" links) | 6 | 0 |
+| Code excerpts | 12 | 7 |
+| Lines of code shown | 255 | 69 |
+
+**Proof.** `npm run build`, `npm test` (241 pass), `check-permalinks` (ANALYSIS.md 126
+excerpts, 923 line references; built site 2343 references), `check-sources` (156 references,
+44 pages), `check-csp` (44 pages, no new hash) and `check-plate`: all pass.
+`scripts/audit.mjs` over the whole visit: 42 pages, 0 problems. `scripts/verify.mjs`: 465
+captures, 0 console errors; the tree replay compares 332 states with the model (every row of
+the climb, the plug before any write, halfway up and at each beat, config on and off, beat 3
+with 0 to 3 uberblock writes landed, four commits in a row), 0 mismatches; reduced motion
+runs no animation; no script shows D2 in memory and the old tree under the uberblock; the
+keyboard walk takes twelve actions, each announced once.
+
+**Reviews.** `technical-writer` on the EN text (16 fixes: when the cut falls, the even labels
+only when the configuration changed, the switch locked once the sync starts, uberblocks on
+three top-level vdevs in an ordinary txg, the flush promise, the slot rule under RAID-Z
+expansion, a fragment and a short dramatic sentence), then on FR and ES (24 fixes: calques,
+wrong referents, a gender clash). `code-reviewer` on the diff: the 3D view did not tell
+written copies from those in memory and re-grew every box on each step, beat 0 was labelled
+"next" while under way, "levels" meant two things: all fixed.
+
+**Debts.** On a phone (390 px) the tree is drawn at about 60 % of its desktop size, so the
+block names are small; the 3D view and the text version carry the same state. The disk table's header no longer wraps
+letter by letter at 390 px (fixed here, in the room's own stylesheet).
+
+**Design review fixes.** The step caption moved from below the panels (about 800 px under the
+tree at 1440 px) to just under the controls; the reasons for disabled buttons now appear only
+on the press of one. Written copies are solid, in-memory copies dashed, the blocks of the last
+step ringed, and the legend is complete from the start (D22.1). Measured in a real browser at
+1440 and 390 px: the caption's top is 77 px above the tree's at 1440 and 93 px at 390, at
+every step; the ring is on exactly the row the step wrote (D2, then L1 #1, L2 #0, the dnode
+block, the objset). `npm test` (241 pass), `npm run build`, `scripts/verify-tree.mjs`: 332
+states, 0 mismatches, 38 captures, 0 console errors.
+
+**QA review fixes.** The figure no longer links to GitHub: the "code" links on the commit
+beats, the disk table's header, the step and import captions are gone, since the Source
+notes below the figure carry the same lines (the pilot room has no link outside its notes
+either). Counted in the built pages, EN, FR and ES alike: 22 GitHub links in the article,
+all 22 inside the Source notes; the 4 others on the page are the site header and footer.
+D22.1 cites ALG-182 by its bare id. `npm test` (241 pass), `npm run build`,
+`scripts/verify-tree.mjs` against the preview.

@@ -25,7 +25,6 @@ const { fr } = await import("../../src/lib/fr.ts");
 
 const strings = (lang) => ({
   ...Object.fromEntries(Object.entries(TREE_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])),
-  refs: new Proxy({}, { get: () => "#" }),
   lang,
 });
 const text = (html) => html.replace(/<[^>]+>/g, "").replace(/[  ]/g, " ");
@@ -47,6 +46,12 @@ test("no elision before a code name, no space after an apostrophe, in French", (
   }
 });
 
+/** spa_sync writes the open txg's blocks, one height per step: beat 0 done. */
+const writeAll = (p) => {
+  while (p.open.beat === null) p = M.step(p);
+  return p;
+};
+
 /** Every state the figure reaches: each step, each cut, each import, config on and off. */
 function states() {
   const out = [];
@@ -55,7 +60,9 @@ function states() {
     p = M.writeLeaf(p, 2).pool;
     out.push({ p });
     out.push({ p: M.writeLeaf(p, 3).pool, write: [3, M.writeLeaf(p, 3).rewritten] });
-    for (let beat = 0; beat <= 4; beat++) {
+    // Each height spa_sync writes, then the four beats; a cut before each step.
+    for (let k = 0; k < M.HEIGHTS + 4; k++) {
+      const beat = p.open.beat === 2 ? 2 : -1;
       const cutAt = M.pullPlug(p, beat === 2 ? 1 : 0);
       out.push({ p: cutAt, cut: true });
       const imp = M.importPool(cutAt);
@@ -119,17 +126,45 @@ test("the drawing agrees with the model", () => {
   assert.deepEqual(blocks.filter((b) => b.endsWith(":old")).map((b) => b.split(":")[0]).sort(), ["D2@4180", "DN@4210", "L1-1@4210", "L2-0@4210", "OS@4210"]);
   assert.deepEqual(blocks.filter((b) => b.endsWith(":live")).map((b) => b.split(":")[0]).sort(), ["D0@4190", "D1@4120", "D3@4210", "L1-0@4190"]);
   assert.match(svg, /data-root="OS@4210"/);
-  for (let i = 0; i < 4; i++) p = M.step(p);
+  // Nothing written yet: the new copies' pointers to each other are not filled in.
+  assert.deepEqual([...svg.matchAll(/class="edge e-wait" data-edge="([^"]+)"/g)].map((m) => m[1]), ["OS@4211>DN@4211", "DN@4211>L2-0@4211", "L2-0@4211>L1-1@4211", "L1-1@4211>D2@4211"]);
+  // Two heights written: D2 and L1 #1 are on the disk, L2 #0 holds the new pointer to L1 #1.
+  let h2 = M.step(M.step(p));
+  const svg2 = V.treeSvg(S, h2);
+  const st2 = Object.fromEntries([...svg2.matchAll(/data-block="([^"]+)" data-state="([^"]+)"/g)].map((m) => [m[1], m[2]]));
+  assert.deepEqual(["D2", "L1-1", "L2-0", "DN", "OS"].map((k) => st2[`${k}@4211`]), ["unflushed", "unflushed", "mem", "mem", "mem"]);
+  assert.match(svg2, /class="edge e-mem" data-edge="L2-0@4211>L1-1@4211"/);
+  assert.match(svg2, /class="edge e-wait" data-edge="DN@4211>L2-0@4211"/);
+  assert.equal(text(V.stepLine(S, h2)), "L1 #1 is written to a new place. Its new address and checksum are now in L2 #0, which the next step writes.");
+  assert.match(text(V.beatsHtml(S, h2)), /under way spa_sync is writing the new blocks of txg 4211, from the data up\. Rows written: 2 of 5\./);
+  // The ring marks only the blocks given as just written; the legend is whole from the start.
+  const ringed = V.treeSvg(S, h2, new Set(["L1-1@4211"]));
+  assert.deepEqual([...ringed.matchAll(/class="b [^"]* just" data-block="([^"]+)"/g)].map((m) => m[1]), ["L1-1@4211"]);
+  assert.equal((ringed.match(/class="ring"/g) ?? []).length, 1);
+  assert.equal((V.treeSvg(S, p).match(/<li class="s-/g) ?? []).length, 8);
+  // Caption sentences name the dnode block and the objset in full, a capital first.
+  h2 = M.step(h2);
+  assert.equal(text(V.stepLine(S, h2)), "L2 #0 is written to a new place. Its new address and checksum are now in the dnode block, which the next step writes.");
+  h2 = M.step(h2);
+  assert.match(text(V.stepLine(S, h2)), /^The dnode block is written to a new place\. Its new address and checksum are now in the objset, /);
+  assert.match(text(V.stepLine(strings("fr"), h2)), /^Le bloc de dnodes est écrit à un nouvel endroit\..* dans l’objset, /);
+  h2 = M.step(h2);
+  assert.match(text(V.stepLine(S, h2)), /^The objset is written: the 5 blocks of txg 4211 are on the disk, not flushed yet\./);
+  // Both data blocks in one step when two leaves share the txg.
+  const two = M.step(M.writeLeaf(M.writeLeaf(M.createPool(), 0).pool, 3).pool);
+  assert.equal(text(V.stepLine(S, two)), "D0 and D3 are written, each to a new place. Their new addresses and checksums are now in L1 #0 and L1 #1, which the next step writes.");
+  p = writeAll(p);
+  for (let i = 0; i < 3; i++) p = M.step(p);
   assert.match(V.treeSvg(S, p), /data-root="OS@4211"/);
   assert.match(V.diskSvg(S, p), /L0 txg 4211, L1 txg 4211, L2 txg 4211, L3 txg 4211/);
   // The announcement of a write names the copies; of beat 3, the slot.
   const w = M.writeLeaf(M.createPool(), 2);
-  assert.equal(text(V.writeLine(S, w.pool, 2, w.rewritten)), "D2 written in txg 4211: new copies of D2, L1 #1, L2 #0, dnodes and objset. The old tree is intact. code");
-  let q = w.pool;
-  for (let i = 0; i < 4; i++) q = M.step(q);
+  assert.equal(text(V.writeLine(S, w.pool, 2, w.rewritten)), "D2 written in txg 4211: new copies of D2, L1 #1, L2 #0, dnodes and objset. The old tree is intact.");
+  let q = writeAll(w.pool);
+  for (let i = 0; i < 3; i++) q = M.step(q);
   assert.match(text(V.stepLine(S, q)), /^Beat 3: the uberblock of txg 4211 is in slot 115 of the four labels\./);
   // A cut in beat 3 with nothing landed, then the import: case (1), config from L1.
-  const c = M.pullPlug(M.step(M.step(M.step(w.pool))), 0);
+  const c = M.pullPlug(M.step(M.step(writeAll(w.pool))), 0);
   assert.match(text(V.plugLine(S, c)), /during beat 3: 0 uberblock writes before the cut, the one to L0 torn/);
   const r = M.importPool(c).result;
   const h = text(V.importHtml(S, r));
@@ -149,8 +184,8 @@ test("the import's reason says which labels a cut txg wrote, and none when the c
   const S = strings("en");
   const cutAt = (beats, landed, dirty) => {
     let p = { ...M.createPool(), configDirty: dirty };
-    p = M.writeLeaf(p, 2).pool;
-    for (let i = 0; i < beats + 1; i++) p = M.step(p);
+    p = writeAll(M.writeLeaf(p, 2).pool);
+    for (let i = 0; i < beats; i++) p = M.step(p);
     return M.importPool(M.pullPlug(p, landed)).result;
   };
   assert.match(text(V.importVerdict(S, cutAt(2, 1, true))), /even labels, written at beat 2, are valid/);

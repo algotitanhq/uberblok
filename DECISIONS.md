@@ -2506,3 +2506,48 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   the desktop layout is unchanged. The open txg card keeps its accent tint but takes the neutral
   border, so an accent frame means only "this changed". Rejected: scrolling alone, which moves
   Next event away from the thumb.
+
+## v1.4 tree room (ALG-185)
+
+### D22.1 The tree room as a question, and a figure that climbs one level per step
+
+- **Context.** The roll-out of D21.1 (ALG-182)
+  starts with the tree and the uberblock room, the most visited after the Hall. It had 12
+  excerpts (255 lines of code) and 58 links to GitHub in each language, 27 of them in the
+  prose. The issue asks for a figure where the reader changes a block and follows the new
+  block pointers up to a new uberblock, one level per step.
+- **Question.** "What if the power fails while ZFS is writing?" (« Et s’il y a une coupure de
+  courant pendant que ZFS écrit ? », « ¿Qué pasa si se va la corriente mientras ZFS escribe? »). The answer does not
+  repeat the copy-on-write room's: it is about the txg as a whole, the one root pointer, the
+  flush before the uberblock, the ring of slots and what the import keeps.
+- **Figure.** `step()` in `src/lib/tree.ts` now writes the open txg's new blocks one height
+  per step, data first and the objset last (`HEIGHTS` = 5: data, L1, L2, the block of dnodes,
+  the objset); beat 0 is done when the objset is written, then the four beats as before. This
+  is the order of the code: a block's write I/O is the child of its parent's
+  (`dbuf_write`, dbuf.c L5411), and `zio_write_compress` holds the parent until every child is
+  ready, with its new address and checksum (zio.c L1932-L1939). In the drawing a new copy has a
+  dashed outline while in memory, a solid one once written, and fills in at the flush; a pointer from a new copy to a child not
+  yet written is dotted and muted, and turns into the accent once the child is written. The 3D
+  view draws the same states (an in-memory copy is a faint box, a waiting pointer a faint line).
+  Only what changed is animated, in 2D and 3D, and nothing under reduced motion. The commit
+  panel marks beat 0 "under way" while the rows are being written. A cut halfway up is a new case
+  (`during: 0`): the old tree wins, as with a cut during the flush. Writing a second block is
+  refused once the first level is written, as the code quiesces the txg before `spa_sync`.
+  The other controls, the text version and the no-script state are unchanged. The figure counts
+  "rows" (data, L1, L2, dnodes, objset), not "levels", which the room keeps for indirect blocks.
+- **Code.** Seven Source notes, 69 lines (`ANALYSIS.md` tree room, excerpts 7 and 12 to 17;
+  six are new short cuts of longer excerpts, checked against `zfs-2.4.4`). The "three depths"
+  section is gone: its one-paragraph summary repeated the answer, and its detail now lives in
+  the notes.
+- **Rejected.** A separate "climb" button beside Next step: two buttons that both advance the
+  sync would make the reader guess which one to press. Drawing the climb as an animation inside
+  one step: the issue asks for one level per step, and an animation cannot be paused or read
+  under reduced motion.
+- **After the design review.** The line that says what the last action did sits under the
+  controls, above the tree, and is there from the start ("D2 has changed in txg 4211…"); it
+  replaces the list of reasons why some buttons were disabled, which read as an instruction.
+  A disabled button gives its reason in the same line, on its press only. The blocks the last
+  step wrote carry a ring until the next action (a class, not an animation, so the same under
+  reduced motion), and the legend lists every state from the start, so a step changes the
+  drawing and never the key. Caption sentences say "the dnode block" and "the objset"; the
+  drawing keeps the short labels.

@@ -3,7 +3,7 @@
 // build:
 //   node scripts/verify-tree.mjs http://127.0.0.1:4321 shots/tree
 // QA's replay against the model (src/lib/tree.ts): a leaf write and its
-// rewritten ancestors; the four beats; the plug pulled at each beat (and
+// rewritten ancestors; the new tree written one height per step, then the four beats; the plug pulled before, during and after (and
 // after 0 to 3 uberblock writes in beat 3), with the tree that wins on import;
 // the slot of several txgs. Then the 3D view (SwiftShader), WebGL off,
 // reduced motion, no JavaScript, a keyboard-only walk, and the JavaScript
@@ -113,23 +113,36 @@ export async function verifyTree({ browser, open, base, out, report, VIEWPORTS }
         if (fresh.join() !== want.join() || r.rewritten.join() !== "D3") miss(k("write-D2-D3"), fresh, want);
         await shot(fig.locator(".tr-stage"), `tree-${lang}-${vp}-write.png`);
       }
-      // The four beats, checked after each step.
-      for (let b = 0; b <= 4; b++) {
+      // spa_sync writes the new tree one height per step, then the four beats, checked after each step.
+      for (let i = 0; i < M.HEIGHTS + 4; i++) {
         await stepN(1);
-        await compare(`beat-${b}`);
-        if (b === 3) await shot(fig, `tree-${lang}-${vp}-beat3.png`);
+        const name = model.open.beat === null ? `height-${model.open.wrote}` : `beat-${model.open.beat}`;
+        await compare(name);
+        if (model.open.beat === null || model.open.beat === 0) {
+          // The blocks written so far: every new copy below the height reached.
+          const got = await trRead(page);
+          const written = Object.entries(got.blocks).filter(([, s]) => s === "unflushed").map(([id]) => id).sort();
+          const want = Object.values(model.blocks).filter((b) => b.birth === 4211 && M.height(b.key) < model.open.wrote).map((b) => b.id).sort();
+          R.runs[k(`${name}-written`)] = written.join(",");
+          if (written.join() !== want.join()) miss(k(`${name}-written`), written, want);
+        }
+        if (name === "height-2") await shot(fig.locator(".tr-stage"), `tree-${lang}-${vp}-height2.png`);
+        if (name === "beat-3") await shot(fig, `tree-${lang}-${vp}-beat3.png`);
       }
-      // The plug pulled at each beat, config changed and not, beat 3 with 0 to 3 writes landed.
+      // The plug pulled before any write, halfway up the tree and at each beat, config changed
+      // and not, beat 3 with 0 to 3 writes landed. `done`: beats done, -1 with blocks still to write.
       const cases = [];
-      for (const dirty of [true, false]) for (let done = -1; done <= 4; done++) for (const landed of done === 2 ? [0, 1, 2, 3] : [0]) cases.push({ dirty, done, landed });
+      for (const dirty of [true, false])
+        for (const steps of [0, 2, ...[0, 1, 2, 3, 4].map((b) => M.HEIGHTS + b)])
+          for (const landed of steps === M.HEIGHTS + 2 ? [0, 1, 2, 3] : [0]) cases.push({ dirty, steps, done: steps < M.HEIGHTS ? -1 : steps - M.HEIGHTS, landed });
       for (const c of cases) {
         await restart();
         await setConfig(c.dirty);
-        await stepN(c.done + 1);
+        await stepN(c.steps);
         await fig.locator(`[data-landed='${c.landed}']`).click();
         await fig.locator("[data-act=plug]").click();
         model = M.pullPlug(model, c.landed);
-        const name = `plug-${c.dirty ? "cfg" : "nocfg"}-after${c.done}-landed${c.landed}`;
+        const name = `plug-${c.dirty ? "cfg" : "nocfg"}-steps${c.steps}-landed${c.landed}`;
         await compare(name + "-cut");
         await fig.locator("[data-act=import]").click();
         const r = M.importPool(model);
@@ -137,7 +150,7 @@ export async function verifyTree({ browser, open, base, out, report, VIEWPORTS }
         const got = await compare(name + "-import");
         R.runs[k(name)] = { winner: got.winner, tree: got.won };
         if (got.winner !== String(r.result.winner.txg) || got.won !== r.result.tree) miss(k(name), { winner: got.winner, won: got.won }, { winner: r.result.winner.txg, won: r.result.tree });
-        if (c.dirty && ((c.done === 2 && c.landed <= 1) || c.done === 1)) await shot(fig, `tree-${lang}-${vp}-${name}.png`);
+        if (c.dirty && ((c.done === 2 && c.landed <= 1) || c.done === 1 || c.steps === 2)) await shot(fig, `tree-${lang}-${vp}-${name}.png`);
       }
       // The slot of several txgs: four commits in a row.
       await restart();
@@ -147,7 +160,7 @@ export async function verifyTree({ browser, open, base, out, report, VIEWPORTS }
           await fig.locator(`[data-leaf='${i % 4}']`).click();
           model = M.writeLeaf(model, i % 4).pool;
         }
-        await stepN(5);
+        await stepN(M.HEIGHTS + 4);
         const got = await compare(`commit-${model.open.txg}`);
         R.runs[k(`slot-${model.open.txg}`)] = { slot: got.heads[4] };
       }
@@ -215,7 +228,7 @@ export async function verifyTree({ browser, open, base, out, report, VIEWPORTS }
     return res;
   };
   R.js = await jsRun(TR.en, "[data-tree-lab]", "[data-view3d]", ".tr-canvas", "tree-en-desktop-3d.png", async (page, fig) => {
-    for (let i = 0; i < 4; i++) await fig.locator("[data-act=step]").click();
+    for (let i = 0; i < M.HEIGHTS + 3; i++) await fig.locator("[data-act=step]").click();
   });
   R.hall.js = await jsRun(HALL.en, "[data-ring]", "[data-ring3d-btn]", ".ring-canvas", "hall-en-desktop-3d.png", async (page) => {
     // The ring commits by itself: three ticks, then mid-flight of the fourth block.
@@ -234,7 +247,7 @@ export async function verifyTree({ browser, open, base, out, report, VIEWPORTS }
     await page.waitForTimeout(800);
     if ((await fig.locator("[data-view3d]").getAttribute("aria-pressed")) !== "true") await fig.locator("[data-view3d]").click();
     await page.waitForSelector(".tr-canvas");
-    for (let i = 0; i < 3; i++) await fig.locator("[data-act=step]").click();
+    for (let i = 0; i < M.HEIGHTS + 2; i++) await fig.locator("[data-act=step]").click();
     await fig.locator("[data-landed='1']").click();
     await fig.locator("[data-act=plug]").click();
     await page.waitForTimeout(1200);
@@ -397,7 +410,7 @@ export async function verifyTree({ browser, open, base, out, report, VIEWPORTS }
     await page.keyboard.press("Enter");
     drive.focusKept = await page.evaluate(() => document.activeElement?.dataset.leaf === "0");
     drive.step = await tabTo("[data-act=step]");
-    for (let i = 0; i < 3; i++) await page.keyboard.press("Enter");
+    for (let i = 0; i < M.HEIGHTS + 2; i++) await page.keyboard.press("Enter");
     drive.landed = await tabTo("[data-landed='1']");
     await page.keyboard.press("Space");
     drive.plug = await tabTo("[data-act=plug]");
@@ -413,8 +426,8 @@ export async function verifyTree({ browser, open, base, out, report, VIEWPORTS }
     drive.toggled = wasOn !== (await page.evaluate(() => document.querySelector("[data-view3d]").getAttribute("aria-pressed")));
     await page.waitForTimeout(300);
     drive.said = await page.evaluate(() => window.__said);
-    // Eight actions: a write, three steps, the landed count, the plug, the import, the view.
-    drive.ok = drive.leaf && drive.focusKept && drive.step && drive.plug && drive.imp && drive.winner === "4211" && drive.toggled && drive.said.length === 8 && !drive.said.some((t) => /\bcode\b$/.test(t));
+    // Twelve actions: a write, seven steps (five heights, two beats), the landed count, the plug, the import, the view.
+    drive.ok = drive.leaf && drive.focusKept && drive.step && drive.plug && drive.imp && drive.winner === "4211" && drive.toggled && drive.said.length === M.HEIGHTS + 7 && !drive.said.some((t) => /\bcode\b$/.test(t));
     if (!drive.ok) miss(`keyboard-${lang}`, drive, {});
     if (lang === "en") {
       await page.screenshot({ path: join(out, "tree-en-desktop-keyboard.png") });

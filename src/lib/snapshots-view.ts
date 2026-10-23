@@ -1,18 +1,18 @@
 // HTML for the Snapshots and clones room's figure, built from a State of
 // src/lib/snapshots.ts. Plain strings, no DOM: the page renders the opening
 // state at build time (readable without JavaScript) and the script renders
-// every later state with the same functions.
+// every later state with the same functions. The narration is plain and has no
+// code links: those live in the room's Source notes (DECISIONS.md D21.1).
 import {
-  SLOTS, head, ds, snapshots, referencedBy, owners, wouldKill, taskRefusal, slotBlock,
+  SLOTS, head, ds, snapshots, referencedBy, owners, wouldKill, taskRefusal, slotBlock, heldOnlyBy, pinned,
   type State, type Dataset, type Event, type Block, type Task,
 } from "./snapshots";
 
-export type SnStrings = Record<string, string> & { refs: Record<string, string> };
+export type SnStrings = Record<string, string>;
 
 const fill = (tpl: string, vars: Record<string, string | number>) =>
   tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
 const code = (s: string | number) => `<code>${s}</code>`;
-const see = (S: SnStrings, r: string) => ` <a class="see" href="${S.refs[r]}">${S.see}</a>`;
 
 /** A block's name: its slot letter (R for a root) and its birth txg. */
 export const blockName = (b: Block) => `${b.slot < 0 ? "R" : SLOTS[b.slot]}<sub>${b.birth}</sub>`;
@@ -21,13 +21,16 @@ const blockText = (S: SnStrings, b: Block) =>
 export const dsName = (s: State, id: string) => (id === "$ORIGIN" ? "$ORIGIN" : (s.datasets.find((d) => d.id === id)?.name ?? id));
 const list = (S: SnStrings, xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} ${S.and} ${xs[xs.length - 1]}`);
 
-/** One chip: a button in the browser, a span at build time. */
+/** Blocks the last action changed: they get a ring until the next action (D21.2, D24.1). */
+let hit: ReadonlySet<number> = new Set();
+
+/** One chip: a button in the browser, a span at build time. A block kept only for snapshots is hatched. */
 function chip(s: State, S: SnStrings, id: number, at: string, live: boolean, extra = ""): string {
   const b = s.blocks[id];
-  const cls = `chip${b.slot < 0 ? " root" : ""}${b.dir === "clone" ? " c" : ""}${extra}`;
+  const cls = `chip${b.slot < 0 ? " root" : ""}${b.dir === "clone" ? " c" : ""}${pinned(s, id) ? " pin" : ""}${hit.has(id) ? " hit" : ""}${extra}`;
   const txt = blockName(b);
   if (!live) return `<span class="${cls}" data-b="${id}" data-at="${at}">${txt}</span>`;
-  return `<button type="button" class="${cls}" data-b="${id}" data-at="${at}" aria-label="${blockText(S, b)}" aria-pressed="false">${txt}</button>`;
+  return `<button type="button" class="${cls}" data-b="${id}" data-at="${at}" aria-label="${blockText(S, b)}${pinned(s, id) ? `, ${S.aPinned}` : ""}" aria-pressed="false">${txt}</button>`;
 }
 
 function entries(s: State, S: SnStrings, d: Dataset, live: boolean): string {
@@ -46,13 +49,20 @@ function pendingTask(s: State, t: Task) {
   return s.pending.tasks.findIndex((q) => q.kind === t.kind && JSON.stringify(q) === JSON.stringify(t));
 }
 
+/** The dataset's previous snapshot, in words: "latest snapshot: fs@s1, txg 9". */
+const metaLine = (s: State, S: SnStrings, d: Dataset, txg: string) =>
+  fill(d.snapshot ? S.mBefore : d.dir === "clone" ? S.mOrigin : S.mLatest, {
+    name: d.prevSnap === "$ORIGIN" ? S.mStart : code(dsName(s, d.prevSnap)),
+    txg,
+  });
+
 function dsRow(s: State, S: SnStrings, d: Dataset, live: boolean): string {
   const kind = d.snapshot
     ? fill(S.kSnapshot, { txg: d.creationTxg })
     : d.dir === "clone"
       ? fill(S.kClone, { origin: dsName(s, d.prevSnap), txg: d.creationTxg })
       : S.kHead;
-  const meta = `${code("ds_prev_snap_txg")} <strong>${d.prevSnapTxg}</strong> <span class="muted">(${dsName(s, d.prevSnap)})</span>`;
+  const meta = metaLine(s, S, d, `<strong>${d.prevSnapTxg}</strong>`);
   const pend = !d.snapshot ? (s.pending.changes[d.dir] ?? {}) : {};
   const slots = s.roots[d.bp]
     .map((id, i) => {
@@ -77,24 +87,32 @@ function dsRow(s: State, S: SnStrings, d: Dataset, live: boolean): string {
     if (di >= 0) bits.push(`<span class="tag task">${fill(S.tagDestroy, { txg: s.txg })}</span><button type="button" class="btn sm" data-cancel-task="${di}">${S.cancel}</button>`);
     else {
       const why = taskRefusal(s, de);
-      if (why === "EEXIST") bits.push(`<span class="refuse">${S.eexist}${see(S, "eexist")}</span>`);
+      if (why === "EEXIST") bits.push(`<span class="refuse">${S.eexist}</span>`);
       else if (!why) bits.push(`<button type="button" class="btn sm" data-task="destroy:${d.id}">${S.destroy}</button>`);
     }
     acts = `<div class="acts">${bits.join("")}</div>`;
   }
+  // What only this snapshot holds: what destroying it would free.
+  let only = "";
+  if (d.snapshot && d.numChildren < 2) {
+    const ids = heldOnlyBy(s, d.id);
+    only = `<p class="only">${ids.length ? `${fill(S.onlyHolds, { n: ids.length })} ${ids.map((id) => chip(s, S, id, `only:${d.id}`, false)).join("")}` : S.onlyNone}</p>`;
+  }
   return `<section class="ds ${d.snapshot ? "snap" : d.dir === "clone" ? "clone" : "head"}" data-ds="${d.id}" aria-label="${d.name}">
 <header><h3><code>${d.name}</code></h3><span class="kind">${kind}</span><span class="meta">${meta}</span>${acts}</header>
 <div class="tree"><span class="lbl">${code("ds_bp")} →</span>${chip(s, S, d.bp, `tree:${d.id}`, live)}<span class="arrow" aria-hidden="true">→</span><span class="slots">${slots}</span></div>
-${entries(s, S, d, live)}
+${entries(s, S, d, live)}${only}
 </section>`;
 }
 
 /** The board: every dataset, then the blocks freed by the last sync. */
-export function board(s: State, S: SnStrings, live: boolean, freedLast: number[] = []): string {
+export function board(s: State, S: SnStrings, live: boolean, freedLast: number[] = [], last: ReadonlySet<number> = new Set()): string {
+  hit = last;
   const rows = s.datasets.map((d) => dsRow(s, S, d, live)).join("");
   const freed = freedLast.length
-    ? `<p class="freed"><span class="lbl">${fill(S.freedIn, { txg: s.txg - 1 })}</span>${freedLast.map((id) => `<span class="chip gone${s.blocks[id].slot < 0 ? " root" : ""}${s.blocks[id].dir === "clone" ? " c" : ""}" data-b="${id}" data-at="freed">${blockName(s.blocks[id])}</span>`).join("")}</p>`
+    ? `<p class="freed"><span class="lbl">${fill(S.freedIn, { txg: s.txg - 1 })}</span>${freedLast.map((id) => `<span class="chip gone${s.blocks[id].slot < 0 ? " root" : ""}${s.blocks[id].dir === "clone" ? " c" : ""}${hit.has(id) ? " hit" : ""}" data-b="${id}" data-at="freed">${blockName(s.blocks[id])}</span>`).join("")}</p>`
     : "";
+  hit = new Set();
   return `<div class="board">${rows}</div>${freed}`;
 }
 
@@ -114,15 +132,15 @@ export function eventLine(s: State, S: SnStrings, e: Event): string {
   const bn = (id: number) => `<b>${blockName(s.blocks[id])}</b>`;
   switch (e.k) {
     case "born":
-      return fill(s.blocks[e.block].slot < 0 ? S.eRoot : S.eBorn, { ds: code(dsName(s, e.ds)), b: bn(e.block), txg: s.blocks[e.block].birth }) + see(S, "birth");
+      return fill(s.blocks[e.block].slot < 0 ? S.eRoot : S.eBorn, { ds: code(dsName(s, e.ds)), b: bn(e.block), txg: s.blocks[e.block].birth });
     case "kill":
       return fill(e.freed ? S.eFree : S.eDead, {
         ds: code(dsName(s, e.ds)), b: bn(e.block), birth: e.birth, prev: e.prevSnapTxg, key: e.key ?? "",
-      }) + see(S, e.freed ? "free" : "insert");
+      });
     case "snapshot":
-      return fill(S.eSnap, { snap: code(dsName(s, e.snap)), root: bn(e.bp), old: e.oldPrev, keys: e.keys.join(", "), txg: ds(s, e.snap).creationTxg }) + see(S, "snapshot");
+      return fill(S.eSnap, { snap: code(dsName(s, e.snap)), root: bn(e.bp), old: e.oldPrev, keys: e.keys.join(", "), txg: ds(s, e.snap).creationTxg });
     case "clone":
-      return fill(S.eClone, { origin: code(dsName(s, e.origin)), root: bn(e.bp), txg: ds(s, e.origin).creationTxg, keys: e.keys.join(", ") }) + see(S, "clone");
+      return fill(S.eClone, { origin: code(dsName(s, e.origin)), root: bn(e.bp), txg: ds(s, e.origin).creationTxg, keys: e.keys.join(", ") });
     case "destroy":
       return fill(S.eDestroy, {
         snap: code(e.name),
@@ -132,9 +150,9 @@ export function eventLine(s: State, S: SnStrings, e: Event): string {
         merged: e.merged.length ? fill(S.eMerged, { list: list(S, e.merged.map(bn)) }) : "",
         key: e.removedKey,
         from: e.removedFrom.length ? fill(S.eRemoved, { key: e.removedKey, list: list(S, e.removedFrom.map((x) => code(dsName(s, x)))) }) : "",
-      }) + see(S, "destroy");
+      });
     case "refused":
-      return fill(e.err === "EAGAIN" ? S.eEagain : e.err === "EEXIST" ? S.eexist : S.eEnoent, {}) + see(S, e.err === "EAGAIN" ? "eagain" : "eexist");
+      return fill(e.err === "EAGAIN" ? S.eEagain : e.err === "EEXIST" ? S.eexist : S.eEnoent, {});
     case "synced":
       return fill(S.eSynced, { txg: e.txg });
   }
@@ -156,7 +174,7 @@ export function ownerPanel(s: State, S: SnStrings, id: number | null, live: bool
   if (b.dir === "fs") {
     const k = b.killed.fs;
     const range = k === undefined ? fill(S.oRangeOpen, { birth: b.birth }) : fill(k - 1 === b.birth ? S.oRangeOne : S.oRangeKilled, { birth: b.birth, last: k - 1, k });
-    out.push(`<p>${o.snaps.length ? fill(S.oSnaps, { list: names(o.snaps), range }) : fill(S.oNoSnap, { range })}${see(S, "insert")}</p>`);
+    out.push(`<p>${o.snaps.length ? fill(S.oSnaps, { list: names(o.snaps), range }) : fill(S.oNoSnap, { range })}</p>`);
   } else out.push(`<p>${S.oCloneOwn}</p>`);
   for (const dir of ["fs", "clone"] as const) {
     const h = head(s, dir);
@@ -169,9 +187,32 @@ export function ownerPanel(s: State, S: SnStrings, id: number | null, live: bool
       acts = p
         ? ` <span class="tag ${p}">${fill(p === "write" ? S.tagWrite : S.tagDelete, { txg: s.txg })}</span> <button type="button" class="btn sm" data-cancel="${dir}:${b.slot}">${S.cancel}</button>`
         : ` <span class="acts"><button type="button" class="btn sm" data-change="${dir}:${b.slot}:write">${fill(S.overwrite, { ds: h.name })}</button><button type="button" class="btn sm" data-change="${dir}:${b.slot}:delete">${fill(S.delete, { ds: h.name })}</button></span>`;
-    out.push(`<p class="would">${cmp}${see(S, "kill")}${acts}</p>`);
+    out.push(`<p class="would">${cmp}${acts}</p>`);
   }
   return out.join("");
+}
+
+/** The blocks a sync changed: born, kept on a deadlist, or freed. */
+export const touched = (ev: Event[]): Set<number> =>
+  new Set(ev.flatMap((e) => (e.k === "born" || e.k === "kill" ? [e.block] : e.k === "destroy" ? [...e.freed, ...e.merged] : [])));
+
+/** One or two sentences on what the last sync did, for the line under the controls. */
+export function didLine(s: State, S: SnStrings, ev: Event[]): string {
+  const txg = s.txg - 1;
+  const bn = (id: number) => `<b>${blockName(s.blocks[id])}</b>`;
+  const freed = ev.flatMap((e) => (e.k === "kill" && e.freed ? [e.block] : e.k === "destroy" ? e.freed : []));
+  const kept = ev.flatMap((e) => (e.k === "kill" && !e.freed ? [e.block] : []));
+  const out: string[] = [];
+  for (const e of ev) {
+    if (e.k === "snapshot") out.push(fill(S.dSnap, { snap: code(dsName(s, e.snap)) }));
+    if (e.k === "clone") out.push(fill(S.dClone, { origin: code(dsName(s, e.origin)) }));
+    if (e.k === "destroy") out.push(fill(S.dDestroy, { snap: code(e.name) }));
+    if (e.k === "refused") out.push(fill(e.err === "EAGAIN" ? S.eEagain : e.err === "EEXIST" ? S.eexist : S.eEnoent, {}));
+  }
+  if (kept.length) out.push(fill(S.dKept, { list: list(S, kept.map(bn)) }));
+  if (freed.length) out.push(fill(S.dFreed, { list: list(S, freed.map(bn)) }));
+  if (!kept.length && !freed.length && !out.length) out.push(S.dNothing);
+  return `${fill(S.dSynced, { txg })} ${out.join(" ")}`;
 }
 
 /** The text version of the whole state. */
@@ -183,7 +224,7 @@ export function describe(s: State, S: SnStrings): string {
       .join(S.semi);
     const kind = d.snapshot ? fill(S.kSnapshot, { txg: d.creationTxg }) : d.dir === "clone" ? fill(S.kClone, { origin: dsName(s, d.prevSnap), txg: d.creationTxg }) : S.kHead;
     return `<li>${fill(S.tDataset, {
-      name: code(d.name), kind, prev: d.prevSnapTxg, root: blockText(S, s.blocks[d.bp]), blocks: blocks.join(", "), dl,
+      name: code(d.name), kind, prev: metaLine(s, S, d, String(d.prevSnapTxg)), root: blockText(S, s.blocks[d.bp]), blocks: blocks.join(", "), dl,
     })}</li>`;
   });
   const freed = s.blocks.filter((b) => b.freed !== undefined);

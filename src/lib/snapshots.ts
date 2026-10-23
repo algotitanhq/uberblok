@@ -420,3 +420,23 @@ export function wouldKill(s: State, d: Dataset, id: number): { freed: boolean; k
 
 /** Blocks still on disk: not freed. */
 export const onDisk = (s: State) => s.blocks.filter((b) => b.freed === undefined);
+
+/**
+ * Blocks only this snapshot holds: on disk and in no other dataset's tree. They are
+ * what destroying it would free (the entries dsl_destroy.c L415-L418 moves), when
+ * nothing else changes in that txg; the tests check the two agree.
+ */
+export const heldOnlyBy = (s: State, id: string): number[] =>
+  onDisk(s)
+    .filter((b) => {
+      const r = referencedBy(s, b.id);
+      return r.length === 1 && r[0] === id;
+    })
+    .map((b) => b.id);
+
+/** A block kept only for snapshots: on disk, and in no head's tree. */
+export const pinned = (s: State, id: number): boolean => {
+  if (s.blocks[id].freed !== undefined) return false;
+  const r = referencedBy(s, id);
+  return r.length > 0 && r.every((x) => ds(s, x).snapshot);
+};

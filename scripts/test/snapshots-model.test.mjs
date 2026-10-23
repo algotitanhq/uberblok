@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   create, opening, change, ask, sync, ds, head, snapshots, referencedBy, owners, wouldKill, taskRefusal,
-  changeRefusal, dlInsert, tree, SLOTS,
+  changeRefusal, dlInsert, tree, SLOTS, heldOnlyBy, pinned,
 } from "../../src/lib/snapshots.ts";
 
 // A block by slot letter and birth txg, among blocks of a directory.
@@ -323,4 +323,54 @@ test("random sequences: no block freed while referenced, none leaked, owners = r
   }
   assert.ok(txgs === 12000);
   for (const [k, v] of Object.entries(outcomes)) assert.ok(v > 20, `${k} exercised (${v})`);
+});
+
+test("random sequences: a destroy alone in its txg frees exactly the blocks only that snapshot held", () => {
+  let checked = 0, nonEmpty = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const r = rng(seed);
+    const s = seed % 2 ? opening() : create(5);
+    for (let step = 0; step < 25; step++) {
+      const snaps = snapshots(s);
+      const victim = snaps.length && r() < 0.35 ? snaps[Math.floor(r() * snaps.length)] : null;
+      if (victim && !taskRefusal(s, { kind: "destroy", snap: victim.id })) {
+        // Nothing else in this txg: the prediction is the figure's, made before the sync.
+        const want = heldOnlyBy(s, victim.id).sort((a, b) => a - b);
+        ask(s, { kind: "destroy", snap: victim.id });
+        const ev = sync(s);
+        const got = ev.find((e) => e.k === "destroy").freed.slice().sort((a, b) => a - b);
+        assert.deepEqual(got, want, `seed ${seed}: destroy of ${victim.name}`);
+        checked++;
+        if (want.length) nonEmpty++;
+        continue;
+      }
+      for (let i = 0, n = Math.floor(r() * 3); i < n; i++) {
+        const dir = head(s, "clone") && r() < 0.4 ? "clone" : "fs";
+        const slot = Math.floor(r() * 4);
+        const c = r() < 0.7 ? "write" : "delete";
+        if (!changeRefusal(s, dir, slot, c)) change(s, dir, slot, c);
+      }
+      const x = r();
+      if (x < 0.35 && !taskRefusal(s, { kind: "snapshot" })) ask(s, { kind: "snapshot" });
+      else if (x < 0.42 && snaps.length) {
+        const t = { kind: "clone", origin: snaps[Math.floor(r() * snaps.length)].id };
+        if (!taskRefusal(s, t)) ask(s, t);
+      }
+      sync(s);
+      // pinned = on disk and held by snapshots only.
+      for (const b of s.blocks) {
+        const refs = referencedBy(s, b.id);
+        const want = b.freed === undefined && refs.length > 0 && refs.every((x) => ds(s, x).snapshot);
+        assert.equal(pinned(s, b.id), want, `seed ${seed}: pinned ${label(s, b.id)}`);
+      }
+    }
+  }
+  assert.ok(checked > 200 && nonEmpty > 50, `destroys checked ${checked}, freeing something ${nonEmpty}`);
+});
+
+test("the opening state: A8 and R8 are kept only for fs@s1, and destroying it would free them", () => {
+  const s = opening();
+  const pins = s.blocks.filter((b) => pinned(s, b.id)).map((b) => label(s, b.id)).sort();
+  assert.deepEqual(pins, ["A8", "R8"]);
+  assert.deepEqual(heldOnlyBy(s, "s1").map((id) => label(s, id)).sort(), ["A8", "R8"]);
 });

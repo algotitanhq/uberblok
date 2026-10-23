@@ -5,38 +5,23 @@
 // visitor writes and deletes files, syncs, loads and condenses;
 // src/lib/metaslab.ts (a transcription of metaslab.c and space_map.c) decides
 // every outcome, and src/lib/metaslab-view.ts draws it, at build time for the
-// opening state (readable without JavaScript) and in the browser after. Refs:
+// opening state (readable without JavaScript) and in the browser after. Each
+// action outlines what it changed, and the line under the buttons says it in
+// plain words, without code links (DECISIONS.md D21.1, D27.1). Refs:
 // ANALYSIS.md, room "Metaslabs and space maps"; simplifications: DECISIONS.md D7.2.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { opening } from "../lib/metaslab";
 import { MS_STRINGS } from "../lib/metaslab-strings";
-import { vdev, bar, legend, trees, files, tape, tapeMeta, bits, check, describe, summary, type MsStrings } from "../lib/metaslab-view";
+import { vdev, bar, legend, trees, files, tape, tapeMeta, bits, check, describe, summary, entryRange, type MsStrings } from "../lib/metaslab-view";
 
 interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const M = "module/zfs/metaslab.c";
-const SMC = "module/zfs/space_map.c";
-const refs = {
-  df: gh(M, 1905, 1931),
-  freeing: gh(M, 5518, 5528),
-  condense: gh(M, 3994, 4013),
-  sync: gh(M, 4397, 4404),
-  early: gh(M, 4279, 4284),
-  defer: gh(M, 4624, 4638),
-  load: gh(SMC, 401, 416),
-  should: gh(M, 3836, 3861),
-  intro: gh(SMC, 529, 543),
-  pad: gh(SMC, 615, 631),
-  words: gh(SMC, 712, 734),
-  layout: gh("include/sys/space_map.h", 104, 140),
-};
 const S0 = MS_STRINGS[lang];
-const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as MsStrings;
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as MsStrings;
 const t = UI[lang];
 const s0 = opening();
 const sel0 = s0.tape.length - 1;
@@ -58,15 +43,21 @@ const sizes = [4, 32, 160];
     </div>
   </div>
   <p class="visually-hidden" data-summary>{summary(s0, S)}</p>
+  <section class="msl-log" aria-labelledby={`msl-log-${lang}`} hidden>
+    <h3 id={`msl-log-${lang}`}>{S.logLabel}</h3>
+    <p class="visually-hidden" data-status aria-live="polite"></p>
+    <ol data-log><li class="muted">{S.logEmpty}</li></ol>
+  </section>
 
-  <div class="msl-vdev" aria-hidden="true">
-    <p class="cap">{S.vdevLabel}</p>
-    <div data-vdev set:html={vdev(s0, S)} />
+  <div class="msl-vdev">
+    <p class="cap" aria-hidden="true">{S.vdevLabel}</p>
+    <div data-vdev aria-hidden="true" set:html={vdev(s0, S)} />
+    <p class="vnote">{S.vdevNote}</p>
   </div>
 
   <div class="msl-ms">
     <p class="cap" aria-hidden="true">{S.msLabel}</p>
-    <div data-ms set:html={bar(s0, S)} />
+    <div data-ms set:html={bar(s0, S, [], entryRange(s0, sel0))} />
     <Fragment set:html={legend(S)} />
   </div>
 
@@ -94,11 +85,6 @@ const sizes = [4, 32, 160];
   </section>
 
   <noscript><p class="muted">{t.noScript}</p></noscript>
-  <section class="msl-log" aria-labelledby={`msl-log-${lang}`} hidden>
-    <h3 id={`msl-log-${lang}`}>{S.logLabel}</h3>
-    <p class="visually-hidden" data-status aria-live="polite"></p>
-    <ol data-log><li class="muted">{S.logEmpty}</li></ol>
-  </section>
   <details class="text-version">
     <summary>{t.textVersion}</summary>
     <div data-describe set:html={describe(s0, S)} />
@@ -108,7 +94,7 @@ const sizes = [4, 32, 160];
 <script>
   import { strings, wait, reducedMotion, fill } from "../lib/svg";
   import { opening, write, del, sync, load, churn, condenseNow, replay, clone, MIB, type Ms, type Ev } from "../lib/metaslab";
-  import { vdev, bar, trees, files, tape, tapeMeta, bits, check, describe, summary, eventLine, eventClass, shownEntries, type MsStrings } from "../lib/metaslab-view";
+  import { vdev, bar, trees, files, tape, tapeMeta, bits, check, describe, summary, eventLine, eventClass, shownEntries, changes, entryRange, NO_CHANGES, type Changes, type MsStrings } from "../lib/metaslab-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-msl]")) {
     const S = strings<MsStrings>(root);
@@ -116,6 +102,8 @@ const sizes = [4, 32, 160];
     const logEl = q("[data-log]");
     let s: Ms = opening();
     let sel: number | null = s.tape.length - 1;
+    // What the last action changed: outlined in the drawing until the next action.
+    let chg: Changes = NO_CHANGES;
     let run = 0;
     let busy = false;
 
@@ -129,11 +117,11 @@ const sizes = [4, 32, 160];
 
     function render(focusKey: string | null = keyOf(document.activeElement)) {
       q("[data-vdev]").innerHTML = vdev(s, S);
-      q("[data-ms]").innerHTML = bar(s, S);
-      q("[data-trees]").innerHTML = trees(s, S);
-      q("[data-files]").innerHTML = files(s, S, true);
+      q("[data-ms]").innerHTML = bar(s, S, chg.segs, entryRange(s, sel));
+      q("[data-trees]").innerHTML = trees(s, S, chg.trees);
+      q("[data-files]").innerHTML = files(s, S, true, chg.files);
       q("[data-tapemeta]").textContent = tapeMeta(s, S);
-      q("[data-tape]").innerHTML = tape(s, S, true, sel);
+      q("[data-tape]").innerHTML = tape(s, S, true, sel, chg.fresh);
       q("[data-bits]").innerHTML = bits(s, S, sel);
       q("[data-check]").innerHTML = check(s, S);
       q("[data-summary]").textContent = summary(s, S);
@@ -161,7 +149,7 @@ const sizes = [4, 32, 160];
       }
       logEl.replaceChildren();
       const lines = ev.map((e) => eventLine(S, e));
-      q("[data-status]").textContent = lines.map((l) => l.replace(/<[^>]+>/g, "")).join(" ").split(` ${S.see}`).join("");
+      q("[data-status]").textContent = lines.map((l) => l.replace(/<[^>]+>/g, "")).join(" ");
       for (let i = 0; i < ev.length; i++) {
         const li = document.createElement("li");
         li.className = eventClass(ev[i]);
@@ -177,7 +165,9 @@ const sizes = [4, 32, 160];
     function act(f: () => Ev[]) {
       const before = s.tape.length;
       const truncated = s.length;
+      const prev = clone(s);
       const ev = f();
+      chg = changes(prev, s);
       const appended = s.tape.length !== before || s.length !== truncated;
       if (appended) sel = lastEntry();
       render();
@@ -189,6 +179,9 @@ const sizes = [4, 32, 160];
       const ev = load(clone(s));
       if (ev[0].k !== "load" || reducedMotion()) return act(() => load(s));
       busy = true;
+      // The previous action's outlines go at once: Load changes nothing.
+      chg = NO_CHANGES;
+      render();
       const me = ++run;
       const n = s.tape.length;
       const steps = Math.min(n, 36);
@@ -223,13 +216,15 @@ const sizes = [4, 32, 160];
         busy = false;
         s = opening();
         sel = s.tape.length - 1;
+        chg = NO_CHANGES;
         logEl.innerHTML = `<li class="muted">${S.logEmpty}</li>`;
         q("[data-status]").textContent = "";
         render();
       } else if (d.del) act(() => del(s, d.del!));
       else if (d.e) {
         sel = Number(d.e);
-        q("[data-tape]").innerHTML = tape(s, S, true, sel);
+        q("[data-ms]").innerHTML = bar(s, S, chg.segs, entryRange(s, sel));
+        q("[data-tape]").innerHTML = tape(s, S, true, sel, chg.fresh);
         q("[data-bits]").innerHTML = bits(s, S, sel);
         // The one live region says what the selected entry's bits mean.
         q("[data-status]").textContent = (q("[data-bits]").textContent ?? "").replace(/\s+/g, " ").trim();
@@ -347,9 +342,14 @@ const sizes = [4, 32, 160];
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--fg);
+    background: var(--surface);
+    padding: 0 3px;
+    border-radius: 2px;
+    line-height: 1.3;
   }
   .msl-ms :global(.ticks) {
     position: relative;
+    margin-top: 8px;
     height: 1.4rem;
     border-top: 0;
   }
@@ -379,8 +379,9 @@ const sizes = [4, 32, 160];
     border-top: 9px solid var(--fg);
     transition: left var(--dur-3) var(--ease);
   }
+  /* --fg-faint: 4.3:1 against the free fill (--surface-2) in both themes (WCAG 1.4.11 asks 3:1). */
   .msl-ms :global(.used) {
-    fill: var(--line-strong);
+    fill: var(--fg-faint);
   }
   .msl-ms :global(.free) {
     fill: var(--surface-2);
@@ -442,7 +443,18 @@ const sizes = [4, 32, 160];
     border: 1px solid var(--line-strong);
   }
   .msl-ms :global(.sw.used) {
-    background: var(--line-strong);
+    background: var(--fg-faint);
+  }
+  /* Just under the bar, above the tick labels. */
+  .msl-ms :global(.flabels .selr) {
+    position: absolute;
+    top: calc(100% + 2px);
+    height: 6px;
+    background: var(--fg);
+  }
+  .msl-ms :global(.sw.selr) {
+    height: 0.3rem;
+    background: var(--fg);
   }
   .msl-ms :global(.sw.allocating) {
     background: var(--accent);
@@ -502,8 +514,8 @@ const sizes = [4, 32, 160];
     font-variant-numeric: tabular-nums;
   }
   .panel :global(.files li) {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-1) var(--space-2);
     min-height: 44px;
@@ -525,7 +537,6 @@ const sizes = [4, 32, 160];
   }
   .panel :global(.fmeta) {
     color: var(--fg-muted);
-    flex: 1 1 12rem;
   }
   .panel :global(.btn--small) {
     min-height: 44px;
@@ -610,9 +621,14 @@ const sizes = [4, 32, 160];
     color: var(--ok);
     font-weight: 600;
   }
+  /* Selected: inverted, so that the outline stays free to mean "changed by the last action". */
   .tape :global(.tc.sel) {
-    outline: 2px solid var(--fg);
-    outline-offset: 1px;
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
+  }
+  .tape :global(.tc.sel .t1) {
+    color: inherit;
   }
   /* The selected entry keeps a focus ring of its own: the selection outline would hide it. */
   .tape :global(.tc.sel:focus-visible) {
@@ -624,6 +640,47 @@ const sizes = [4, 32, 160];
   }
   .tape :global(.tc.replayed) {
     background: var(--accent-soft);
+  }
+  .tape :global(.tc.sel.replayed),
+  .tape :global(.tc.sel.cond) {
+    background: var(--fg);
+    color: var(--bg);
+  }
+  /* What the last action changed: a dashed ink outline (focus rings are solid), static, so the same under reduced motion. */
+  /* Rows are outlined inside their own box, so that two changed neighbours do not draw double lines. */
+  .panel :global(li.chg) {
+    outline: 2px dashed var(--fg);
+    outline-offset: -2px;
+    border-radius: 2px;
+  }
+  .panel :global(.trees li),
+  .panel :global(.files li) {
+    padding: 3px 6px;
+  }
+  /* The words the last action wrote: one box around the run, whatever its length. */
+  .tape :global(.chgrun) {
+    min-width: 0;
+    outline: 2px dashed var(--fg);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  .msl-ms :global(.chg) {
+    fill: none;
+    stroke: var(--fg);
+    stroke-width: 2;
+    stroke-dasharray: 5 3;
+    vector-effect: non-scaling-stroke;
+  }
+  .msl-ms :global(.sw.chg) {
+    background: transparent;
+    outline: 2px dashed var(--fg);
+    outline-offset: -2px;
+  }
+  .vnote {
+    margin-top: var(--space-2);
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+    max-width: var(--measure);
   }
   .bits {
     margin-top: var(--space-4);
@@ -699,6 +756,9 @@ const sizes = [4, 32, 160];
     min-width: 2.6em;
     font-weight: 600;
   }
+  .check :global(.verdict .yn) {
+    min-width: 0;
+  }
   .check :global(.yn.yes) {
     color: var(--ok);
   }
@@ -725,17 +785,17 @@ const sizes = [4, 32, 160];
     font-size: var(--step--1);
   }
   .msl-log {
-    margin-top: var(--space-6);
+    margin: 0 0 var(--space-5);
     max-width: 48rem;
+    min-height: 3.5rem;
   }
   .msl-log h3 {
-    font-family: var(--font-caption);
-    font-style: italic;
-    font-weight: 400;
-    font-size: var(--step-1);
-    color: var(--accent);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
     letter-spacing: 0;
-    margin-bottom: var(--space-3);
+    margin-bottom: var(--space-2);
   }
   .msl-log ol {
     margin: 0;
@@ -766,10 +826,6 @@ const sizes = [4, 32, 160];
   }
   .msl-log :global(li.refused) {
     border-left-color: var(--bad);
-  }
-  .msl :global(a.see) {
-    font-size: 0.85em;
-    color: var(--fg-muted);
   }
   .text-version {
     margin-top: var(--space-5);

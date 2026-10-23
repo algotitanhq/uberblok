@@ -2701,3 +2701,115 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   below the tree. The answer's second paragraph keeps only the class rules (123 words in EN,
   from 192); the fallback, the spread within a class and the second copy move to what to try,
   where the figure shows each. The fill buttons get their own labelled group.
+
+## v1.4 ARC room (ALG-193)
+
+### D25.1 The ARC room as a question, and a figure that reads one block per press
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)),
+  fifth room. It had 8 excerpts (199 lines of code) and 49 links to GitHub in each language, 37
+  of them in the prose, plus a "code" link after every line of the figure's log. A scan read its
+  12 blocks in one press, so the reader saw the end state and a log of 30 lines, not the blocks
+  moving one by one.
+- **Question.** "Why doesn't a big read empty my cache?" (« Pourquoi une grosse lecture ne
+  vide-t-elle pas mon cache ? », « ¿Por qué una lectura grande no vacía mi caché? »). The
+  operator's worry about a backup or a scan; the answer goes from the plain LRU problem to the
+  two lists, the shares, and the ghost lists that move them.
+- **Figure.** `ArcLab` is improved, not rebuilt; the model (`src/lib/arc.ts`) is unchanged.
+  Next read is the first button, in the DOM and on screen, and reads one block per press. Scan 12
+  new blocks and Read the hot set again read their first block at once and queue the others,
+  which Next read then reads 1 ms apart, as `readAll` did in one go, so every state is the one the
+  hand-checked sequence of `ANALYSIS.md` gives. With nothing queued, Next read reads a new block;
+  a line above the narration says what it will read next. Read the rest finishes a queue in one
+  press, for a reader who has seen enough. Each read outlines the block read (accent), the blocks
+  it pushed out (dashed) and the balance line when `arc_pd` moved; the outlines are static, so
+  they read under reduced motion. Each list has a one-line plain role under its name. The
+  narration, in a live region, says the read in one or three short sentences; the log below gives
+  the detail. Both are plain and carry no code links (D21.1); `arc_pd` stays named once, on the
+  balance line, since the Source notes show it. Without script the board and the text version are
+  shown, as before; the two new legend items need the outlines, so they are hidden too.
+- **Phone.** As in the TXG room (D24.1), below 40rem Next read and the narration sit in a bar
+  that sticks to the bottom of the screen while the figure is in view, and after a read the block
+  read is scrolled into view above the bar. The figure is a flex column, and the bar is moved
+  below the board with `order` only, so it stays first in the Tab order on every screen.
+- **Code.** Eight Source notes, 70 lines, all new short cuts in `ANALYSIS.md` (ARC room, 10 to
+  17), checked against `zfs-2.4.4`. The "three depths" section and the L2ARC coda are gone: their
+  detail is in the notes, and the L2ARC is the last step of "In the code". The paragraph on when a
+  pass runs and how `arc_c` grows moved to "What the figure leaves out", without links.
+- **Rejected.** Keeping a scan in one press and only outlining: twelve outlined blocks show no
+  order. A Play button: the reader would watch the scan rather than read it, and the TXG room's
+  Play exists because time passes there between events; here nothing happens between reads.
+  Putting the bar after the board in the DOM so it sticks on phones without `order`: on desktop
+  Tab would reach Next read only after every block.
+- **After the Design review.** On desktop the bar sits about 400 px above the board, so a reader
+  who scrolled just far enough to see Next read did not see the block it read. `show()` now runs
+  on every width: on a wide screen it scrolls just enough to bring the block read into view, never
+  past the top of the bar, so Next read stays on screen (measured at 1280×720 to 1920×1080 in the
+  three languages). Rejected: moving the second button row and the gap choice below the board;
+  the controls would sit apart from the button they qualify. The nine-step tour paragraph is split
+  at its three phases: the scan, the ghost hits, the 10 ms re-read.
+
+## v1.4 metaslabs room (ALG-197)
+
+### D27.1 The metaslabs room as a question, and a figure that outlines what each action changed
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 10 excerpts (276 lines of code) and 66 links to GitHub in each language, 40 of
+  them in the prose and a "code" link after every line the figure narrated. The issue asks for
+  a figure where the reader allocates and frees blocks and watches the space map and the
+  metaslab choice.
+- **Question.** "How does ZFS know which space is free?" (« Comment ZFS sait-il quel espace est
+  libre ? », « ¿Cómo sabe ZFS qué espacio está libre? »). The answer goes from the problem
+  (copy-on-write allocates and frees all the time; a bitmap would be rewritten in place) to the
+  mechanism (metaslabs, a free tree in memory, an append-only space map replayed on load), then
+  the two-txg grace and condensing.
+- **Figure.** `MetaslabLab` is improved, not rebuilt; the model (`src/lib/metaslab.ts`) is
+  unchanged. `changes()` in `metaslab-view.ts` compares the state before and after an action, and
+  the figure outlines exactly that in ink until the next action: the ranges of the metaslab
+  whose state changed, the in-memory trees that changed, the file written or deleted, and the
+  words the action wrote on the tape (the whole tape after a condense). Load changes nothing, and
+  says the tree is the same. The outline is a class, not an animation, so it reads the same
+  under reduced motion; the key gains "changed by the last action". The selected tape entry is
+  now inverted, so an outline means only "changed". "What the last action did" moves from the
+  bottom of the figure to just under the buttons, and its lines are plain sentences with no code
+  links (D21.1) and fewer code names. The metaslab choice: a line under the vdev strip says that
+  metaslab 2 is the active metaslab and how ZFS ranks and activates metaslabs, and a write that
+  does not fit says ZFS would activate the next metaslab in rank; the "Choosing a metaslab" note
+  shows the code. Without script the opening state and the text version show, as before.
+  `scripts/verify-metaslabs.mjs` runs the room alone in EN, FR and ES (it was EN and FR inside
+  `verify.mjs`) and checks the outline after a delete.
+- **Code.** Eight Source notes, 58 lines (`ANALYSIS.md` metaslab room, 15 to 22: 15 is new,
+  `metaslab_compare`; the others are short cuts of excerpts 9, 1, 2, 10, 11, 12 and 14, checked
+  against `zfs-2.4.4`). The "three depths" section is gone, and the coda on the log space map
+  moves into "What the figure leaves out", without links.
+- **Rejected.** Modelling the weights of all sixteen metaslabs and moving a write to another
+  metaslab when metaslab 2 is full: the segment-based weight needs every metaslab's free-segment
+  histogram, and with fifteen empty metaslabs of equal weight the choice would teach nothing the
+  sentence and the note do not. "About two hundred metaslabs" in the answer, as the writing
+  review suggested: 200 is the target, but a vdev larger than 200 × 16 GiB gets more, so the
+  answer keeps "a few hundred". Animating the outline: an animation cannot be read at the
+  reader's pace or under reduced motion.
+
+### D27.2 The metaslabs figure after the Design/UX review: contrast, one outline per run, the selected range
+
+- **Context.** Design/UX on PR #14 at 0e331ca: three SHOULD, five NIT
+  ([ALG-197](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-197), document `design-review`).
+- **Allocated fill.** `--fg-faint` instead of `--line-strong`: 4.3:1 against the free fill
+  (`--surface-2`) in both themes, over the 3:1 of WCAG 1.4.11 (it was 1.7:1). In the light theme no
+  fill reaches 3:1 against the free fill and 4.5:1 under `--fg` text, so the file labels on the bar
+  sit on a small `--surface` chip and keep their contrast on any fill.
+- **One outline per run.** Changed ranges of the metaslab closer than 2.5 % of its size (12.8 MiB)
+  merge into one dashed box; a rewrite of db touched hundreds of blocks and drew hundreds of boxes.
+  The words an action wrote are always the end of the tape, so they are grouped in one nested list
+  item outlined once (the whole tape after a condense). Rows of "In memory" and "Files" draw their
+  outline inside the row, so two changed neighbours do not draw double lines. A single change looks
+  as before.
+- **The selected entry on the bar.** A 6 px ink strip just under the bar marks the range of the
+  selected tape entry, at least 10 px wide, so B (4 MiB, 3 px on a phone) shows when its entry is
+  selected at the opening. The key gains "range of the selected tape entry". Rejected: a label
+  above narrow extents with a tick, which would still leave the reader to match the tape to the bar.
+- **Smaller fixes.** The dynamic-fit cursor is clamped inside the bar at 0 and 512 MiB; the verdict's
+  yes/no has no fixed width; file rows are a grid, so Delete stays on the right in FR on a phone;
+  the offset field is named in the reader's language (« décalage », « desplazamiento »), as the
+  sentence under it; the "what to try" text of section 1 is three short paragraphs, and says that
+  rewrite db stops by itself when the test says yes.

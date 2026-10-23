@@ -2,96 +2,87 @@
 import Base from "../../layouts/Base.astro";
 import MetaslabLab from "../../components/MetaslabLab.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomUrl, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D27.1): the question, a plain
+// answer, the figure, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "fr";
 const r = room("metaslabs");
 const M = "module/zfs/metaslab.c";
 const SMC = "module/zfs/space_map.c";
-const SMH = "include/sys/space_map.h";
 const L = {
-  struct: gh("include/sys/metaslab_impl.h", 339),
-  trees: gh("include/sys/metaslab_impl.h", 375, 388),
-  lifecycle: gh("include/sys/metaslab_impl.h", 285, 338),
-  rollback: gh("include/sys/metaslab_impl.h", 295, 302),
-  deferSize: gh("include/sys/txg.h", 49),
-  setSize: gh("module/zfs/vdev.c", 3021, 3026),
-  sizeTable: gh("module/zfs/vdev.c", 3006, 3013),
-  msCount: gh("module/zfs/vdev.c", 91),
-  shift: gh(M, 2920, 2921),
-  lbas: gh("include/sys/metaslab_impl.h", 506),
-  fallback: gh(M, 1933, 1954),
+  segWeight: gh(M, 3389, 3442),
+  segEnabled: gh(M, 259),
+  findValid: gh(M, 4924, 4937),
+  shouldAlloc: gh(M, 3454, 3493),
   threshold: gh(M, 169),
   freePct: gh(M, 177),
+  picker: gh(M, 1771, 1802),
   maxSearch: gh(M, 192),
   minSearch: gh(M, 199),
-  picker: gh(M, 1771, 1802),
+  fallback: gh(M, 1933, 1954),
+  condensingCheck: gh(M, 4864),
   merge: gh("module/zfs/range_tree.c", 387, 394),
-  freeing: gh(M, 5518, 5528),
-  swap: gh(M, 4493, 4494),
-  early: gh(M, 4279, 4284),
   intro: gh(SMC, 529, 543),
-  emptyTree: gh(SMC, 775, 778),
-  smpAlloc: gh(SMC, 780, 783),
-  feature: gh("module/zcommon/zfeature_common.c", 427, 431),
-  sentinel: gh(SMH, 163),
-  macros: gh(SMH, 175, 203),
-  bf64: gh("include/sys/bitops.h", 46, 48),
-  pad: gh(SMC, 615, 631),
-  kinds: gh(SMC, 63, 80),
-  iterate: gh(SMC, 121, 142),
+  words: gh(SMC, 728, 734),
+  seg: gh(SMC, 636, 651),
+  early: gh(M, 4279, 4284),
+  deferSize: gh("include/sys/txg.h", 49),
+  rollback: gh("include/sys/metaslab_impl.h", 295, 302),
+  slop: gh(M, 4573, 4578),
   loadLength: gh(SMC, 423, 443),
   syncedLength: gh(M, 2514),
   loadDefer: gh(M, 2649, 2652),
-  neverWritten: gh(M, 2543, 2557),
-  stayDirty: gh(M, 4645, 4651),
-  slop: gh(M, 4573, 4578),
   condenseCall: gh(M, 4363, 4365),
+  blksz: gh(M, 74),
+  estimate: gh(SMC, 1033, 1085),
   condensePct: gh(M, 89),
   blockThreshold: gh(M, 104),
-  blksz: gh(M, 74),
-  blkszLog: gh(M, 81),
-  estimate: gh(SMC, 1033, 1085),
-  histogram: gh("module/zfs/range_tree.c", 131, 132),
-  condenseTree: gh(M, 3949, 3957),
   condensing: gh(M, 3974),
   truncate: gh(SMC, 908, 910),
-  rotor: gh(M, 5431, 5464),
-  weight: gh("include/sys/metaslab_impl.h", 469),
-  logSm: gh(M, 4373, 4396),
-  unflushed: gh("include/sys/metaslab_impl.h", 521, 522),
-  logFeature: gh("module/zcommon/zfeature_common.c", 481, 491),
-  createAll: gh("cmd/zpool/zpool_main.c", 1959, 1961),
-  logDesign: gh("module/zfs/spa_log_spacemap.c", 36, 52),
-  blkszWhy: gh(M, 66, 81),
+  condenseTree: gh(M, 3949, 3957),
 };
 ---
 
 <Base
   lang={lang}
   roomId="metaslabs"
-  title="Metaslabs et space maps · Uberblok"
-  description="Comment OpenZFS 2.4.4 trouve l’espace libre : des vdevs découpés en metaslabs, un arbre libre en mémoire, et une space map d’entrées ALLOC et FREE en ajout seul, condensée quand elle devient trop longue. Interactif, avec le code."
+  title="Comment ZFS sait-il quel espace est libre ? Metaslabs et space maps · Uberblok"
+  description="ZFS découpe chaque vdev en metaslabs, garde leur espace libre en mémoire sous forme d’arbre, et le note sur le disque dans un journal auquel il ne fait qu’ajouter, réécrit en plus court quand il devient trop long. En interactif, avec le code d’OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Salle {roomNumber(r.id)}</p>
-      <h1>{r.title.fr}</h1>
-      <div class="prose problem">
+      <p class="kicker">Salle {roomNumber(r.id)} · {r.title.fr}</p>
+      <h1>Comment ZFS <span class="nowrap">sait-il</span> quel espace est libre ?</h1>
+      <div class="prose answer">
         <p class="lead">
-          La copie sur écriture n’écrase jamais un bloc : chaque écriture alloue de l’espace neuf et chaque réécriture libère
-          l’ancien bloc. L’allocation est sur le chemin de chaque écriture, elle doit donc être rapide, et ce qui est libre
-          doit être noté sur le disque, pour que le pool le sache encore après un redémarrage.
+          ZFS n’écrase jamais un bloc en place. Chaque écriture demande de l’espace libre neuf, et chaque modification
+          libère l’ancienne copie d’un bloc, sauf si un instantané la garde : le pool alloue et libère donc de
+          l’espace sans arrêt, et il doit pourtant retrouver ce qui est libre après un redémarrage. La façon évidente
+          de le noter est un bitmap, un bit par secteur du pool. Sur un pool de 16 Tio à secteurs de 4 Kio, ce bitmap
+          fait 512 Mio, et le garder sur le disque obligerait à le réécrire sur place à chaque changement, ce que ZFS
+          évite partout ailleurs.
         </p>
         <p>
-          La façon évidente de le noter est un bitmap de tout le pool, un bit par secteur. Un pool de 16 Tio à secteurs de
-          4 Kio en a 2<sup>32</sup> : 512 Mio de bitmap à garder en mémoire, qu’il faudrait modifier sur place à chaque
-          changement, exactement ce que la copie sur écriture interdit. ZFS fait autrement. Il découpe chaque vdev en
-          quelques centaines de <em>metaslabs</em>, garde l’espace libre d’un metaslab en mémoire sous forme d’arbre de
-          segments libres, et n’écrit sur le disque que ce qui a changé, dans une <em>space map</em> : un journal d’extents
-          ALLOC et FREE auquel on ne fait qu’ajouter, et qu’on réécrit en plus court quand il est devenu trop long.
+          ZFS découpe plutôt chaque vdev de premier niveau (un disque, un miroir ou un groupe RAID-Z) en quelques
+          centaines de régions appelées metaslabs, et n’écrit que dans quelques-unes à la fois, choisies pour leurs
+          grands segments libres. En mémoire, l’espace libre d’un metaslab est un arbre trié de plages libres, si bien
+          que trouver de la place pour un bloc demande une courte recherche. Sur le disque, chaque metaslab a une
+          space map, un journal auquel ZFS ne fait qu’ajouter. Quand un groupe de transactions (le lot de
+          modifications que ZFS valide à quelques secondes d’intervalle) est écrit, ZFS ajoute une entrée pour chaque
+          plage allouée et une pour chaque plage libérée. Quand ZFS a de nouveau besoin d’un metaslab, après un
+          redémarrage par exemple, il le charge : il reconstruit l’arbre en rejouant le journal depuis le début.
+        </p>
+        <p>
+          L’espace libéré dans un groupe de transactions ne peut resservir que deux groupes plus tard. Ainsi, si le
+          pool doit revenir à un état un peu plus ancien, les blocs de cet état sont encore intacts. Comme le journal
+          ne fait que grandir, ZFS le réécrit à partir de l’arbre dès qu’il prend environ le double de la place que
+          prendrait l’arbre libre écrit seul. C’est ce qu’on appelle la condensation.
         </p>
       </div>
     </header>
@@ -100,384 +91,293 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Écrire, supprimer, synchroniser</h2>
       <div class="prose">
         <p>
-          Ci-dessous, un vdev de 8 Gio à secteurs de 4 Kio, découpé en 16 metaslabs de 512 Mio ; toutes les écritures vont
-          dans le metaslab 2, dessiné en dessous. Deux fichiers y sont déjà : A, 32 Mio, écrit dans le txg 10, et B, 4 Mio,
-          dans le txg 11. La bande est la space map du metaslab, des mots de 64 bits sur le disque ; choisissez une entrée
-          pour voir ses bits.
+          La figure montre un vdev de 8 Gio découpé en 16 metaslabs de 512 Mio, avec le metaslab 2 dessiné en grand en
+          dessous. Deux fichiers y sont déjà : A, 32 Mio, et B, 4 Mio. La bande est la space map du metaslab sur le
+          disque, un mot de 64 bits par case ; choisissez une case pour voir ses bits. Après chaque action, la ligne
+          sous les boutons dit ce qui s’est passé, et tout ce que l’action a changé est entouré.
         </p>
         <p>
-          Supprimez A et synchronisez : une entrée FREE rejoint la bande, mais l’espace de A est différé, pas libre, pendant
-          deux txg encore. Synchronisez deux fois pour le récupérer, puis écrivez 160 Mio : le dynamic fit ne revient pas
-          dans le trou de A, et une longueur pareille demande une entrée de deux mots. Appuyez sur Charger pour reconstruire
-          l’arbre libre depuis la bande, et sur Condenser : c’est refusé tant que la map est courte. Réécrivez la base de
-          données jusqu’à ce que le test dise oui, puis condensez.
+          Supprimez A. Sa plage passe au rouge : elle est libérée dans le groupe de transactions ouvert, mais encore allouée. Synchronisez : une entrée FREE rejoint la bande et A passe au vert, en attente. Deux synchronisations de plus la rendent libre.
+        </p>
+        <p>
+          Écrivez ensuite 160 Mio. Ses blocs de 128 Kio se placent après B, pas dans le trou de A, parce que l’allocateur cherche vers l’avant à partir d’un curseur. Une plage aussi longue prend une entrée de deux mots sur la bande. Charger reconstruit l’arbre libre à partir de la bande seule et retrouve le même arbre.
+        </p>
+        <p>
+          Condenser est refusé tant que la map est courte. Réécrivez db une fois : db est un fichier de 64 Mio dont les blocs sont réécrits au hasard, et la réécriture s’arrête d’elle-même quand le test dit oui. Condensez ensuite.
         </p>
       </div>
       <MetaslabLab lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">L’idée, à trois profondeurs</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">Dans le code</h2>
+      <p class="prose">
+        La figure suit huit endroits de <code>metaslab.c</code> et <code>space_map.c</code>. Ouvrez une note Source
+        pour voir les lignes, tirées de la version zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>En une phrase</h3>
-        <p class="lead prose">
-          ZFS garde l’espace libre par metaslab, sous forme d’arbre en mémoire et de journal en ajout seul sur le disque qui,
-          rejoué, reconstruit l’arbre, et il réécrit le journal depuis l’arbre quand le journal est devenu bien plus long que
-          l’arbre.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>En un paragraphe</h3>
+      <div class="step">
+        <h3>Choisir un metaslab</h3>
         <p class="prose">
-          Un vdev de premier niveau est découpé en metaslabs, environ 200 par défaut, de 512 Mio à 16 Gio chacun (moins nombreux et plus petits sur les petits vdevs). Un
-          metaslab chargé a ses segments libres dans un arbre d’intervalles, <code>ms_allocatable</code>. Une allocation
-          prend un segment dans cet arbre, par défaut avec l’allocateur dynamic fit, qui cherche en avant depuis la fin de la
-          dernière allocation de cette taille, et le met dans un arbre propre au txg, <code>ms_allocating</code> ; une
-          libération va dans <code>ms_freeing</code>. Rien n’atteint le disque avant la synchronisation du txg : alors
-          les allocations et libérations du txg sont ajoutées à la space map du metaslab, un mot de débogage et des
-          entrées ALLOC, un mot de débogage et des entrées FREE, un ou deux mots de 64 bits par extent. L’espace libéré ne
-          redevient allouable que deux txg plus tard, pour que le pool puisse revenir à un uberblock plus ancien sans
-          trouver ses blocs réutilisés. Charger un metaslab rejoue sa map, en ajoutant les extents FREE et en retirant les
-          ALLOC. Et quand la map fait au moins deux fois ce que l’arbre libre ferait écrit seul, et plus de quatre blocs, la
-          synchronisation suivante la condense si le metaslab est chargé : la map est tronquée et réécrite depuis l’arbre.
+          Chaque vdev range ses metaslabs dans un arbre trié par poids. Par défaut, le poids note la classe de taille
+          des plus grands segments libres du metaslab, et combien il en a dans cette classe. Un allocateur continue
+          d’écrire dans son metaslab actif. Quand ce metaslab ne peut plus recevoir un bloc, l’allocateur parcourt
+          l’arbre depuis le haut et active le premier metaslab dont le plus grand segment libre est assez grand.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>metaslab_compare</code>, metaslab.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={M}
+            from={947}
+            to={960}
+            symbol="metaslab_compare"
+            notes={[
+              { from: 947, to: 954, text: `La règle, dans le commentaire : d’abord le metaslab actif primaire, puis le secondaire, puis un metaslab inactif à activer.` },
+              { from: 955, to: 958, text: `Les metaslabs inactifs sont triés avant les actifs, si bien que la recherche d’un nouveau metaslab les parcourt d’abord.` },
+              {
+                from: 960,
+                text: `Puis le poids le plus fort d’abord. Il est <a href="${L.segEnabled}">fondé sur les segments par défaut</a> : <a href="${L.segWeight}"><code>metaslab_segment_weight</code></a> code la plus grande classe de taille des segments libres du metaslab, et leur nombre. <code>find_valid_metaslab</code> <a href="${L.findValid}">écarte un metaslab</a> dont <a href="${L.shouldAlloc}">le plus grand segment libre est trop petit</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>En détail</h3>
-        <div class="prose">
-          <p>
-            <strong>Les metaslabs.</strong> Un metaslab, <a href={L.struct}><code>struct metaslab</code></a>, est une plage
-            d’un vdev avec <a href={L.trees}>ses arbres en mémoire</a> : <code>ms_allocatable</code>, l’arbre libre,
-            <code>ms_allocating[]</code>, un par txg en cours, <code>ms_freeing</code>, <code>ms_freed</code> et
-            <code>ms_defer[]</code> ; un commentaire de l’en-tête <a href={L.lifecycle}>dessine leur cycle de vie</a>. Leur
-            taille vient de <a href={L.setSize}><code>vdev_metaslab_set_size</code></a> : il vise
-            <a href={L.msCount}>200 metaslabs</a>, entre 512 Mio et 16 Gio, et <a href={L.sizeTable}>au moins 16</a> sur
-            un petit vdev. Le vdev de la figure, 8 Gio, en reçoit 16 de 512 Mio. La map d’un metaslab compte en secteurs :
-            <a href={L.shift}>son décalage est l’<code>ashift</code> du vdev</a>, une unité vaut donc ici 4 Kio.
-          </p>
-          <p><strong>Prendre un bloc.</strong> Allouer dans un metaslab :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={M}
-          from={4863}
-          to={4890}
-          symbol="metaslab_block_alloc"
-          notes={[
-            { from: 4864, text: "Aucune allocation dans un metaslab dont la map est en cours de condensation : son arbre libre est en train d’être écrit." },
-            {
-              from: 4868,
-              text: "L’allocateur de la classe, dynamic fit par défaut, renvoie un décalage dans ce metaslab.",
-            },
-            { from: 4877, text: "L’extent sort de l’arbre libre." },
-            {
-              from: 4880,
-              to: 4881,
-              text: "La première allocation d’un txg marque le metaslab comme sale : la synchronisation passera par lui.",
-            },
-            {
-              from: 4883,
-              to: 4884,
-              text: "L’extent entre dans <code>ms_allocating</code> pour ce txg. Rien n’est encore écrit sur le disque. Dans la figure, les extents orange.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Le dynamic fit.</strong> Quel décalage l’allocateur renvoie :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={M}
-          from={1905}
-          to={1931}
-          symbol="metaslab_df_alloc"
-          notes={[
-            {
-              from: 1905,
-              to: 1906,
-              text: `Un curseur par alignement en puissance de deux, <a href="${L.lbas}"><code>ms_lbas[]</code></a>. Tous les blocs de la figure font 128 Kio, donc un seul curseur, <code>ms_lbas[17]</code>, la marque noire au-dessus du metaslab.`,
-            },
-            {
-              from: 1917,
-              to: 1921,
-              text: `Sous <a href="${L.freePct}">4 % libre</a>, ou quand aucun segment libre n’atteint <a href="${L.threshold}">128 Kio</a>, pas de recherche en avant.`,
-            },
-            {
-              from: 1923,
-              to: 1924,
-              text: `Sinon <a href="${L.picker}"><code>metaslab_block_picker</code></a> : le premier segment libre au curseur ou après qui convient, cherché au plus <a href="${L.maxSearch}">16 Mio</a> au-delà du premier candidat, et toujours sur au moins <a href="${L.minSearch}">100 segments</a> ; le curseur passe à la fin de ce qui a été pris.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Si cela ne trouve rien, <a href={L.fallback}>le repli</a> prend, dans un arbre des mêmes segments libres triés
-            par taille, un segment de la taille demandée exactement ou le suivant plus grand, et y déplace le curseur. L’espace
-            libéré derrière le curseur n’est donc pas réutilisé avant que le curseur atteigne la fin du metaslab, ou que le
-            metaslab vienne à manquer : dans la figure, le fichier de 160 Mio se place après B, pas dans le trou de A. Des
-            blocs pris l’un après l’autre sont contigus, et l’arbre d’intervalles <a href={L.merge}>fusionne les segments
-            adjacents</a> : un fichier écrit dans un txg forme un seul extent, et une seule entrée dans la map.
-          </p>
-          <p>
-            <strong>Libérer.</strong> Une libération <a href={L.freeing}>va dans <code>ms_freeing</code></a>, dans le
-            contexte de synchronisation. Le bloc reste alloué jusqu’à la fin de la synchronisation.
-          </p>
-          <p><strong>Synchroniser : ajouter à la map.</strong> Dans <code>metaslab_sync</code> :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={M}
-          from={4367}
-          to={4405}
-          symbol="metaslab_sync"
-          notes={[
-            {
-              from: 4373,
-              to: 4396,
-              text: "Avec une log space map, les allocations et libérations du txg vont à la place dans un seul journal pour tout le pool, avec l’identifiant du vdev. Voir plus bas ; la figure prend l’autre branche.",
-            },
-            {
-              from: 4400,
-              to: 4403,
-              text: "L’arbre d’allocation du txg est ajouté en entrées ALLOC, puis <code>ms_freeing</code> en entrées FREE, à la map du metaslab lui-même, sans identifiant de vdev. Rien de ce qui est déjà sur le disque n’est réécrit.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Chaque ajout <a href={L.intro}>commence par un mot de débogage</a>, qui note le txg et la passe, et un arbre
-            vide <a href={L.emptyTree}>n’ajoute rien</a> ; ALLOC augmente le total alloué de la map, <code>smp_alloc</code>,
-            et FREE le diminue (<a href={L.smpAlloc}>L780–L783</a>). Un metaslab sans allocation ni libération dans un txg
-            <a href={L.early}>est laissé tel quel</a>. Puis <a href={L.swap}><code>ms_freeing</code> devient
-            <code>ms_freed</code></a>. Combien de mots prend un extent :
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={SMC}
-          from={704}
-          to={739}
-          symbol="space_map_write_impl"
-          notes={[
-            {
-              from: 708,
-              to: 711,
-              text: "Décalage et longueur en unités de 4 Kio, depuis le début du metaslab.",
-            },
-            {
-              from: 728,
-              to: 734,
-              text: `Deux mots quand le décalage ne tient pas sur 47 bits, que la longueur dépasse <code>SM_RUN_MAX</code>, 2<sup>15</sup> unités (128 Mio ici), ou qu’un identifiant de vdev doit être stocké, et que la fonctionnalité <code>spacemap_v2</code> est active. Elle est <a href="${L.feature}">activée dès qu’elle est autorisée</a>, ce que fait un nouveau pool.`,
-            },
-            { from: 732, to: 733, text: "Un réglage de test, désactivé par défaut." },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Les mots.</strong> La disposition, telle que l’en-tête la dessine :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={SMH}
-          from={104}
-          to={140}
-          symbol="space map entries"
-          notes={[
-            { from: 104, to: 111, text: "Un mot de débogage : préfixe 10, l’action (0 ALLOC, 1 FREE), la passe, le txg." },
-            {
-              from: 114,
-              to: 120,
-              text: "Une entrée d’un mot : bit de poids fort à 0, un décalage de 47 bits, un bit de type et une longueur de 15 bits. La longueur est stockée moins un, elle va donc de 1 à 2<sup>15</sup>.",
-            },
-            {
-              from: 123,
-              to: 135,
-              text: "Une entrée de deux mots : préfixe 11, une longueur de 36 bits et un identifiant de vdev de 24 bits, puis le type et un décalage de 63 bits.",
-            },
-            {
-              from: 137,
-              to: 139,
-              text: "Dans la figure, un mot de remplissage apparaît quand une entrée de deux mots commencerait sur le dernier mot d’un bloc de 16 Kio.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Les trois sortes se distinguent <a href={L.kinds}>par leurs bits de poids fort</a>. La figure encode chaque mot
-            avec <a href={L.macros}>les macros de l’en-tête</a>, <code>BF64_ENCODE</code> <a href={L.bf64}>masquant puis
-            décalant</a> : l’entrée ALLOC de A, décalage 0 et 8192 unités, vaut <code>0x0000000000001FFF</code> ; l’extent de
-            160 Mio, décalage 0x2400 et 40960 unités, vaut <code>0xC000009FFF000000</code> puis <code>0x0000000000002400</code>.
-            Le champ vdev de ce premier mot vaut 0 : <a href={L.sentinel}><code>SM_NO_VDEVID</code></a> vaut
-            <code>1 &lt;&lt; 24</code>, et le masque de 24 bits le fait disparaître. Les mots sont écrits ici :
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={SMC}
-          from={633}
-          to={663}
-          symbol="space_map_write_seg"
-          notes={[
-            { from: 633, text: "Une longueur au-delà de ce que le format permet est coupée ; en deux mots, c’est 2<sup>36</sup> unités, jamais atteint dans un metaslab." },
-            { from: 636, to: 638, text: "Un mot : décalage, type, longueur." },
-            { from: 643, to: 651, text: "Deux mots : préfixe, longueur et vdev ; puis type et décalage." },
-            { from: 659, text: "La map grandit d’un ou deux mots. Elle ne fait que grandir, jusqu’à sa condensation." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Avant une entrée de deux mots, <a href={L.pad}>le dernier mot d’un bloc est rempli</a> d’un mot de débogage vide,
-            que le chargement <a href={L.iterate}>ignore</a>.
-          </p>
-          <p><strong>Deux txg de grâce.</strong> À la fin de la synchronisation de chaque txg :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={M}
-          from={4624}
-          to={4638}
-          symbol="metaslab_sync_done"
-          notes={[
-            {
-              from: 4630,
-              to: 4631,
-              text: "Les libérations différées il y a deux txg reviennent dans l’arbre libre : <code>defer_tree</code> est <code>ms_defer[txg % TXG_DEFER_SIZE]</code>.",
-            },
-            { from: 4632, to: 4633, text: "Les libérations de ce txg prennent leur place." },
-            {
-              from: 4634,
-              to: 4637,
-              text: `Pas de report seulement quand le pool est <a href="${L.slop}">presque plein, ou qu’un vdev est retiré ou agrandi</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <a href={L.deferSize}><code>TXG_DEFER_SIZE</code> vaut 2</a> : un bloc libéré dans le txg T est FREE dans la
-            map après la synchronisation de T, mais allouable seulement après celle de T + 2. L’en-tête dit pourquoi :
-            <a href={L.rollback}>« a safety net for uberblock rollback »</a>, un filet de sécurité en cas de retour à un
-            uberblock antérieur. Le pool peut reculer de deux txg sans trouver aucun de ses blocs réutilisé. Un metaslab qui a de
-            l’espace différé <a href={L.stayDirty}>reste sale</a> jusqu’au retour des libérations.
-          </p>
-          <p><strong>Charger : rejouer le journal.</strong> Chaque entrée de la map, dans l’ordre :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={SMC}
-          from={401}
-          to={416}
-          symbol="space_map_load_callback"
-          notes={[
-            { from: 405, to: 409, text: "On charge l’espace libre : une entrée FREE est ajoutée à l’arbre." },
-            { from: 410, to: 413, text: "Une entrée ALLOC en est retirée." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            L’arbre <a href={L.loadLength}>part de tout le metaslab</a> : rejouer le journal depuis le début laisse donc
-            exactement l’espace libre. <code>metaslab_load</code> rejoue jusqu’à <a href={L.syncedLength}>la longueur de la
-            dernière synchronisation</a>, puis <a href={L.loadDefer}>retire les arbres différés</a>, FREE dans la map mais pas
-            encore allouables. Un metaslab dont la map n’a jamais été écrite <a href={L.neverWritten}>se charge libre</a>. Le
-            bouton Charger de la figure fait exactement cela et compare le résultat à l’arbre qu’il avait.
-          </p>
-          <p><strong>Quand condenser.</strong> À chaque synchronisation, à sa première passe, si le metaslab est chargé, <code>metaslab_sync</code> <a href={L.condenseCall}>demande</a> :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={M}
-          from={3835}
-          to={3861}
-          symbol="metaslab_should_condense"
-          notes={[
-            { from: 3851, to: 3853, text: "Un arbre libre vide, ou une condensation demandée : toujours." },
-            { from: 3855, text: "Un enregistrement vaut le plus grand de la taille de bloc de la map et d’un secteur." },
-            {
-              from: 3857,
-              to: 3858,
-              text: `La taille optimale : une estimation de l’arbre libre écrit seul, d’après <a href="${L.histogram}">son histogramme des tailles de segments</a>, un mot par segment sous 128 Mio, deux au-dessus, plus le remplissage (<a href="${L.estimate}">space_map.c L1033–L1085</a>).`,
-            },
-            {
-              from: 3860,
-              to: 3861,
-              text: `Condenser quand la map fait au moins <a href="${L.condensePct}">200 %</a> de cela, et plus de <a href="${L.blockThreshold}">4 enregistrements</a>. Sans log space map, <a href="${L.blksz}">un bloc fait 16 Kio</a> : 64 Kio. Dans la figure, les deux tests sous la bande.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Dans la figure, A, B et un C supprimé font une map de 96 octets pour un optimum de 32 : deux fois plus longue, mais
-            loin de 64 Kio, donc non. Les réécritures d’une base de données de 64 Mio, 128 blocs au hasard par txg, ajoutent une
-            entrée FREE pour presque chaque ancien bloc ; après environ 70 txg la map dépasse 64 Kio, alors que l’arbre libre,
-            environ deux cents segments, tiendrait en moins de 2 Kio.
-          </p>
-          <p><strong>Condenser.</strong> La map est réécrite depuis l’arbre :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={M}
-          from={3994}
-          to={4013}
-          symbol="metaslab_condense"
-          notes={[
-            {
-              from: 3994,
-              to: 4003,
-              text: "Les entrées propres à ce txg sont encore ajoutées après la map condensée, comme d’habitude.",
-            },
-            { from: 4009, to: 4010, text: "Une entrée ALLOC pour tout le metaslab : 2<sup>17</sup> unités, une entrée de deux mots." },
-            { from: 4011, text: "Une entrée FREE par segment libre." },
-            {
-              from: 4012,
-              text: `Puis l’arbre de condensation : <a href="${L.condenseTree}">les libérations différées et les allocations des txg en cours</a>, libres pour ce que sait l’ancienne map.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Avant d’écrire, le metaslab est <a href={L.condensing}>marqué en condensation</a>, pour que rien n’y soit alloué
-            entre-temps, et la map est <a href={L.truncate}>tronquée à la longueur 0</a>. Rejouer la map courte donne le même
-            arbre que rejouer la longue : le bouton Charger de la figure, après une condensation, le dit.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="logsm">
-      <h2 id="logsm">Coda : la log space map</h2>
-      <div class="prose">
-        <p>
-          <code>zpool create</code> <a href={L.createAll}>autorise toutes les fonctionnalités</a> sauf indication contraire,
-          dont <a href={L.logFeature}><code>log_spacemap</code></a>, et <code>metaslab_sync</code> prend alors
-          <a href={L.logSm}>l’autre branche</a> : les allocations et libérations de chaque txg, pour tous les metaslabs, sont
-          ajoutées à un seul journal pour tout le pool, en entrées de deux mots qui portent l’identifiant du vdev, et chaque
-          metaslab les garde en mémoire comme <a href={L.unflushed}>changements non vidés</a>. À chaque txg,
-          <a href={L.logDesign}>un groupe choisi de metaslabs est vidé</a> : leurs changements sont écrits dans leurs propres
-          maps, les mêmes entrées que dans la figure, en blocs de <a href={L.blkszLog}>128 Kio</a> au lieu de 16. Le
-          commentaire de conception nomme la charge visée : les écritures aléatoires, qui libèrent un peu partout et
-          <a href={L.blkszWhy}>toucheraient sinon les maps de nombreux metaslabs à chaque txg</a>. La figure montre la map
-          propre d’un metaslab, écrite à chaque synchronisation, parce que l’idée est là : le journal retarde les mêmes
-          entrées et les regroupe.
+      <div class="step">
+        <h3>Choisir une place dans le metaslab</h3>
+        <p class="prose">
+          L’allocateur par défaut, le dynamic fit, garde un curseur par taille de bloc en puissance de deux et cherche
+          vers l’avant le premier segment libre qui convient. L’espace libéré derrière le curseur n’est donc pas
+          réutilisé tout de suite, et des blocs écrits l’un après l’autre se retrouvent côte à côte. Quand rien ne
+          convient après le curseur, ou que le metaslab a moins de 4 % d’espace libre ou aucun segment libre d’au
+          moins 128 Kio, il prend plutôt le plus petit segment libre qui convient.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>metaslab_df_alloc</code>, metaslab.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={M}
+            from={1917}
+            to={1924}
+            symbol="metaslab_df_alloc"
+            notes={[
+              {
+                from: 1917,
+                to: 1921,
+                text: `Aucun segment libre de <a href="${L.threshold}">128 Kio</a>, ou moins de <a href="${L.freePct}">4 % libre</a> : pas de recherche vers l’avant, et <a href="${L.fallback}">le repli</a> prend le plus petit segment libre au moins aussi grand que la demande. Il sert aussi quand la recherche vers l’avant ne trouve rien.`,
+              },
+              {
+                from: 1923,
+                to: 1924,
+                text: `Sinon <a href="${L.picker}"><code>metaslab_block_picker</code></a> : le premier segment libre qui convient à partir du curseur, cherché au plus <a href="${L.maxSearch}">16 Mio</a> après le premier candidat et toujours sur au moins <a href="${L.minSearch}">100 segments</a>. Le curseur passe à la fin de ce qui a été pris.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Prendre le bloc</h3>
+        <p class="prose">
+          <code>metaslab_block_alloc</code> fait passer la plage du bloc de l’arbre libre à un arbre propre au groupe
+          de transactions ouvert. Rien n’est encore écrit dans la space map : elle ne change que quand ce groupe est
+          écrit.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>metaslab_block_alloc</code>, metaslab.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={M}
+            from={4877}
+            to={4884}
+            symbol="metaslab_block_alloc"
+            notes={[
+              { from: 4877, text: `La plage quitte <code>ms_allocatable</code>, l’arbre libre. <a href="${L.condensingCheck}">Aucune allocation</a> ne vient d’un metaslab dont la map est en cours de condensation.` },
+              { from: 4880, to: 4881, text: `La première allocation d’un txg dans ce metaslab le marque comme modifié, pour que la synchronisation de ce txg passe par lui.` },
+              {
+                from: 4883,
+                to: 4884,
+                text: `La plage va dans <code>ms_allocating</code> pour ce txg. Les plages contiguës <a href="${L.merge}">fusionnent</a> : un fichier écrit dans un seul txg forme une plage, et une entrée dans la map.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Ajouter à la map</h3>
+        <p class="prose">
+          Quand le groupe de transactions est écrit, <code>metaslab_sync</code> ajoute ses allocations, puis ses
+          libérations, à la space map du metaslab. Chaque entrée tient un décalage et une longueur dans un mot de 64
+          bits, ou dans deux quand la plage dépasse 32 768 secteurs (128 Mio ici).
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>metaslab_sync</code>, metaslab.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={M}
+            from={4400}
+            to={4403}
+            symbol="metaslab_sync"
+            notes={[
+              {
+                from: 4400,
+                to: 4401,
+                text: `Les allocations du txg en entrées ALLOC, après <a href="${L.intro}">un mot de débogage</a> qui note le txg. Une entrée prend <a href="${L.words}">deux mots</a> quand sa longueur ne tient pas sur 15 bits ; <a href="${L.seg}">les mots sont écrits ici</a>. Un metaslab sans changement dans le txg <a href="${L.early}">n’est pas visité</a>.`,
+              },
+              { from: 4402, to: 4403, text: `Puis les libérations du txg en entrées FREE. Rien de ce qui est déjà sur le disque n’est réécrit.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Deux groupes de transactions de répit</h3>
+        <p class="prose">
+          À la fin de chaque synchronisation, l’espace libéré deux groupes plus tôt revient dans l’arbre libre, et les
+          libérations de ce groupe prennent sa place. Un commentaire de <code>metaslab_impl.h</code> y voit un filet
+          de sécurité pour revenir à un uberblock plus ancien, l’enregistrement racine que le pool lit en premier.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>metaslab_sync_done</code>, metaslab.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={M}
+            from={4630}
+            to={4633}
+            symbol="metaslab_sync_done"
+            notes={[
+              {
+                from: 4630,
+                to: 4631,
+                text: `L’arbre différé, <code>ms_defer[txg % TXG_DEFER_SIZE]</code>, revient dans l’arbre libre. <a href="${L.deferSize}"><code>TXG_DEFER_SIZE</code> vaut 2</a>, « <a href="${L.rollback}">a safety net for uberblock rollback</a> ».`,
+              },
+              {
+                from: 4632,
+                to: 4633,
+                text: `Les libérations de ce txg prennent sa place. Seule exception : quand le pool est <a href="${L.slop}">presque plein, ou qu’un vdev est retiré ou agrandi</a>, elles retournent directement dans l’arbre libre.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Rejouer la map</h3>
+        <p class="prose">
+          Pour charger un metaslab, ZFS part d’un arbre qui couvre tout le metaslab, puis rejoue la map dans l’ordre.
+          Une entrée FREE ajoute sa plage, une entrée ALLOC la retire. Ce qui reste compte encore comme libres les
+          libérations qui attendent leurs deux groupes de transactions, que <code>metaslab_load</code> retire donc
+          ensuite.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>space_map_load_callback</code>, space_map.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={SMC}
+            from={405}
+            to={413}
+            symbol="space_map_load_callback"
+            notes={[
+              { from: 405, to: 409, text: `Au chargement de l’espace libre, la plage d’une entrée FREE est ajoutée à l’arbre, qui <a href="${L.loadLength}">part du metaslab entier</a>.` },
+              {
+                from: 410,
+                to: 413,
+                text: `La plage d’une entrée ALLOC est retirée. <code>metaslab_load</code> rejoue la map jusqu’à <a href="${L.syncedLength}">sa longueur à la dernière synchronisation</a>, puis <a href="${L.loadDefer}">retire les arbres différés</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Décider de condenser</h3>
+        <p class="prose">
+          Dans la première passe de chaque synchronisation, un metaslab chargé qui a des changements demande à
+          <code>metaslab_should_condense</code> si sa map est devenue trop longue. La fonction compare la longueur de
+          la map à une estimation de l’arbre libre écrit seul.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>metaslab_should_condense</code>, metaslab.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={M}
+            from={3855}
+            to={3861}
+            symbol="metaslab_should_condense"
+            notes={[
+              { from: 3855, text: `Un enregistrement fait la plus grande de ces deux tailles : le bloc de la map (<a href="${L.blksz}">16 Kio</a> ici) ou un secteur.` },
+              { from: 3857, to: 3858, text: `La taille de l’arbre libre écrit seul, <a href="${L.estimate}">estimée</a> à partir des tailles de ses segments.` },
+              {
+                from: 3860,
+                to: 3861,
+                text: `Condenser quand la map fait au moins <a href="${L.condensePct}">200 %</a> de cette taille et plus de <a href="${L.blockThreshold}">4 enregistrements</a>, 64 Kio ici. <code>metaslab_sync</code> <a href="${L.condenseCall}">pose la question</a> avant d’ajouter.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Réécrire la map en plus court</h3>
+        <p class="prose">
+          <code>metaslab_condense</code> vide la map et la réécrit à partir de l’arbre : une entrée ALLOC pour tout le
+          metaslab, puis une entrée FREE par segment libre. Rejouer la map courte donne le même arbre que rejouer la
+          longue.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>metaslab_condense</code>, metaslab.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={M}
+            from={4009}
+            to={4012}
+            symbol="metaslab_condense"
+            notes={[
+              {
+                from: 4009,
+                to: 4010,
+                text: `La map a été <a href="${L.truncate}">tronquée</a> et le metaslab <a href="${L.condensing}">marqué comme en cours de condensation</a>. D’abord une entrée ALLOC pour tout le metaslab.`,
+              },
+              { from: 4011, text: `Une entrée FREE par segment libre.` },
+              {
+                from: 4012,
+                text: `Puis <a href="${L.condenseTree}">les libérations différées et les allocations des txg en cours</a>, qui sont libres pour l’ancienne map. Les entrées de ce txg suivent, comme d’habitude.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Ce que la figure laisse de côté</h2>
-      <p class="prose muted">
-        La figure exécute les fonctions ci-dessus sur un metaslab d’un vdev, à secteurs de 4 Kio et sans log space map. Tous
-        les blocs font 128 Kio, donc un seul curseur ; un seul txg est en cours, synchronisé aussitôt en une passe, sans
-        clôture, si bien que <code>ms_allocating</code> n’a qu’un arbre utilisé. Le choix du metaslab où va une allocation,
-        par <a href={L.weight}>poids</a> et par <a href={L.rotor}>le rotor sur les vdevs</a>, est laissé de côté : tout va
-        dans le metaslab 2, et une écriture qui ne tient pas est refusée au lieu de passer ailleurs. De même la régulation des
-        allocations, les blocs gang, les copies ditto, les checkpoints, le trim et l’histogramme de la space map. La
-        condensation suit <code>metaslab_should_condense</code>, à la synchronisation qui écrit dans la map, comme le fait
-        <code>metaslab_sync</code> ; les réécritures s’arrêtent juste avant une telle synchronisation, pour qu’on puisse la
-        regarder. Le chargement se fait sur un txg sans rien en attente. La suite de la visite est dans
-        <a href={roomUrl(lang, "txg")}>Groupes de transactions</a> pour le moment où un txg se synchronise, et dans
-        <a href={roomUrl(lang, "snapshots")}>Instantanés et clones</a> pour le moment où un bloc est libéré tout court.
-      </p>
+      <div class="prose muted">
+        <p>
+          La figure exécute les fonctions ci-dessus sur un metaslab d’un vdev, à secteurs de 4 Kio. Chaque bloc fait
+          128 Kio, donc il n’y a qu’un curseur, et un seul groupe de transactions est en cours à la fois, synchronisé
+          aussitôt en une passe. Le metaslab 2 reste le metaslab actif : une écriture qui ne tient pas est refusée au
+          lieu de passer au metaslab suivant dans le classement, et les quinze autres sont dessinés vides. La
+          régulation des allocations, les blocs gang, les copies supplémentaires des métadonnées, les checkpoints, le
+          trim et l’histogramme gardé avec chaque space map sont laissés de côté. Les réécritures s’arrêtent juste
+          avant une synchronisation qui condenserait, pour que vous puissiez regarder la condensation, et Charger est
+          montré sur un groupe de transactions sans rien en attente.
+        </p>
+        <p>
+          Un pool créé aujourd’hui a aussi la fonctionnalité log space map. Les changements de chaque groupe de
+          transactions, pour tous les metaslabs, vont alors dans un seul journal pour tout le pool, et à chaque groupe
+          de transactions seuls quelques metaslabs écrivent ces changements dans leur propre map. Un tel pool utilise
+          aussi des blocs de map de 128 Kio, si bien que son seuil de condensation est plus haut que les 64 Kio de la
+          figure. Cela économise des écritures quand des réécritures aléatoires libèrent un peu d’espace dans beaucoup
+          de metaslabs à la fois. La figure montre la map propre d’un metaslab écrite à chaque synchronisation, parce
+          que les entrées sont les mêmes : le journal du pool ne fait que les retarder et les regrouper. La suite de
+          la visite est dans <a href={roomUrl(lang, "txg")}>Groupes de transactions</a> pour le moment où un groupe
+          est écrit, et dans <a href={roomUrl(lang, "snapshots")}>Instantanés et clones</a> pour le moment où un bloc
+          est libéré.
+        </p>
+      </div>
     </section>
   </article>
   <RoomNav lang={lang} roomId="metaslabs" />
@@ -491,7 +391,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -500,10 +400,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -511,8 +411,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

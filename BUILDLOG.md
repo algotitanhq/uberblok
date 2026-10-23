@@ -2257,3 +2257,122 @@ group of their own (`aria-label` "Special class"). `npm test` 246 pass, build 0 
 `verify-vdevs.mjs` 136 runs and 0 mismatches, keyboard walk with every stop visible, 0 console
 errors. `code-reviewer` on the fix: the scroll now waits a frame for the line above the tree
 to change; the FR and ES sentences on the two copies now use the figure's words for the ring.
+
+## v1.4 ARC room (ALG-193): a question, and a figure that reads one block per press
+
+**What changed.** The ARC room, in EN, FR and ES, asks one question ("Why doesn't a big read
+empty my cache?"), answers it in three plain paragraphs, keeps its figure with what to try, then
+shows the code in eight Source notes (D21.1, D25.1). In `ArcLab`, Next read reads one block per
+press; a scan or the hot set reads its first block at once and queues the others, 1 ms apart as
+before, so every state matches the hand-checked sequence. Each read outlines the block read, the
+blocks it pushed out (dashed) and the balance line when `arc_pd` moved; each list says its role in
+one line; the narration and the log are plain, with no code links. On a phone, Next read and the
+narration stay in a bar at the bottom while the figure is in view. The model is unchanged. Eight
+short excerpts are new in `ANALYSIS.md` (ARC room, 10 to 17). No shared code changed; the other
+rooms are unchanged, except the Engine room's computed excerpt count (127 → 135).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 49 | 31 |
+| of them in the prose | 37 | 0 |
+| in excerpts and Source notes | 12 | 31 |
+| "code" links the figure adds as it runs | 1 per log line (10 targets) | 0 |
+| Code excerpts (citations) | 8 | 8 |
+| Lines of code shown | 199 | 70 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (245 pass, 5 of
+them new in `arc-view.test.mjs`), `check-permalinks` (ANALYSIS.md 135 excerpts, 0 failures; built
+pages 3138 line references, 0 failures), `check-csp` (44 pages). `scripts/verify-arc.mjs` (new,
+scoped to this room): EN, FR, ES on desktop and a 390 px phone; through the scan one press at a
+time, each read outlines exactly the block the model reads and the blocks it pushes out, and the
+four lists equal the model's; the narration names the block and is announced; no link in the
+narration or log; on the phone the block read and Next read are on screen after every press; the
+MRU ghost hit on S2 moves `arc_pd` to 53.1% and outlines the balance; Read the rest empties the
+queue and hands the focus to Next read; at 10 ms a re-read stays in MRU; reduced motion runs no
+animation; with no script the board and the text version are shown and the controls are not; Tab
+reaches Next read before any block, Enter and Space press it with a visible focus; at 1280 px a
+Source note opens in the side panel; no horizontal overflow, no console error. 35 captures, 0
+problems. On the final head, the whole-site suites: `scripts/verify.mjs` (the ARC part
+now presses Read the rest after a scan; 457 captures, 0 console errors, 0 ARC mismatches, every
+keyboard stop with a visible focus) and `scripts/audit.mjs` (42 pages, 0 problems; the ARC room
+in three languages: 43 stops, axe 0, one announcement per press of Next read).
+
+**Reviews.** `technical-writer` on the three languages: "what to try" asked to re-read "a few"
+scan blocks, which can leave MFU with nothing to give up, and did not say how to re-read a block
+at 10 ms; the cache is full after S10, not at S11; the ghost-list targets, not their sizes, set
+the step; calques and register in FR and ES. All fixed. `code-reviewer` on the diff: a block read
+and then pushed out within Read the rest kept the "just read" outline (fixed, last event wins, and
+tested); a block reached with Tab could sit under the phone bar (scroll padding); selecting a
+block in the middle of a scan broke the 1 ms spacing (it now ends the scan); a repeated narration
+might not be announced; Next read is now described by the queue line.
+
+**Design review.** On desktop the block read sat 130 to 330 px below the fold when the reader
+pressed Next read just after it came into view. `show()` now scrolls on wide screens too, just
+enough to show the block read and never past the top of the bar: measured in EN, FR and ES at
+1280×720, 1366×768, 1440×900 and 1920×1080, three presses each, the block read ends 8 px above
+the bottom and Next read stays on screen; phones unchanged. The nine-step tour paragraph is split
+in three. `npm test` 245 pass, `verify-arc.mjs` 35 captures, 0 problems.
+
+**Debts.** None new. `scripts/verify.mjs` still checks this room in EN and FR only;
+`verify-arc.mjs` covers ES.
+
+## v1.4 metaslabs room (ALG-197): a question, a figure that outlines what each action changed
+
+**What changed.** The metaslabs room, in EN, FR and ES, asks one question ("How does ZFS know
+which space is free?"), answers it in three plain paragraphs, keeps its figure with what to try,
+then shows the code in eight Source notes (D21.1, D27.1). In the figure, each action (write,
+delete, sync, rewrite, load, condense) outlines what it changed: the range on the metaslab, the
+in-memory tree, the file, the new words on the tape. The line under the buttons says it in plain
+words, without code links. A line under the vdev strip names the active metaslab and how ZFS
+picks one. Eight short excerpts are new in `ANALYSIS.md` (metaslab room, 15 to 22). The other
+rooms are unchanged, except the Engine room's computed excerpt count (141 → 149).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 66 | 38 |
+| of them in the prose | 40 | 0 |
+| in the figure (opening state; the old log added one per line) | 2 | 0 |
+| in excerpts and Source notes | 24 | 38 |
+| Code excerpts (citations) | 10 | 8 |
+| Source notes | 0 | 8 |
+| Lines of code shown | 276 | 58 |
+
+**Proof.** `npm test` (250 pass, 5 new for the outline and the no-link rule), `npm run build`
+(astro check 0 errors, FR typography 0 failures), `check-permalinks` (ANALYSIS.md 149 excerpts,
+957 line references; built site 1869 references), `check-sources` (156 references, 44 pages),
+`check-csp` (44 pages): all pass. `scripts/verify-metaslabs.mjs` against the preview, EN, FR and
+ES at 390 and 1440 px: QA's sequences replayed against the model with every tape word equal, the
+outline after a delete on exactly A's range, `ms_freeing` and file A, no link in the figure, the
+Source note in the side panel, keyboard walk with visible focus on every stop, reduced motion
+(no running animation), no script (opening state and text version); 42 captures (not committed,
+`shots/`), 0 console errors.
+
+**Reviews.** `technical-writer` on the three languages (30 edits proposed, most taken): the
+dynamic-fit fallback stated fully (nothing after the cursor, under 4 % free, or no free segment
+of 128 KiB), metaslabs loaded on demand, the deferred frees still counted free before
+`metaslab_load` removes them, uberblock glossed, the weight as a size class, the exception to
+the deferral spelled out, the Spanish "registro" no longer used for both the log and a record,
+calques in FR and ES. Not taken: "about two hundred metaslabs" (D27.1).
+`code-reviewer` on the whole diff: the selected tape entry stays inverted after a condense,
+"changed" is a dashed outline so the solid focus ring stays visible, Load clears the last
+outlines, and the keyboard walk now fails the run on a missing focus ring. All four fixed;
+`verify-metaslabs.mjs` replayed at the head after the fixes (42 captures, 0 console errors,
+0 mismatches, 48 keyboard stops with visible focus in each language).
+
+**Debts.** None found outside the room.
+
+### Design/UX fixes (ALG-197, second pass)
+
+All eight items of the Design/UX review fixed (D27.2): allocated fill at 4.3:1 against free in both
+themes, labels on a chip; one dashed outline per changed run on the bar, the tape and the rows; the
+"what to try" text in three paragraphs in EN, FR and ES; no gap in "Verdict: no."; the selected
+entry's range marked under the bar; the cursor clamped at 512 MiB; Delete kept on the right in FR
+at 390 px; « décalage » for the FR offset field. `code-reviewer` on the diff: no defect; taken the
+strip under the bar instead of over it, padding on file rows, fresh words hidden in the skipped gap
+counted in the run, two new tests. **Proof.** `npm test` 252 pass, `npm run build` 0 errors,
+`verify-metaslabs.mjs` EN, FR, ES at 390 and 1440 px: 42 captures, 0 console errors, 0 mismatches;
+captures of the bar in the light theme, after a rewrite and of the verdict read by eye.

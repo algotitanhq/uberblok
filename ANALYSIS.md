@@ -3543,6 +3543,150 @@ The design comment opens with what the L2ARC is: "a cache layer in-between main 
 - `arc_c` grows by `MAX(bytes, SPA_OLD_MAXBLOCKSIZE)` per allocation when near the target — [`module/zfs/arc.c#L5076-L5081`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5076-L5081).
 - Hand-checked sequence (the unit tests replay it; `arc_c` = 16 blocks of 128 KiB, data only, one sublist). Opening: H1-H6 read, then read again a second later: six MRU hits after more than `ARC_MINTIME`, all six in MFU, `arc_pd` = 2^31, nothing evicted. A scan of S1-S12, 1 ms apart: S1-S10 fill the cache; S11 is over `arc_c` by one block: first pass, ghost targets still 0, `total < 32`, `arc_pd` unchanged; MRU holds 11 blocks, target 8: `e = MIN(1, 3)` blocks, S1 to the MRU ghost list; ghost targets 6/2 = 3 blocks (MRU ghost) and 10/2 = 5 (MFU ghost). S12: the same, S2 to the MRU ghost list. MRU S12...S3, MFU H6...H1 intact, MRU ghost S2 S1. Read S2 (MRU-ghost hit): to MFU, `arcs_hits` + 128 KiB; pass: `total` = 8 blocks = 2^20, `arc_pd` = 2^31 + 2^27 (53.125 %), MRU target 8.5 blocks, MRU 10 blocks: `e = MIN(1, 1.5)`, S3 to the MRU ghost list; MFU nothing. Read S12, S11, S10 again: MRU hits after more than 62 ms, to MFU, no pass. Read N1 (new): over by one; MRU 7 blocks, under its target 8.5: nothing from MRU, H1 (MFU tail) to the MFU ghost list; ghost targets 9/2 = 4.5 and 7/2 = 3.5 blocks. Read H1 (MFU-ghost hit): to MFU; pass: `total` = 8 blocks, `arc_pd` = 2^31 + 2^27 − 2^27 = 2^31, target 8; MRU 7: nothing; H2 to the MFU ghost list. A new block N2 read again 10 ms later stays in MRU (MRU hit, `b_arc_access` unchanged), again 52 ms later (62 ms, not after `b_arc_access + ARC_MINTIME`) stays, one more millisecond later goes to MFU.
 
+**Short excerpts for the question-first room (v1.4, ALG-193).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 10. `arc_access`, promotion to MFU — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5423-L5428
+
+```c
+		if (ddi_time_after(now, hdr->b_l1hdr.b_arc_access +
+		    ARC_MINTIME)) {
+			hdr->b_l1hdr.b_arc_access = now;
+			DTRACE_PROBE1(new_state__mfu, arc_buf_hdr_t *, hdr);
+			arc_change_state(arc_mfu, hdr);
+		}
+```
+
+The end of excerpt 1. A hit on an MRU block more than `ARC_MINTIME` after `b_arc_access` refreshes the time and moves the header to MFU; otherwise nothing changes, so re-reads within one burst count as one use. `ARC_MINTIME` is `hz >> 4`, "62 ms" ([L1318](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L1318)); `ddi_time_after` is strict, so exactly 62 ms does not promote. A new block enters MRU in the anon branch ([L5381-L5397](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5381-L5397)).
+
+### 11. `arc_evict_hdr`, the data goes, the header stays — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3876-L3882
+
+```c
+	if (hdr->b_l1hdr.b_pabd != NULL)
+		arc_hdr_free_abd(hdr, B_FALSE);
+
+	if (HDR_HAS_RABD(hdr))
+		arc_hdr_free_abd(hdr, B_TRUE);
+
+	arc_change_state(evicted_state, hdr);
+```
+
+Excerpt 7 without its last lines. L3876-L3880: the data (and its raw copy, if any) is freed. L3882: the header moves to `evicted_state`, MRU ghost for an MRU header and MFU ghost for an MFU header ([L3829-L3830](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3829-L3830)). Only an uncached header goes to anon and is destroyed (L3884-L3889); a ghost header stays in the hash table, so a later read of the same block finds it.
+
+### 12. `arc_evict`, MRU data down to its target, then MFU data — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4543-L4556
+
+```c
+	/* Evict MRU data. */
+	wt -= m - total_evicted;
+	w = wt * (int64_t)(arc_pd >> 16) >> 16;
+	e = MIN((int64_t)(asize - ac), (int64_t)(mrud - w));
+	bytes = arc_evict_impl(arc_mru, ARC_BUFC_DATA, e);
+	total_evicted += bytes;
+	mrud -= bytes;
+	asize -= bytes;
+
+	/* Evict MFU data. */
+	e = asize - ac;
+	bytes = arc_evict_impl(arc_mfu, ARC_BUFC_DATA, e);
+	mfud -= bytes;
+	total_evicted += bytes;
+```
+
+The data half of excerpt 3. L4545: the MRU data target `w` is `wt` times `arc_pd`, a fraction of 2^32. L4546-L4547: MRU gives up at most what it holds above `w`, and no more than the cache is over `arc_c` (`asize - ac`); a negative amount evicts nothing ([L4386-L4398](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4386-L4398)). L4553-L4554: MFU gives up whatever is still over. `wt` is the evictable part of `arc_c` ([L4499-L4501](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4499-L4501)).
+
+### 13. `arc_evict`, how many ghosts to keep — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4561-L4572
+
+```c
+	 * Size of each state's ghost list represents how much that state
+	 * may grow by shrinking the other states.  Would it need to shrink
+	 * other states to zero (that is unlikely), its ghost size would be
+	 * equal to sum of other three state sizes.  But excessive ghost
+	 * size may result in false ghost hits (too far back), that may
+	 * never result in real cache hits if several states are competing.
+	 * So choose some arbitraty point of 1/2 of other state sizes.
+	 */
+	gsrd = (mrum + mfud + mfum) / 2;
+	e = zfs_refcount_count(&arc_mru_ghost->arcs_size[ARC_BUFC_DATA]) -
+	    gsrd;
+	(void) arc_evict_impl(arc_mru_ghost, ARC_BUFC_DATA, e);
+```
+
+Part of excerpt 6: its comment without the first two lines, and the trim of the MRU data ghost list. L4561-L4567: a ghost list as large as the three other live lists would give false ghost hits, so it is held to half of them. L4569-L4572: the MRU data ghost list is trimmed to `gsrd` from its tail; the trimmed headers are destroyed ([L3820-L3823](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3820-L3823)) unless the block is on an L2ARC device. `gsrd` is static ([L4465](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4465)) and becomes the next pass's `total`. The MFU data ghost list is trimmed the same way at L4579-L4582.
+
+### 14. `arc_access`, an MRU ghost hit — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5432-L5441
+
+```c
+		 * This buffer has been accessed once recently, but was
+		 * evicted from the cache.  Would we have bigger MRU, it
+		 * would be an MRU hit, so handle it the same way, except
+		 * we don't need to check the previous access time.
+		 */
+		hdr->b_l1hdr.b_mru_ghost_hits++;
+		ARCSTAT_BUMP(arcstat_mru_ghost_hits);
+		hdr->b_l1hdr.b_arc_access = now;
+		wmsum_add(&arc_mru_ghost->arcs_hits[arc_buf_type(hdr)],
+		    arc_hdr_size(hdr));
+```
+
+The start of excerpt 4. L5432-L5435: "Would we have bigger MRU, it would be an MRU hit". L5437-L5441: the hit is counted on the header and the header's size ([L1795-L1807](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L1795-L1807), compressed if the block is) is added to the MRU ghost list's `arcs_hits` for its buffer type. L5442-L5449: the header goes to MFU, or to MRU if the read was a prefetch. `arc_access` changes no target; an MFU ghost hit does the same with the MFU ghost list's counter ([L5466-L5472](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5466-L5472)).
+
+### 15. `arc_evict`, the balance moves — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4493-L4497
+
+```c
+	/* Adjust ARC states balance based on ghost hits. */
+	arc_meta = arc_evict_adj(arc_meta, gsrd + gsrm + gsfd + gsfm,
+	    grm + gfm, grd + gfd, zfs_arc_meta_balance);
+	arc_pd = arc_evict_adj(arc_pd, gsrd + gsfd, grd, gfd, 100);
+	arc_pm = arc_evict_adj(arc_pm, gsrm + gsfm, grm, gfm, 100);
+```
+
+The end of excerpt 2. Each pass passes the ghost-hit bytes since the previous pass (L4480-L4491) to `arc_evict_adj`: `arc_meta`, the metadata share, up with metadata ghost hits and down with data ghost hits divided by `zfs_arc_meta_balance / 100` ([L459](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L459), 500 by default); `arc_pd`, the MRU share of data, up with MRU-ghost data hits and down with MFU-ghost data hits; `arc_pm`, the same for metadata. They are fractions of 2^32 ([include/sys/arc_impl.h L1032-L1035](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/arc_impl.h#L1032-L1035)) and start at 1/4, 1/2 and 1/2 ([L8038-L8040](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L8038-L8040)).
+
+### 16. `arc_evict_adj`, at most about 1/32 per pass — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4412-L4422
+
+```c
+	/*
+	 * We should not have more ghost hits than ghost size, but they may
+	 * get close.  To avoid overflows below up/down should not be bigger
+	 * than 1/5 of total.  But to limit maximum adjustment speed restrict
+	 * it some more.
+	 */
+	if (up + down >= total / 16) {
+		uint64_t scale = (up + down) / (total / 32);
+		up /= scale;
+		down /= scale;
+	}
+```
+
+Part of excerpt 5. When the hits reach 1/16 of the ghost total, `up` and `down` are divided by `(up + down) / (total / 32)`, so they come to about 1/32 of the total, and a pass moves a fraction by at most about 1/32 of its range. In the figure one 128 KiB ghost hit (2^17 bytes) against ghost targets of 8 blocks (2^20) reaches that limit: it is scaled by 4 to 2^15, the shift is 32, `up` = 2^47 / 2^20 = 2^27, and `arc_pd` goes from 2^31 to 2^31 + 2^27, 53.125% (the hand-checked sequence above).
+
+### 17. The L2ARC is fed from the lists' tails — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L8266-L8270
+
+```c
+ * 2. The L2ARC attempts to cache data from the ARC before it is evicted.
+ * It does this by periodically scanning buffers from the eviction-end of
+ * the MFU and MRU ARC lists, copying them to the L2ARC devices if they are
+ * not already there. It scans until a headroom of buffers is satisfied,
+ * which itself is a buffer for ARC eviction. If a compressible buffer is
+```
+
+Point 2 of excerpt 9. The feed thread copies blocks from the eviction end of MRU and MFU to the cache device before they are evicted; eviction itself writes nothing to it (point 1, L8261-L8264). `l2arc_feed_thread` ([L9771](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L9771)) wakes about once a second ([L9791](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L9791)) and reads the lists from their tails ([L9530-L9538](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L9530-L9538)). A ghost header whose block is on the device stays as L2C only ([L3805-L3819](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3805-L3819)).
+
 ## Room: Metaslabs and space maps
 
 **Problem.** A copy-on-write pool allocates a new block for every write and frees the old one, so allocation is the hottest path in the system. A single bitmap of the whole pool would be enormous to keep in memory and would have to be rewritten in place on every change, which is exactly what copy-on-write forbids. ZFS instead cuts each vdev into a few hundred metaslabs, keeps only some of them loaded in memory, and records each metaslab's history as an append-only log of ALLOC and FREE extents.
@@ -4069,6 +4213,138 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 ```
 
 Before this point the condense tree has received the two deferred trees and the allocation trees of the txgs in flight ([L3949-L3957](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3949-L3957)): they are free in the old map's view (deferred frees were written as FREE; this txg's allocations are not written yet). `ms_condensing` is set so no allocation happens meanwhile ([L3974](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3974), checked by `metaslab_block_alloc` L4864, excerpt 1), and the map is truncated to length 0, `smp_alloc` 0 ([L3978-L3980](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3978-L3980); `space_map_truncate` [`module/zfs/space_map.c#L908-L910`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/space_map.c#L908-L910)). L4009-L4010: one ALLOC entry for the whole metaslab. L4011: one FREE entry per segment of `ms_allocatable`. L4012: one FREE entry per segment of the condense tree. Then `metaslab_sync` goes on and appends this txg's ALLOC and FREE entries as usual (L3994-L4003 says so). Replaying the condensed map therefore gives the same free tree, deferred frees included, as replaying the long one. The metaslab must be loaded: condensing writes from the in-core tree.
+
+**Short excerpts for the question-first room (v1.4, ALG-197).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis. Excerpt 15 is new; 16 to 22 are cuts of excerpts 9, 1, 2, 10, 11, 12 and 14. Each is checked against the frozen commit like the others.
+
+### 15. `metaslab_compare`, the order of the metaslabs — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L947-L960
+
+```c
+	/*
+	 * Sort inactive metaslabs first, then primaries, then secondaries. When
+	 * selecting a metaslab to allocate from, an allocator first tries its
+	 * primary, then secondary active metaslab. If it doesn't have active
+	 * metaslabs, or can't allocate from them, it searches for an inactive
+	 * metaslab to activate. If it can't find a suitable one, it will steal
+	 * a primary or secondary metaslab from another allocator.
+	 */
+	if (sort1 < sort2)
+		return (-1);
+	if (sort1 > sort2)
+		return (1);
+
+	int cmp = TREE_CMP(m2->ms_weight, m1->ms_weight);
+```
+
+How a metaslab group keeps its metaslabs sorted, for the room's "Choosing a metaslab" note. L947-L954: the comment states the policy: an allocator first tries its primary active metaslab, then its secondary, and only if it has none or they cannot take the allocation does it look for an inactive metaslab to activate. L955-L958: inactive metaslabs sort before active ones, so that search walks the inactive ones first. L960: within each group, a higher `ms_weight` comes first. The weight is segment-based by default (`zfs_metaslab_segment_weight_enabled`, [L259](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L259)): `metaslab_segment_weight` ([L3389-L3442](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3389-L3442)) encodes the highest bucket of the free-segment histogram that has segments, and how many. `find_valid_metaslab` walks this tree and skips a metaslab for which `metaslab_should_allocate` says its largest free segment is too small ([L4924-L4937](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4924-L4937); [L3454-L3493](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3454-L3493)).
+
+### 16. `metaslab_df_alloc`, the cursor or the size — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L1917-L1924
+
+```c
+	if (metaslab_largest_allocatable(msp) < metaslab_df_alloc_threshold ||
+	    free_pct < metaslab_df_free_pct) {
+		align = size & -size;
+		cursor = &msp->ms_lbas[highbit64(align) - 1];
+		offset = -1;
+	} else {
+		offset = metaslab_block_picker(rt, cursor, size, max_size,
+		    metaslab_df_max_search, found_size);
+```
+
+Excerpt 9 from its test on. L1917-L1921: with no free segment of at least `metaslab_df_alloc_threshold` (128 KiB) or under 4 % free, no forward search (`offset = -1`), and the fallback after this excerpt takes a segment by size ([L1933-L1954](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L1933-L1954)). L1923-L1924: otherwise `metaslab_block_picker` searches forward from the cursor.
+
+### 17. `metaslab_block_alloc`, from the free tree to the open txg — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4877-L4884
+
+```c
+		zfs_range_tree_remove(rt, start, size);
+		zfs_range_tree_clear(msp->ms_trim, start, size);
+
+		if (zfs_range_tree_is_empty(msp->ms_allocating[txg & TXG_MASK]))
+			vdev_dirty(mg->mg_vd, VDD_METASLAB, msp, txg);
+
+		zfs_range_tree_add(msp->ms_allocating[txg & TXG_MASK], start,
+		    size);
+```
+
+Excerpt 1, the two trees. L4877: the extent leaves `ms_allocatable`, the free tree. L4880-L4881: the first allocation of a txg in this metaslab marks it dirty for that txg's sync. L4883-L4884: the extent goes into `ms_allocating` of this txg. Nothing reaches the disk here.
+
+### 18. `metaslab_sync`, the append — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4400-L4403
+
+```c
+		space_map_write(msp->ms_sm, alloctree, SM_ALLOC,
+		    SM_NO_VDEVID, tx);
+		space_map_write(msp->ms_sm, msp->ms_freeing, SM_FREE,
+		    SM_NO_VDEVID, tx);
+```
+
+Excerpt 2, the branch without a log space map. The txg's allocation tree is appended as ALLOC entries, then `ms_freeing` as FREE entries, to the metaslab's own space map; `SM_NO_VDEVID` says the entries carry no vdev id. Nothing already on disk is rewritten.
+
+### 19. `metaslab_sync_done`, the deferred frees, swapped — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4630-L4633
+
+```c
+	zfs_range_tree_vacate(*defer_tree,
+	    msp->ms_loaded ? zfs_range_tree_add : NULL, msp->ms_allocatable);
+	if (defer_allowed) {
+		zfs_range_tree_swap(&msp->ms_freed, defer_tree);
+```
+
+Excerpt 10, the swap alone. L4630-L4631: the tree deferred two txgs ago goes back into `ms_allocatable` (if loaded). L4632-L4633: this txg's frees take its place in `ms_defer[txg % TXG_DEFER_SIZE]`.
+
+### 20. `space_map_load_callback`, the replay — module/zfs/space_map.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/space_map.c#L405-L413
+
+```c
+	if (sme->sme_type == smla->smla_type) {
+		VERIFY3U(zfs_range_tree_space(smla->smla_rt) + sme->sme_run, <=,
+		    smla->smla_sm->sm_size);
+		zfs_range_tree_add(smla->smla_rt, sme->sme_offset,
+		    sme->sme_run);
+	} else {
+		zfs_range_tree_remove(smla->smla_rt, sme->sme_offset,
+		    sme->sme_run);
+	}
+```
+
+Excerpt 11 without its signature. Loading free space, `smla_type` is `SM_FREE`: a FREE entry is added to the tree (L405-L409), an ALLOC entry removed (L410-L413). The tree starts as the whole metaslab, so replaying the map in order gives the free space.
+
+### 21. `metaslab_should_condense`, the two tests — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3855-L3861
+
+```c
+	uint64_t record_size = MAX(sm->sm_blksz, vdev_blocksize);
+	uint64_t object_size = space_map_length(sm);
+	uint64_t optimal_size = space_map_estimate_optimal_size(sm,
+	    msp->ms_allocatable, SM_NO_VDEVID);
+
+	return (object_size >= (optimal_size * zfs_condense_pct / 100) &&
+	    object_size > zfs_metaslab_condense_block_threshold * record_size);
+```
+
+Excerpt 12 after its early returns. L3855: a record is the larger of the map's block size and a sector. L3856: the map's length on disk. L3857-L3858: the size the free tree would take if written alone (excerpt 13). L3860-L3861: condense when the map is at least `zfs_condense_pct` (200 %) of that and longer than `zfs_metaslab_condense_block_threshold` (4) records.
+
+### 22. `metaslab_condense`, the rewrite — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4009-L4012
+
+```c
+	zfs_range_tree_add(tmp_tree, msp->ms_start, msp->ms_size);
+	space_map_write(sm, tmp_tree, SM_ALLOC, SM_NO_VDEVID, tx);
+	space_map_write(sm, msp->ms_allocatable, SM_FREE, SM_NO_VDEVID, tx);
+	space_map_write(sm, condense_tree, SM_FREE, SM_NO_VDEVID, tx);
+```
+
+Excerpt 14, the three writes. After the truncation, one ALLOC entry for the whole metaslab (L4009-L4010), one FREE entry per segment of the free tree (L4011), then one FREE entry per segment of the condense tree, the deferred frees and the allocations of the txgs in flight (L4012).
 
 **What the animation shows.**
 - A top-level vdev of `vdev_asize` 8 GiB with `ashift` 12 cut into 16 metaslabs of 512 MiB: `vdev_metaslab_set_size` gives `ms_count = asize >> 29` = 16, which is not under `zfs_vdev_min_ms_count` = 16 nor over 200, so `ms_shift` = 29 ([`module/zfs/vdev.c#L3021-L3026`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev.c#L3021-L3026), the table of [L3006-L3013](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev.c#L3006-L3013)). The visitor's writes all go to metaslab 2, `ms_start` = 1 GiB, drawn zoomed: its free tree `ms_allocatable` (L376), the extents allocated in the open txg (`ms_allocating[txg & TXG_MASK]`, L375), the frees of the open txg (`ms_freeing`, L385), the two deferred trees (`ms_defer[]`, L388) with the txg at which each comes back, and the dynamic-fit cursor `ms_lbas[17]`.

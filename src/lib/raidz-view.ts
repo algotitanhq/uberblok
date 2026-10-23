@@ -177,8 +177,27 @@ export function shownAttempts(n: number): number[] {
   return n <= 16 ? [...Array(n).keys()] : [...Array(12).keys(), n - 3, n - 2, n - 1];
 }
 
+/** What child `d` holds of block `block`, in one sentence: the reader sees why a damaged child matters to this read, or not. */
+export function holds(L: Layout, S: RzStrings, d: number, block: string): string {
+  const mine = L.cols.filter((c) => c.dev === d);
+  const written = mine.filter((c) => c.size > 0);
+  const v = { d, name: block, cols: written.map((c) => c.name).join(", ") };
+  if (written.some((c) => !c.parity)) return fill(S.holdsData, v);
+  if (written.length) return fill(S.holdsParity, v);
+  return fill(mine.some((c) => c.skip) ? S.holdsSkip : S.holdsNone, v);
+}
+
+/** One line under the damage heading: which children hold the block's data, and which its parity. */
+export function roles(L: Layout, S: RzStrings, block: string): string {
+  const devs = (parity: boolean) => {
+    const ds = L.cols.filter((c) => c.parity === parity && c.size > 0).map((c) => c.dev).sort((a, b) => a - b);
+    return fill(ds.length === 1 ? S.oneChild : S.manyChildren, { list: ds.join(", ") });
+  };
+  return fill(S.roles, { name: block, data: devs(false), parity: devs(true) });
+}
+
 /** The read of the live block, one step per press of "Next step". */
-export function readPlan(L: Layout, R: ReadResult, S: RzStrings, health: string[]): ReadStep[] {
+export function readPlan(L: Layout, R: ReadResult, S: RzStrings, health: string[], block = "A"): ReadStep[] {
   const name = (c: number) => L.cols[c].name;
   const dev = (c: number) => L.cols[c].dev;
   const names = (cs: number[]) => cs.map((c) => `${name(c)} (${fill(S.childN, { d: dev(c) })})`).join(", ");
@@ -186,6 +205,8 @@ export function readPlan(L: Layout, R: ReadResult, S: RzStrings, health: string[
   const dataCols = L.cols.slice(0, L.acols).filter((c) => !c.parity).map((c) => c.c);
   const out: ReadStep[] = [];
   const step = (s: Omit<ReadStep, "kind">) => out.push({ kind: "step", ...s });
+  const damaged = health.map((h, d) => (h === "ok" ? -1 : d)).filter((d) => d >= 0);
+  if (damaged.length) step({ html: damaged.map((d) => holds(L, S, d, block)).join(" ") });
   if (R.missing.length) step({ html: fill(S.rMissing, { cols: names(R.missing) }), tone: "bad" });
   step({
     html: fill(R.firstRead.some((c) => L.cols[c].parity) ? S.rFirstParity : S.rFirst, { cols: R.firstRead.map(name).join(", ") }),

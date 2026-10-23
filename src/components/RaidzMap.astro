@@ -12,7 +12,7 @@ import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
 import { fr } from "../lib/fr";
 import { mapAlloc } from "../lib/raidz";
-import { grid, readout, describe, summary, bytes, type RzStrings } from "../lib/raidz-view";
+import { grid, readout, describe, summary, roles, bytes, type RzStrings } from "../lib/raidz-view";
 
 interface Props {
   lang: Lang;
@@ -104,6 +104,15 @@ const S0 = {
     resilverAll: "Resilver of {list}: this block is rewritten, it spans every child.",
     resilverNo: "Resilver of {list}: this block is skipped, since none of the children it covers (s + nparity of them, from column f on) missed writes.",
     attemptsMore: "… {n} more combinations …",
+    holdsData: "Child {d} holds {cols} of block {name}.",
+    holdsParity: "Child {d} holds only parity of block {name} ({cols}), which a read uses only when a data column is missing or wrong.",
+    holdsSkip: "Child {d} holds only a skip sector of block {name}, so the read does not need it.",
+    holdsNone: "Child {d} holds nothing of block {name}, so the read does not need it.",
+    roles: "Block {name}: data on {data}; parity on {parity}.",
+    oneChild: "child {list}",
+    manyChildren: "children {list}",
+    legendMissing: "missing child",
+    legendBad: "child returning bad data",
   },
   fr: {
     figure: "La carte d’un bloc sur un vdev raidz",
@@ -190,6 +199,15 @@ const S0 = {
     resilverAll: "Resilver ({list}) : ce bloc est réécrit, il couvre tous les enfants.",
     resilverNo: "Resilver ({list}) : ce bloc est sauté, car aucun des enfants qu’il couvre (s + nparity, à partir de la colonne f) n’a manqué d’écriture.",
     attemptsMore: "… {n} autres combinaisons …",
+    holdsData: "L’enfant {d} porte {cols} du bloc {name}.",
+    holdsParity: "L’enfant {d} ne porte que de la parité du bloc {name} ({cols}), qu’une lecture n’utilise que si une colonne de données manque ou est fausse.",
+    holdsSkip: "L’enfant {d} ne porte qu’un secteur de saut du bloc {name} : la lecture n’en a pas besoin.",
+    holdsNone: "L’enfant {d} ne porte rien du bloc {name} : la lecture n’en a pas besoin.",
+    roles: "Bloc {name} : données sur {data} ; parité sur {parity}.",
+    oneChild: "l’enfant {list}",
+    manyChildren: "les enfants {list}",
+    legendMissing: "enfant absent",
+    legendBad: "enfant aux données fausses",
   },
   es: {
     figure: "El mapa de un bloque en un vdev raidz",
@@ -276,6 +294,15 @@ const S0 = {
     resilverAll: "Resilver de {list}: este bloque se reescribe, abarca todos los hijos.",
     resilverNo: "Resilver de {list}: este bloque se omite, porque a ninguno de los hijos que cubre (s + nparity, desde la columna f) le faltan escrituras.",
     attemptsMore: "… {n} combinaciones más …",
+    holdsData: "El hijo {d} guarda {cols} del bloque {name}.",
+    holdsParity: "El hijo {d} solo guarda paridad del bloque {name} ({cols}), que una lectura usa solo cuando falta una columna de datos o es errónea.",
+    holdsSkip: "El hijo {d} solo guarda un sector de relleno del bloque {name}, así que la lectura no lo necesita.",
+    holdsNone: "El hijo {d} no guarda nada del bloque {name}, así que la lectura no lo necesita.",
+    roles: "Bloque {name}: datos en {data}; paridad en {parity}.",
+    oneChild: "el hijo {list}",
+    manyChildren: "los hijos {list}",
+    legendMissing: "hijo ausente",
+    legendBad: "hijo que devuelve datos erróneos",
   },
 }[lang];
 const S = Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])) as RzStrings;
@@ -336,6 +363,7 @@ const SIZES = [4096, 8192, 32768, 131072];
     </div>
   </div>
   <p class="rz-summary" data-summary set:html={summary(L, S, lang)} />
+  <p class="rz-note muted" data-write-note aria-live="polite"></p>
   <div class="rz-stage">
     <div class="rz-stage-map">
     <div class="rz-map" role="img" aria-label={`${S.figure}. ${summary(L, S, lang)}`} data-map set:html={grid(L, S)} />
@@ -349,8 +377,9 @@ const SIZES = [4096, 8192, 32768, 131072];
     </div>
     <div class="rz-read" hidden>
       <h3>{S.damage}</h3>
+      <p class="rz-roles muted" data-roles>{roles(L, S, "A")}</p>
       <ul class="rz-health" data-health></ul>
-      <div class="buttons">
+      <div class="buttons rz-read-buttons">
         <button class="btn btn--primary" type="button" data-act="read">{S.read}</button>
         <button class="btn" type="button" data-act="finish" hidden>{S.finish}</button>
         <button class="btn" type="button" data-act="heal">{S.reset}</button>
@@ -360,13 +389,14 @@ const SIZES = [4096, 8192, 32768, 131072];
         <li><span class="cell d rebuilt"></span>{S.legendRebuilt}</li>
         <li><span class="cell d sim"></span>{S.legendSim}</li>
         <li><span class="cell d fixed"></span>{S.legendFixed}</li>
+        <li><span class="cell d gone">0</span>{S.legendMissing}</li>
+        <li><span class="cell d bad"></span>{S.legendBad}</li>
       </ul>
       <p class="rz-stepof muted" data-stepof></p>
       <ol class="rz-steps" data-steps></ol>
       <p class="visually-hidden" data-live aria-live="polite"></p>
     </div>
   </div>
-  <p class="rz-note muted" data-write-note aria-live="polite"></p>
   <details class="rz-numbers">
     <summary>{S.numbers}</summary>
     <div data-readout set:html={readout(L, lang)} />
@@ -381,7 +411,7 @@ const SIZES = [4096, 8192, 32768, 131072];
 <script>
   import { strings, fill, wait, reducedMotion } from "../lib/svg";
   import { mapAlloc, readBlock, type Health, type Layout } from "../lib/raidz";
-  import { grid, readout, describe, summary, readPlan, blockName, bytes, type RzStrings, type ReadStep } from "../lib/raidz-view";
+  import { grid, readout, describe, summary, roles, readPlan, blockName, bytes, type RzStrings, type ReadStep } from "../lib/raidz-view";
 
   /** Blocks written before the live one that the figure keeps: older ones scroll off. */
   const MAX_OLDER = 11;
@@ -454,6 +484,7 @@ const SIZES = [4096, 8192, 32768, 131072];
       q("[data-readout]").innerHTML = readout(L, lang);
       q("[data-describe]").innerHTML = describe(L, S, lang, older);
       q("[data-legend-old]").hidden = older.length === 0;
+      q("[data-roles]").textContent = roles(L, S, name);
       for (const btn of root.querySelectorAll<HTMLButtonElement>("[data-size]"))
         btn.setAttribute("aria-label", fill(S.writeSize, { size: bytes(Number(btn.dataset.size), lang), name }));
       note.textContent = "";
@@ -558,7 +589,7 @@ const SIZES = [4096, 8192, 32768, 131072];
     function next() {
       if (!plan.length || at >= plan.length) {
         clearRead();
-        plan = readPlan(L, readBlock(L, health), S, health);
+        plan = readPlan(L, readBlock(L, health), S, health, blockName(older.length));
       }
       show(plan[at++]);
       const done = at >= plan.length;
@@ -735,7 +766,7 @@ const SIZES = [4096, 8192, 32768, 131072];
     color: var(--fg-faint);
   }
   .rz-map :global(.cell.o1) {
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--line-strong) 55%, transparent);
   }
   .rz-map :global(.cell.o.k) {
     background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 5px);
@@ -759,12 +790,21 @@ const SIZES = [4096, 8192, 32768, 131072];
     outline: 2px solid var(--fg);
     outline-offset: -2px;
   }
+  .cell.gone,
   .rz-map :global(.cell.gone) {
     opacity: 0.25;
   }
+  .rz-legend .cell.gone {
+    text-decoration: line-through;
+  }
+  .cell.bad,
   .rz-map :global(.cell.bad:not(.e)) {
     border-color: var(--bad);
     background: var(--bad-soft);
+  }
+  /* A skip sector on a bad child keeps its hatching over the red. */
+  .rz-map :global(.cell.bad.k) {
+    background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line-strong) 4px 5px), var(--bad-soft);
   }
   .cell.fixed,
   .rz-map :global(.cell.fixed:not(.e)) {
@@ -804,9 +844,15 @@ const SIZES = [4096, 8192, 32768, 131072];
   }
   .rz-note {
     max-width: 44rem;
-    margin-top: var(--space-3);
+    margin: 0 0 var(--space-4);
     font-size: var(--step--1);
-    min-height: 1.5em;
+  }
+  .rz-note:empty {
+    margin: 0;
+  }
+  .rz-roles {
+    font-size: var(--step--1);
+    margin: 0 0 var(--space-3);
   }
   .rz-numbers {
     margin-top: var(--space-4);
@@ -945,6 +991,54 @@ const SIZES = [4096, 8192, 32768, 131072];
     padding-left: 1.2em;
     display: grid;
     gap: var(--space-1);
+  }
+  /* On a narrow screen the map and the read panel stack. Order them so the
+     damage, the map, the read buttons and the newest step line follow each
+     other: one press and its effect on the map fit on one screen. */
+  @media (max-width: 45rem) {
+    .rz-stage {
+      flex-direction: column;
+      flex-wrap: nowrap;
+      align-items: stretch;
+      gap: var(--space-4);
+    }
+    .rz-read {
+      display: contents;
+    }
+    .rz-read > h3,
+    .rz-roles {
+      order: 1;
+      margin-bottom: 0;
+    }
+    .rz-health {
+      order: 2;
+      margin-bottom: 0;
+    }
+    .rz-stage-map {
+      order: 3;
+    }
+    .rz-read-buttons {
+      order: 4;
+    }
+    .rz-stepof {
+      order: 5;
+      margin-top: 0;
+    }
+    /* Newest line first, right under the buttons; earlier lines follow below. */
+    .rz-steps {
+      order: 6;
+      margin-top: calc(-1 * var(--space-3));
+      display: flex;
+      flex-direction: column-reverse;
+      justify-content: flex-end;
+    }
+    .rz-steps :global(li) {
+      display: list-item;
+    }
+    .rz-legend-read {
+      order: 7;
+      margin-top: 0;
+    }
   }
   @media (max-width: 30rem) {
     .num input,

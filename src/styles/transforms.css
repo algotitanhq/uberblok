@@ -193,7 +193,7 @@
   padding: 2px 4px 2px 1.8em;
 }
 .cl .path li::before {
-  content: counter(step) ".";
+  content: counter(step) "." / "";
   position: absolute;
   left: 0.4em;
   font-variant-numeric: tabular-nums;

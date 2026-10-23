@@ -112,7 +112,7 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
       // The button names what it does next, so it never contradicts the key's state above the file.
       q("[data-key]").textContent = ui.key ? S.keyUnload : S.keyLoad;
       q("[data-flip]").setAttribute("aria-pressed", String(ui.flip));
-      if (!reducedMotion()) for (const el of root.querySelectorAll<HTMLElement>("[data-file] .sc, [data-file] .readout")) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: "ease-out" });
+      if (!reducedMotion()) for (const el of root.querySelectorAll<HTMLElement>("[data-file] .sc, [data-file] .rd, [data-file] .readout")) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: "ease-out" });
     }
 
     root.addEventListener("click", (e) => {
@@ -161,6 +161,10 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--space-4);
     align-items: start;
+  }
+  /* "Unload the key" and "Load the key" take the same room, so the buttons beside them do not move. */
+  [data-key] {
+    min-width: 11.5em;
   }
   .kline {
     font-size: var(--step--1);

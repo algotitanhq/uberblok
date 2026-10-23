@@ -188,7 +188,7 @@ test("the limit label names the seven eighths only when rounding moves the limit
   const S = strings("en");
   const label = (x) => V.compressBars(S, x, M.compress(x)).match(/<span class="lim">([^<]*)<\/span>/)[1];
   assert.equal(label({ lsize: 131072, ashift: 12, algo: "lz4", zero: false, out: 1000 }), "limit 112 KiB");
-  assert.match(label({ lsize: 16384, ashift: 13, algo: "lz4", zero: false, out: 1000 }), /^limit 8 KiB, rounded down to a sector \(dashed: seven eighths before rounding, 14 KiB\)$/);
+  assert.match(label({ lsize: 16384, ashift: 13, algo: "lz4", zero: false, out: 1000 }), /^limit 8 KiB \(dashed line: seven eighths, 14 KiB\)$/);
 });
 
 test("compression: each action outlines what it changed, and only that", () => {

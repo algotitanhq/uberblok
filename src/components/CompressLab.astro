@@ -109,8 +109,9 @@ const id = `cl-out-${lang}`;
       if (announce) before = { ...x };
       q("[data-bars]").innerHTML = compressBars(S, x, r, c);
       q("[data-path]").innerHTML = compressPath(S, x, r, c);
-      // Once the line under the controls says the sentence, the figure keeps only the outcome's name.
-      q("[data-result]").innerHTML = compressResult(S, x, r, c, !q("[data-now]").hidden || announce);
+      // When the line under the controls says the sentence, the figure keeps only the outcome's name; while the range
+      // is dragged that line is not updated, so the figure says it in full.
+      q("[data-result]").innerHTML = compressResult(S, x, r, c, announce);
       q("[data-table]").innerHTML = compressTable(S, x);
       q("[data-describe]").innerHTML = compressLine(S, x, r);
       controls();

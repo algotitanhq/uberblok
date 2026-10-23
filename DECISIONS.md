@@ -2432,6 +2432,126 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   paragraph being read. Opening GitHub in a new tab: the feedback asked for the code beside the
   text.
 
+## v1.4 copy-on-write follow-up (ALG-183): FR and ES, teaching figures, panel fixes
+
+### D21.2 The figures teach by acting; the panel after its design review
+
+- **Context.** The roll-out of D21.1 to every room starts here. This issue also carries the
+  pilot's design debt (two SHOULDs, four NITs on `SourceNote`/`SourcePanel`) and asks for figures
+  where "the reader acts and the figure carries the explanation". It is the only roll-out issue
+  that touches shared code, so the other rooms rebase onto it.
+- **FR and ES.** Adapted from the English room, not translated line by line: vouvoiement in
+  French, tuteo in Spanish (as in the rest of the site), French spacing by D1.9. The same four
+  excerpts and the same notes' line ranges in the three languages, so `ANALYSIS.md` gets no new
+  entry and the Engine room's count stays at 120.
+- **Figures.** `CowTree` and `MirrorHeal` are improved, not rebuilt. Each action now shows one
+  effect in the drawing: the picked block is outlined (and can be clicked; the radios stay the
+  keyboard path); a snapshot puts an S on every block it reaches; after a power cut the blocks
+  written for the next txg stay drawn, in red and under the tree the pool came back to, until
+  the next action; a legend names the four looks. In `MirrorHeal` each damage says what it did in
+  one line, and the expected checksum lights up while a block is compared. The narration is
+  plain and carries no code links: D21.1 keeps GitHub links in Source notes only, and the
+  figures' steps are the ones the four notes show. Without script the figures show their text
+  version, as before.
+- **Panel.** Below a 36rem panel body (windows from 1024 px to about 1350 px) a note's line
+  range sits above its text, so the text keeps the panel's width; the code still scrolls
+  sideways. The shadow is a theme token, `--panel-shadow`, faint in light. The open note's pill
+  takes an accent fill; an inline note has a 2 px rule on its left; inside a note the Excerpt's
+  symbol heading is hidden, since the note's label names it.
+- **Rejected.** Making `--line-strong` stronger for the pills, as the review suggested: every
+  figure card and button on the site uses it, so the pill gets its own mix
+  (`--fg-faint` 65% into `--line-strong`, about 3:1) and no other room changes. Removing the
+  power-cut blocks at once (as before): the reader could not see that they were written and
+  are simply unreachable.
+- **After the design review (ALG-183).** The picked block wore the accent outline that the key
+  calls "new copy", so a picked old block looked new. The pick now has a ring of its own in the
+  ink colour, with its own line in the key; the accent outline means a new copy only. The ghost
+  labels of a stacked card ("R · snapshot") go from 10 to 11 units, 12 below 480 px (9.5 CSS px
+  on a 390 px phone, from 7.7). They may run over the front card's top edge, short of the next
+  card; a longer one is squeezed with `textLength` rather than made smaller.
+
+## v1.4 transaction groups room (ALG-189)
+
+### D24.1 The TXG room as a question, and a figure where each step outlines what it changed
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)),
+  third room. It had 5 excerpts (148 lines of code) and 43 links to GitHub in each language,
+  34 of them in the prose, plus a "code" link after every event the figure narrated.
+- **Question.** "When does my write reach the disk?" (« Quand mon écriture arrive-t-elle sur le
+  disque ? », « ¿Cuándo llega mi escritura al disco? »). The operator's question; the answer
+  goes from the cost of committing every write to the batch, the five seconds, the commit by
+  the uberblock, and what a power cut loses (and fsync and the ZIL).
+- **Figure.** `TxgPipeline` is improved, not rebuilt; the model (`src/lib/txg.ts`) is unchanged.
+  Each event outlines the one part of the figure it changed: the CPU cell a write joins or
+  leaves, the dirty-data meter, the txg card that closes, drains or is taken, the pass row, the
+  "On disk" line, or the thread row that woke or asked. The outline is static (it fades in only
+  when motion is allowed), so it reads under reduced motion. Each stage has a one-line plain
+  role under its name; a write's dot drops in only when it is new; a busy CPU cell no longer
+  takes the accent border, which is kept for the outline. Next event is the first button. The
+  two starting writes begin 0.3 s apart so that each ends on its own step. The narration and
+  the log are plain and carry no code links (D21.1): the seven Source notes follow the same
+  steps. Without script the text version is shown, as before.
+- **Code.** Seven Source notes, 58 lines, all new short cuts in `ANALYSIS.md` (TXG room, 6 to
+  12), checked against `zfs-2.4.4`. The "three depths" section is gone: its sentence and
+  paragraph repeated the answer, and its detail now lives in the notes.
+- **Rejected.** Narrating with the code names (`tc_count`, `txg_hold_open`): the reader the
+  question speaks to does not know them, and the notes show them. Emitting one release per
+  step inside the model: it changes a tested model to fix what staggering the first two writes
+  fixes.
+- **Phone (design review).** Below 40rem the figure is taller than the screen, so the outline
+  was off screen for most presses. Next event and the narration now sit in a bar that sticks to
+  the bottom of the screen while the figure is in view (`.live` and `.controls` lend no box
+  there, so the bar's sticky range is the whole figure), and after a press the outlined part is
+  scrolled into view above the bar if it is not visible. The other buttons stay where they were;
+  the desktop layout is unchanged. The open txg card keeps its accent tint but takes the neutral
+  border, so an accent frame means only "this changed". Rejected: scrolling alone, which moves
+  Next event away from the thumb.
+
+## v1.4 tree room (ALG-185)
+
+### D22.1 The tree room as a question, and a figure that climbs one level per step
+
+- **Context.** The roll-out of D21.1 (ALG-182)
+  starts with the tree and the uberblock room, the most visited after the Hall. It had 12
+  excerpts (255 lines of code) and 58 links to GitHub in each language, 27 of them in the
+  prose. The issue asks for a figure where the reader changes a block and follows the new
+  block pointers up to a new uberblock, one level per step.
+- **Question.** "What if the power fails while ZFS is writing?" (« Et s’il y a une coupure de
+  courant pendant que ZFS écrit ? », « ¿Qué pasa si se va la corriente mientras ZFS escribe? »). The answer does not
+  repeat the copy-on-write room's: it is about the txg as a whole, the one root pointer, the
+  flush before the uberblock, the ring of slots and what the import keeps.
+- **Figure.** `step()` in `src/lib/tree.ts` now writes the open txg's new blocks one height
+  per step, data first and the objset last (`HEIGHTS` = 5: data, L1, L2, the block of dnodes,
+  the objset); beat 0 is done when the objset is written, then the four beats as before. This
+  is the order of the code: a block's write I/O is the child of its parent's
+  (`dbuf_write`, dbuf.c L5411), and `zio_write_compress` holds the parent until every child is
+  ready, with its new address and checksum (zio.c L1932-L1939). In the drawing a new copy has a
+  dashed outline while in memory, a solid one once written, and fills in at the flush; a pointer from a new copy to a child not
+  yet written is dotted and muted, and turns into the accent once the child is written. The 3D
+  view draws the same states (an in-memory copy is a faint box, a waiting pointer a faint line).
+  Only what changed is animated, in 2D and 3D, and nothing under reduced motion. The commit
+  panel marks beat 0 "under way" while the rows are being written. A cut halfway up is a new case
+  (`during: 0`): the old tree wins, as with a cut during the flush. Writing a second block is
+  refused once the first level is written, as the code quiesces the txg before `spa_sync`.
+  The other controls, the text version and the no-script state are unchanged. The figure counts
+  "rows" (data, L1, L2, dnodes, objset), not "levels", which the room keeps for indirect blocks.
+- **Code.** Seven Source notes, 69 lines (`ANALYSIS.md` tree room, excerpts 7 and 12 to 17;
+  six are new short cuts of longer excerpts, checked against `zfs-2.4.4`). The "three depths"
+  section is gone: its one-paragraph summary repeated the answer, and its detail now lives in
+  the notes.
+- **Rejected.** A separate "climb" button beside Next step: two buttons that both advance the
+  sync would make the reader guess which one to press. Drawing the climb as an animation inside
+  one step: the issue asks for one level per step, and an animation cannot be paused or read
+  under reduced motion.
+- **After the design review.** The line that says what the last action did sits under the
+  controls, above the tree, and is there from the start ("D2 has changed in txg 4211…"); it
+  replaces the list of reasons why some buttons were disabled, which read as an instruction.
+  A disabled button gives its reason in the same line, on its press only. The blocks the last
+  step wrote carry a ring until the next action (a class, not an animation, so the same under
+  reduced motion), and the legend lists every state from the start, so a step changes the
+  drawing and never the key. Caption sentences say "the dnode block" and "the objset"; the
+  drawing keeps the short labels.
+
 ## v1.4 RAID-Z room (ALG-187)
 
 ### D23.1 The RAID-Z room as a question; blocks written one after another, a read one step per press

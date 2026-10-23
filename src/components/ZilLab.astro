@@ -100,7 +100,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     <p class="narration" aria-live="polite" data-now>{S.idle}</p>
   </div>
 
-  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <noscript><p class="muted noscript">{t.noScript}</p></noscript>
   <section class="zl-log" aria-labelledby={`zl-log-${lang}`} hidden>
     <h3 id={`zl-log-${lang}`}>{S.logLabel}</h3>
     <ol data-log><li class="muted">{S.logEmpty}</li></ol>
@@ -210,20 +210,25 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     // The ring: what the last step changed, until the next step. A class, so it reads under
     // reduced motion too; it fades in only when motion is allowed.
     function ring(e: Ev | undefined): Element[] {
-      for (const x of root.querySelectorAll(".hit")) x.classList.remove("hit");
+      for (const x of root.querySelectorAll(".hit")) x.classList.remove("hit", "hit-first");
       const els = e ? targets(e).flatMap((sel) => [...root.querySelectorAll(sel)]) : [];
       for (const x of els) x.classList.add("hit");
+      els[0]?.classList.add("hit-first");
       q(".khit").hidden = !els.length;
       return els;
     }
-    // The figure is taller than most screens: after a step, bring the first ringed part into
-    // view above the bar, which sticks to the bottom of the screen.
-    function show(el: Element | undefined) {
-      if (!el) return;
-      const r = el.getBoundingClientRect();
+    // The figure is taller than most screens: after a step, bring the ringed parts into view
+    // above the bar, which sticks to the bottom of the screen. All of them when they fit
+    // together, otherwise the first, which is the one the narration names.
+    function show(els: Element[]) {
+      const rs = els.map((x) => x.getBoundingClientRect()).filter((r) => r.width || r.height);
+      if (!rs.length) return;
       const room = Math.min(q(".stepbar").getBoundingClientRect().top, innerHeight) - 8;
-      if (r.top >= 8 && r.bottom <= room) return;
-      const by = r.top < 8 || r.height > room - 8 ? r.top - 8 : r.bottom - room;
+      const top = Math.min(...rs.map((r) => r.top));
+      const bottom = Math.max(...rs.map((r) => r.bottom));
+      const [t, b] = bottom - top <= room - 8 ? [top, bottom] : [rs[0].top, rs[0].bottom];
+      if (t >= 8 && b <= room) return;
+      const by = t < 8 || b - t > room - 8 ? t - 8 : b - room;
       window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
@@ -247,9 +252,9 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
         controls();
         refocus(focusKey);
       }
-      const line = eventLine(S, ev[k]);
+      const line = eventLine(S, ev[k], true);
       now.innerHTML = ev.length > 1 ? `${fill(S.stepOf, { k: shown, n: ev.length })} ${line}` : line;
-      show(ring(ev[k])[0]);
+      show(ring(ev[k]));
     }
 
     function act(f: () => Ev[]) {
@@ -262,7 +267,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       if (ev.every((e) => e.k === "refused")) {
         for (const e of ev) logLine(e);
         shown = ev.length;
-        now.textContent = plain(eventLine(S, ev[0]));
+        now.textContent = plain(eventLine(S, ev[0], true));
         ring(undefined);
         render(focusKey);
         return;
@@ -929,6 +934,10 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     font-size: var(--step--1);
     line-height: 1.4;
     max-width: 60rem;
+  }
+  .noscript {
+    margin: var(--space-5) 0 0;
+    font-size: var(--step--1);
   }
   .text-version {
     margin-top: var(--space-5);

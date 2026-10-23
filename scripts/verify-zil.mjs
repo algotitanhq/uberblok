@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// The ZIL room alone (D30.1): every language, desktop and phone. Writes,
-// fsyncs, cuts the power, imports and mounts, one press of Next step at a
-// time, and checks that each step rings a part of the figure, that the
-// narration counts the steps and carries no link, that on a phone the ringed
-// part and Next step are on screen, that reduced motion runs no animation,
-// that with no script the text version is there and the controls are not, and
-// that the keyboard reaches and presses Next step. Captures the figure at each
-// stage and the whole page.
+// The ZIL room alone (D30.1): every language, desktop and two phone sizes.
+// Writes, fsyncs, cuts the power, imports and mounts, one press of Next step
+// at a time, and checks that each step rings a part of the figure, that the
+// narration counts the steps and carries no link, that the first ringed part
+// (all of them when they fit together) and Next step are on screen, that on a
+// phone the step bar stays under a quarter of the screen, that reduced motion
+// runs no animation, that with no script the text version is there and the
+// controls are not, and that the keyboard reaches and presses Next step.
+// Captures the figure at each stage and the whole page.
 //   node scripts/verify-zil.mjs http://127.0.0.1:4321 shots/zil
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -14,7 +15,11 @@ import { join } from "node:path";
 
 const [base = "http://127.0.0.1:4321", out = "shots/zil"] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
-const VP = { desktop: { width: 1280, height: 900 }, phone: { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true } };
+const VP = {
+  desktop: { width: 1280, height: 900 },
+  phone: { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  small: { width: 360, height: 740, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+};
 const report = { problems: [], captures: [], steps: {} };
 const problem = (x) => report.problems.push(x);
 const browser = await chromium.launch();
@@ -24,11 +29,16 @@ const state = (page) =>
     const f = document.querySelector("[data-zl]");
     const bar = f.querySelector(".stepbar");
     const floor = Math.min(bar.getBoundingClientRect().top, innerHeight);
-    const hit = f.querySelector(".hit");
-    const r = hit?.getBoundingClientRect();
+    const r = f.querySelector(".hit-first")?.getBoundingClientRect();
+    // All the ringed parts must be on screen when they fit together above the bar.
+    const rs = [...f.querySelectorAll(".hit")].map((x) => x.getBoundingClientRect()).filter((x) => x.width || x.height);
+    const top = Math.min(...rs.map((x) => x.top));
+    const bottom = Math.max(...rs.map((x) => x.bottom));
+    const fits = bottom - top <= floor - 16;
     const b = f.querySelector('[data-step="next"]').getBoundingClientRect();
     return {
       hits: f.querySelectorAll(".hit").length,
+      barShare: bar.getBoundingClientRect().height / innerHeight,
       key: !f.querySelector(".khit").hidden,
       narration: f.querySelector("[data-now]").textContent.trim(),
       live: f.querySelector("[data-now]").getAttribute("aria-live"),
@@ -36,7 +46,7 @@ const state = (page) =>
       focus: document.activeElement?.dataset.step ?? document.activeElement?.dataset.act ?? null,
       links: f.querySelectorAll(".stepbar a, .zl-log a, [data-writes] a, [data-memory] a, [data-disk] a").length,
       overflow: document.documentElement.scrollWidth > innerWidth,
-      seen: { hit: !!r && r.top >= 0 && r.top < floor, next: b.top >= 0 && b.bottom <= innerHeight },
+      seen: { hit: !!r && r.top >= 0 && r.top < floor, all: !fits || (top >= 0 && bottom <= floor), next: b.top >= 0 && b.bottom <= innerHeight },
     };
   });
 
@@ -76,14 +86,15 @@ for (const lang of ["en", "fr", "es"]) {
       await fig.locator(`[data-act="${act}"]`).click();
       let n = 0;
       for (;;) {
-        await page.waitForTimeout(vp === "phone" ? 500 : 60);
+        await page.waitForTimeout(500);
         const st = await state(page);
         n++;
-        seq.push(`${i} ${act} ${n}: ${st.narration}`);
+        seq.push(`${i} ${act} ${n} [bar ${Math.round(st.barShare * 100)} %]: ${st.narration}`);
         if (!st.hits || !st.key) problem(`${tag} ${act} step ${n}: nothing ringed`);
+        if (vp !== "desktop" && st.barShare > 0.25) problem(`${tag} ${act} step ${n}: the step bar covers ${Math.round(st.barShare * 100)} % of the screen`);
         if (st.links) problem(`${tag} ${act} step ${n}: links in the figure`);
         if (st.live !== "polite" || !st.narration) problem(`${tag} ${act} step ${n}: narration "${st.narration}"`);
-        if (vp === "phone" && !(st.seen.hit && st.seen.next)) problem(`${tag} ${act} step ${n}: ringed part or Next step off screen ${JSON.stringify(st.seen)}`);
+        if (!(st.seen.hit && st.seen.all && st.seen.next)) problem(`${tag} ${act} step ${n}: ringed part or Next step off screen ${JSON.stringify(st.seen)}`);
         if (st.stepping && st.focus !== "next") problem(`${tag} ${act} step ${n}: focus on ${st.focus}, not Next step`);
         if (n === 2 && i === 3) await shot(`zil-${tag}-1-fsync-step.png`);
         if (n === 2 && act === "mount") await shot(`zil-${tag}-3-replay-step.png`);

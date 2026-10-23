@@ -294,11 +294,21 @@ export function disk(s0: Zil, S: ZilStrings, f?: Frame): string {
 
 // ---------- Words for the log, the summary and the text version ----------
 
-export function eventLine(S: ZilStrings, e: Ev): string {
+/**
+ * For the narration (`short`): where a log block went and why it is not on the SLOG. The log under
+ * the figure lists every class tried; the narration does not, so the step bar stays small on a phone.
+ */
+function where(S: ZilStrings, cls: AllocClass, t: Try[]): string {
+  if (t.length < 2) return clsName(S, cls);
+  return fill(S.eWhy, { cls: clsName(S, cls), why: t[0].why === "full" ? S.whySlogFull : S.whyNoSlog });
+}
+
+export function eventLine(S: ZilStrings, e: Ev, short = false): string {
   switch (e.k) {
     case "itx":
       return fill(e.recs > 1 ? S.eItxN : S.eItx, { size: size(S, e.size), recs: plural(S, e.recs, "rec1", "recN"), txg: e.txg, state: e.state });
     case "create":
+      if (short) return fill(S.eCreate, { b: e.blk.id, size: size(S, e.blk.size), cls: where(S, e.blk.cls, e.tried) });
       return `${fill(S.eCreate, { b: e.blk.id, size: size(S, e.blk.size), cls: clsName(S, e.blk.cls) })} ${fill(S.eTried, { list: tried(S, e.tried) })}`;
     case "createWait":
       return fill(S.eCreateWait, { txg: e.txg });
@@ -316,6 +326,7 @@ export function eventLine(S: ZilStrings, e: Ev): string {
       return fill(S.eInPlace, { w: e.write });
     case "alloc": {
       const fb = e.tried.length > 1;
+      if (short) return fill(S.eAlloc, { id: e.lwb, b: e.blk.id, next: e.next, cls: where(S, e.blk.cls, e.tried) });
       return fill(fb ? S.eAllocFallback : S.eAlloc, { id: e.lwb, b: e.blk.id, next: e.next, cls: clsName(S, e.blk.cls), list: tried(S, e.tried.slice(0, -1)) });
     }
     case "returns":
@@ -378,7 +389,8 @@ export function targets(e: Ev): string[] {
     case "claim":
       return ['[data-h="claim"]', '[data-h="flags"]'];
     case "replay":
-      return [`[data-b] [data-seq="${e.seq}"]`, `[data-w="${e.write}"]`];
+      // The write the narration names first: on a phone the file panel sits far above the chain.
+      return [`[data-w="${e.write}"]`, `[data-b] [data-seq="${e.seq}"]`];
     case "skip":
       return [`[data-b] [data-seq="${e.seq}"]`];
     case "refused":

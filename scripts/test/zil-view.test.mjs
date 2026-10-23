@@ -370,3 +370,27 @@ test("the figure carries no link: the code is in the Source notes", () => {
     assert.doesNotMatch(html, /<a\b/);
   }
 });
+
+test("the narration says where a log block went and why, the log keeps every class tried", () => {
+  const why = { en: "because there is no SLOG", fr: "car il n’y a pas de SLOG", es: "porque no hay SLOG" };
+  const full = { en: "because the SLOG is full", fr: "car le SLOG est plein", es: "porque el SLOG está lleno" };
+  for (const lang of ["en", "fr", "es"]) {
+    const S = strings(lang);
+    for (const e of [{ k: "create", blk, tried }, { k: "alloc", lwb: 1, next: 2, blk, tried }]) {
+      const short = text(eventLine(S, e, true));
+      const long = text(eventLine(S, e));
+      assert.ok(short.includes(full[lang]), `${lang} ${e.k}: ${short}`);
+      assert.ok(!short.includes(text(S.clsSpecial)), `${lang} ${e.k}: the tries stay in the log: ${short}`);
+      assert.ok(long.includes(text(S.clsSpecial)), `${lang} ${e.k}: ${long}`);
+      assert.ok(short.length < long.length, `${lang} ${e.k}`);
+    }
+    const noSlog = [{ cls: "log", ok: false, why: "absent" }, { cls: "embedded_log", ok: true, why: "taken" }];
+    assert.ok(text(eventLine(S, { k: "create", blk, tried: noSlog }, true)).includes(why[lang]), lang);
+    const onSlog = text(eventLine(S, { k: "create", blk: { ...blk, cls: "log" }, tried: [{ cls: "log", ok: true, why: "taken" }] }, true));
+    assert.ok(!onSlog.includes(why[lang]) && !onSlog.includes(full[lang]), `${lang}: ${onSlog}`);
+  }
+});
+
+test("a replay rings the write before the record: the narration names the write", () => {
+  assert.match(targets({ k: "replay", seq: 1, write: 2, txg: 100 })[0], /data-w="2"/);
+});

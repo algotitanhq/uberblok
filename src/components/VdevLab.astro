@@ -42,6 +42,8 @@ const helpId = `vd-help-${lang}`;
       <span class="glabel"><code>{S.smallLabel}</code></span>
       <button class="btn" type="button" data-small="0" aria-pressed="true">0</button>
       <button class="btn" type="button" data-small="16384" aria-pressed="false">{lang === "fr" ? "16 Kio" : lang === "es" ? "16\u00a0KiB" : "16 KiB"}</button>
+    </div>
+    <div class="buttons" role="group" aria-label={S.fillLabel}>
       <span class="glabel">{S.fillLabel}</span>
       <button class="btn" type="button" data-fill="low" aria-pressed="true">{S.fillLow}</button>
       <button class="btn" type="button" data-fill="over75" aria-pressed="false">{S.fillOver75}</button>
@@ -67,13 +69,13 @@ const helpId = `vd-help-${lang}`;
       <div class="vd-key" data-key set:html={legendHtml(S)} />
     </div>
     <div class="vd-side">
-      <section class="panel" aria-labelledby={`vd-last-${lang}`}>
-        <h3 id={`vd-last-${lang}`}>{S.lastTitle}</h3>
-        <div data-last set:html={lastHtml(S, p0, io0)} />
-      </section>
       <section class="panel" aria-labelledby={`vd-cls-${lang}`}>
         <h3 id={`vd-cls-${lang}`}>{S.classTitle}</h3>
         <div data-classes set:html={classesHtml(S, p0, io0.block.cls)} />
+      </section>
+      <section class="panel" aria-labelledby={`vd-last-${lang}`}>
+        <h3 id={`vd-last-${lang}`}>{S.lastTitle}</h3>
+        <div data-last set:html={lastHtml(S, p0, io0)} />
       </section>
     </div>
   </div>
@@ -172,6 +174,14 @@ const helpId = `vd-help-${lang}`;
       for (const b of root.querySelectorAll<HTMLElement>("[data-rep]")) b.setAttribute("aria-disabled", String(!!canReplace(pool, selected, b.dataset.rep as "new")));
       q("[data-act='read']").setAttribute("aria-disabled", String(!last));
       if (scene) scene.draw(pool, io, selected, animate && !reducedMotion());
+      // After a write or a read, the first vdev it reached is brought on screen
+      // if it is not, by the least scroll (as RaidzMap does); on the next frame,
+      // once say() has changed the line above the tree.
+      if (animate && !is3d) requestAnimationFrame(() => {
+        const hit = root.querySelector("[data-tree] .n.hit") ?? root.querySelector("[data-tree] .n.on:not([data-node='root'])");
+        const r = hit?.getBoundingClientRect();
+        if (hit && r && (r.top < 0 || r.bottom > innerHeight)) hit.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+      });
       if (animate && !reducedMotion() && !is3d) {
         for (const el of root.querySelectorAll<SVGGraphicsElement>("[data-tree] .n.on, [data-tree] .edge.on")) {
           const d = Number(el.getAttribute("data-depth") ?? 0);

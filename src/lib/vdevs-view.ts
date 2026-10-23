@@ -238,7 +238,8 @@ export function nodeOptions(S: VdStrings, p: Pool, selected: string): string {
 export function dropLine(S: VdStrings, p: Pool, b: Block, h: Hop): string {
   const tops = [...new Set(b.dvas.map((d) => code(name(p, d.top))))];
   return cap(fill(S.sayDrop, {
-    kind: S[`k_${b.kind}`], cls: fill(S.clsOf, { cls: clsName(S, b.cls) }), dvas: plural(S, b.dvas.length, "copy1", "copyN"),
+    // The class's swatch, as in the table, for a phone where the table is below the fold.
+    kind: S[`k_${b.kind}`], cls: `<span class="sw sw-${b.cls}" aria-hidden="true"></span>` + fill(S.clsOf, { cls: clsName(S, b.cls) }), dvas: plural(S, b.dvas.length, "copy1", "copyN"),
     tops: list(S, tops), disks: plural(S, new Set(leavesOf(h)).size, "disk1", "diskN"),
   }));
 }

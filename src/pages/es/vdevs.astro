@@ -75,8 +75,7 @@ const L = {
           ZFS elige primero una clase según el tipo de bloque. Los vdevs que guardan los datos forman la clase normal, y
           cada tipo de dispositivo especializado forma su propia clase. Los metadatos van al dispositivo special cuando el
           pool tiene uno. Los datos de los archivos solo van allí si el bloque no pasa de un tamaño que fijas por dataset,
-          cero por defecto, y solo mientras el special esté lleno a menos de tres cuartas partes. La tabla de deduplicación va al dispositivo de dedup, o al special si no hay dispositivo de dedup. El registro de intenciones, el ZIL, va al dispositivo de log. Si no lo hay, va a un espacio reservado en los vdevs special o normales. Todo lo demás va a la clase normal. Cuando la clase special o la de dedup está llena, ZFS vuelve a elegir sin ella y acaba en la clase normal. Dentro de la clase, ZFS reparte los bloques entre los vdevs según el espacio libre y la
-          carga. Los metadatos se guardan en dos copias por defecto. ZFS empieza la segunda en el vdev siguiente de la clase, así que las dos copias quedan en vdevs distintos cuando la clase tiene más de uno.
+          cero por defecto, y solo mientras el special esté lleno a menos de tres cuartas partes. La tabla de deduplicación va al dispositivo de dedup, o al special si no hay dispositivo de dedup. El registro de intenciones, el ZIL, va al dispositivo de log o, si no lo hay, a un espacio reservado en los vdevs special o normales. Todo lo demás va a la clase normal.
         </p>
         <p>
           Después, la escritura baja por un árbol. El pool es la raíz, los vdevs son sus hijos y los discos son los hijos
@@ -98,11 +97,14 @@ const L = {
           los botones dice adónde fue, los vdevs que recibieron una copia quedan rodeados y su clase se marca en la tabla.
           Luego desactiva el espejo special, lo que rehace el pool sin él, y vuelve a escribir metadatos, pon <code>special_small_blocks</code> a
           16&nbsp;KiB y escribe un bloque pequeño de archivo, o llena la clase special y mira cómo el bloque pasa a la
-          clase normal.
+          clase normal: cuando la clase special o la de dedup está llena, ZFS vuelve a elegir sin ella y acaba en la clase
+          normal.
         </p>
         <p>
           El panel del último bloque muestra cada paso de la elección y el camino de la escritura por el árbol. Selecciona
-          un nodo para ver su tabla de funciones. Un espejo escribe en cada hijo y lee de uno. Un grupo RAID-Z escribe una columna por hijo. Un grupo dRAID escribe tres columnas, cada una en un hijo distinto de los cinco. El dRAID reparte sus grupos entre sus cinco hijos con una tabla fija de
+          un nodo para ver su tabla de funciones. Dentro de una clase, ZFS reparte los bloques entre los vdevs según el espacio
+          libre y la carga. Los metadatos se guardan en dos copias por defecto, y ZFS empieza la segunda en el vdev siguiente
+          de la clase: sin el espejo special, un bloque de metadatos deja rodeados dos vdevs normales. Un espejo escribe en cada hijo y lee de uno. Un grupo RAID-Z escribe una columna por hijo. Un grupo dRAID escribe tres columnas, cada una en un hijo distinto de los cinco. El dRAID reparte sus grupos entre sus cinco hijos con una tabla fija de
           permutaciones, así que dos bloques grandes seguidos caen en conjuntos de discos distintos.
         </p>
         <p>

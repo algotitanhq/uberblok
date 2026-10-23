@@ -76,9 +76,7 @@ const L = {
           normale, et chaque type de périphérique spécialisé forme sa propre classe. Les métadonnées vont sur le
           périphérique special quand le pool en a un. Les données des fichiers n’y vont que si le bloc ne dépasse pas une
           taille que vous fixez par dataset, nulle par défaut, et seulement tant que le special est rempli à moins des trois
-          quarts. La table de déduplication va sur le périphérique de dedup, ou sur le special quand il n’y a pas de périphérique de dedup. Le journal d’intention, le ZIL, va sur le périphérique de log. Sans lui, il va dans une place réservée sur les vdevs special ou normaux. Tout le reste va dans la classe normale. Quand la classe special ou dedup est pleine, ZFS choisit de nouveau sans elle, et finit par la classe normale. Dans la classe, ZFS répartit
-          les blocs entre les vdevs selon la place libre et la charge. Les métadonnées sont écrites en deux copies par
-          défaut, ZFS commence la seconde sur le vdev suivant de la classe : les deux copies sont sur des vdevs différents quand la classe en compte plusieurs.
+          quarts. La table de déduplication va sur le périphérique de dedup, ou sur le special quand il n’y a pas de périphérique de dedup. Le journal d’intention, le ZIL, va sur le périphérique de log, ou, sans lui, dans une place réservée sur les vdevs special ou normaux. Tout le reste va dans la classe normale.
         </p>
         <p>
           L’écriture descend ensuite un arbre. Le pool en est la racine, les vdevs sont ses enfants et les disques sont les
@@ -100,11 +98,14 @@ const L = {
           ligne sous les boutons dit où il est allé, les vdevs qui ont reçu une copie sont cerclés, et sa classe est
           marquée dans le tableau. Désactivez ensuite le miroir special, ce qui reconstruit le pool sans lui, et écrivez de nouveau des métadonnées, passez
           <code>special_small_blocks</code> à 16 Kio et écrivez un petit bloc de fichier, ou remplissez la classe special
-          et regardez le bloc partir dans la classe normale.
+          et regardez le bloc partir dans la classe normale : quand la classe special ou dedup est pleine, ZFS choisit de
+          nouveau sans elle, et finit par la classe normale.
         </p>
         <p>
           Le panneau du dernier bloc donne chaque étape du choix et le chemin de l’écriture le long de l’arbre.
-          Sélectionnez un nœud pour voir sa table de fonctions. Un miroir écrit sur chaque enfant et lit sur un seul. Un groupe RAID-Z écrit une colonne par enfant. Un groupe dRAID écrit trois colonnes, chacune sur un enfant différent parmi les cinq. Le dRAID répartit ses groupes sur ses cinq enfants grâce à
+          Sélectionnez un nœud pour voir sa table de fonctions. Dans une classe, ZFS répartit les blocs entre les vdevs selon
+          la place libre et la charge. Les métadonnées sont écrites en deux copies par défaut, et ZFS commence la seconde sur
+          le vdev suivant de la classe : sans le miroir special, deux vdevs normaux sont cerclés pour un bloc de métadonnées. Un miroir écrit sur chaque enfant et lit sur un seul. Un groupe RAID-Z écrit une colonne par enfant. Un groupe dRAID écrit trois colonnes, chacune sur un enfant différent parmi les cinq. Le dRAID répartit ses groupes sur ses cinq enfants grâce à
           une table fixe de permutations : deux grands blocs à la suite arrivent sur deux ensembles de disques différents.
         </p>
         <p>

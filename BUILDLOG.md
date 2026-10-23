@@ -2246,3 +2246,14 @@ debt below; no sideways scroll. Captures not committed (`shots/`).
 its accent fill (axe `color-contrast`, needs 4.5:1). It is in the shared `SourceNote`, the
 same on `main` in every room (checked on the RAID-Z room), and the whole-visit audit does not
 open a note, so it never saw it. Left for the issue that owns `SourceNote`.
+
+**Design/UX fixes** (D26.1, design review). Measured with the "Write a block" row at 60 % of
+the window, then Metadata pressed: the ringed `mirror-4` was 540 px below the fold at
+1440×900 and the class row 410 px; now the line, the ring and the class row are all on screen
+at 1440×900 and 1366×768 (ring 839–867 of 900, class row 447–480), and on a 390×844 phone the
+line and the ring are (787–811 of 844), the class shown by its swatch in the line. Answer
+paragraph 2: 192 → 123 words in EN, 207 → 134 in FR, 205 → 129 in ES. The fill buttons are a
+group of their own (`aria-label` "Special class"). `npm test` 246 pass, build 0 errors,
+`verify-vdevs.mjs` 136 runs and 0 mismatches, keyboard walk with every stop visible, 0 console
+errors. `code-reviewer` on the fix: the scroll now waits a frame for the line above the tree
+to change; the FR and ES sentences on the two copies now use the figure's words for the ring.

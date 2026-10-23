@@ -59,7 +59,7 @@
     align-items: start;
   }
 }
-/* The last block and the classes beside the tree, so a press and its effect
+/* The classes, then the last block, beside the tree, so a press and its effect
    share the screen on a desktop (D26.1). */
 .vd .vd-side {
   display: grid;
@@ -80,7 +80,9 @@
 .vd-tree {
   display: block;
   width: 100%;
-  max-width: 34rem;
+  /* Near its natural width (360 units): a taller drawing would push the ring
+     and the class row below the fold after a press (Design/UX, ALG-191). */
+  max-width: 24rem;
   height: auto;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -95,6 +97,8 @@
   stroke-width: 2;
 }
 .vd-tree .n {
+  /* Room around a node brought on screen after a press. */
+  scroll-margin: var(--space-6);
   cursor: pointer;
 }
 .vd-tree .n rect {

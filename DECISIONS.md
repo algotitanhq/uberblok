@@ -2692,3 +2692,12 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   sticky bar for phones as in the TXG room (D24.1): here the line under the controls already
   says the effect in words; left to the design review. Rebuilding the figure around one pool
   layout builder: the issue asks to improve the existing figure.
+- **Design review** ([ALG-191](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-191)). After a press, the ring and the
+  class row were 400 to 1,050 px below the fold. The tree is capped at 24rem, near its natural
+  width (12 px labels instead of 17); the classes table now comes before the last block's panel
+  beside the tree; after a write or a read, the first vdev it reached is scrolled into view by the
+  least amount if it is off screen (instant under reduced motion, as in the RAID-Z room); and the
+  line under the controls puts the class's swatch before its name, for phones, where the table is
+  below the tree. The answer's second paragraph keeps only the class rules (123 words in EN,
+  from 192); the fallback, the spread within a class and the second copy move to what to try,
+  where the figure shows each. The fill buttons get their own labelled group.

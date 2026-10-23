@@ -2,81 +2,76 @@
 import Base from "../../layouts/Base.astro";
 import ArcLab from "../../components/ArcLab.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D25.1): the question, a plain
+// answer, the figure, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "fr";
 const r = room("arc");
 const A = "module/zfs/arc.c";
 const L = {
-  states: gh("include/sys/arc.h", 231, 238),
-  key: gh("include/sys/arc_impl.h", 472, 475),
-  counters: gh("include/sys/arc_impl.h", 162, 172),
-  fractions: gh("include/sys/arc_impl.h", 1032, 1035),
-  anon: gh(A, 5381, 5397),
   mintime: gh(A, 1318),
-  hit: gh(A, 6025),
-  miss: gh(A, 6204, 6208),
-  hold: gh(A, 2334, 2338),
-  release: gh(A, 2369),
-  head: gh("module/zfs/multilist.c", 184),
-  tail: gh(A, 3922, 3924),
+  anon: gh(A, 5381, 5397),
   mfuHit: gh(A, 5450, 5459),
-  mfuGhost: gh(A, 5460, 5472),
-  hdrSize: gh(A, 1795, 1807),
-  evictedState: gh(A, 3828, 3830),
-  ghostDestroy: gh(A, 3820, 3823),
   wt: gh(A, 4499, 4501),
   evictImpl: gh(A, 4386, 4398),
-  statics: gh(A, 4464, 4465),
+  evictedState: gh(A, 3828, 3830),
+  destroy: gh(A, 3884, 3889),
+  ghostDestroy: gh(A, 3820, 3823),
+  mfuTrim: gh(A, 4579, 4582),
+  hdrSize: gh(A, 1795, 1807),
+  toMfu: gh(A, 5442, 5449),
+  mfuGhost: gh(A, 5466, 5472),
+  hits: gh(A, 4479, 4491),
   balance: gh(A, 459),
+  fractions: gh("include/sys/arc_impl.h", 1032, 1035),
   init: gh(A, 8038, 8040),
-  alloc: gh(A, 5251, 5252),
-  overflowing: gh(A, 5099, 5100),
-  recordsize: gh("module/zfs/dsl_dataset.c", 87, 91),
-  evictCb: gh(A, 4876, 4877),
-  evictLoop: gh(A, 4895, 4896),
-  adapt: gh(A, 5076, 5081),
-  cMax: gh(A, 5069, 5070),
-  reduce: gh(A, 4714),
-  blockSizes: gh("include/sys/fs/zfs.h", 1958, 1962),
-  l2arcWhat: gh(A, 8217, 8222),
+  adjRest: gh(A, 4424, 4441),
+  noEvictPath: gh(A, 8261, 8264),
   feed: gh(A, 9771),
   feedHz: gh(A, 9791),
   feedTail: gh(A, 9530, 9538),
   l2cOnly: gh(A, 3805, 3819),
   l2cHit: gh(A, 5481, 5488),
-  sublists: gh(A, 7518, 7543),
-  randomSublist: gh(A, 4205, 4213),
-  prefetchLife: gh(A, 3832, 3839),
-  uncached: gh(A, 5473, 5480),
 };
 ---
 
 <Base
   lang={lang}
   roomId="arc"
-  title="L’ARC · Uberblok"
-  description="Comment l’ARC de ZFS empêche un parcours séquentiel de vider son cache, avec les listes MRU, MFU et fantômes, et comment les succès fantômes déplacent son équilibre dans OpenZFS 2.4.4 : interactif, avec le code."
+  title="Pourquoi une grosse lecture ne vide-t-elle pas mon cache ? L’ARC · Uberblok"
+  description="ZFS sépare les blocs lus une fois des blocs relus et se souvient des blocs qu’il a fait sortir : un seul gros parcours ne peut pas vider son cache. Interactif, avec le code d’OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Salle {roomNumber(r.id)}</p>
-      <h1>{r.title.fr}</h1>
-      <div class="prose problem">
+      <p class="kicker">Salle {roomNumber(r.id)} · {r.title.fr}</p>
+      <h1>Pourquoi une grosse lecture ne <span class="nowrap">vide-t-elle</span> pas mon cache ?</h1>
+      <div class="prose answer">
         <p class="lead">
-          Un cache en mémoire doit choisir ce qu’il oublie. Qu’il oublie le bloc utilisé le moins récemment, comme un cache
-          LRU, et une seule grosse lecture, une sauvegarde ou le parcours d’un gros fichier, chasse tout ce qui servait :
-          chaque bloc parcouru est plus récent que l’ensemble de travail. Qu’il oublie le moins fréquemment utilisé, comme un
-          cache LFU, et les blocs chauds d’hier restent, si froids soient-ils aujourd’hui.
+          ZFS garde en mémoire les blocs qu’il a lus, dans un cache appelé l’ARC, pour que la lecture suivante du même bloc
+          n’aille pas jusqu’au disque. Quand le cache est plein, il doit choisir quel bloc abandonner. Un cache simple
+          abandonne le bloc utilisé il y a le plus longtemps. Avec cette règle, une seule grosse lecture, comme une
+          sauvegarde ou le parcours d’un gros fichier, remplit tout le cache de blocs qui ne seront pas relus et en chasse
+          les blocs que vos programmes utilisent sans arrêt.
         </p>
         <p>
-          L’ARC, le cache de ZFS, range les blocs vus une fois récemment dans une liste, MRU, et les blocs vus au moins deux
-          fois dans une autre, MFU : un parcours ne fait que traverser la première. Et il se souvient de ce qu’il vient
-          d’évincer : une liste <em>fantôme</em> garde l’en-tête de chaque bloc évincé, sans ses données. Une lecture qui
-          tombe sur un fantôme est un échec qu’une liste plus grande aurait changé en succès, et l’ARC déplace son équilibre
-          vers cette liste.
+          L’ARC tient deux listes au lieu d’une. Un bloc lu une fois va dans la première, appelée MRU (most recently used,
+          le plus récemment utilisé). Un bloc relu plus tard passe dans la seconde, MFU (most frequently used, le plus
+          fréquemment utilisé). Chaque liste a une part cible du cache. Quand le cache est plein, MRU cède son bloc le plus
+          ancien si elle dépasse sa part, et sinon c’est MFU qui cède le sien. Un parcours n’ajoute que des blocs lus une
+          fois : ils vont dans MRU et s’y chassent les uns les autres, tandis que les blocs de MFU restent.
+        </p>
+        <p>
+          Les parts ne sont pas fixes. Quand un bloc sort du cache, l’ARC libère ses données mais en garde une petite fiche,
+          son en-tête, dans une liste fantôme. Il y a une liste fantôme pour MRU et une pour MFU. La lecture d’un bloc
+          encore présent dans une liste fantôme va jusqu’au disque, mais elle montre qu’une liste plus grande aurait gardé
+          ce bloc, et l’ARC déplace alors un peu du cache vers cette liste. Une charge qui revient sans cesse sur des blocs
+          récents fait grandir MRU, et une charge qui revient sur des blocs plus anciens et souvent lus fait grandir MFU.
         </p>
       </div>
     </header>
@@ -85,355 +80,292 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Lire, parcourir, relire</h2>
       <div class="prose">
         <p>
-          Le cache ci-dessous tient 16 blocs de 128 Kio : c’est sa taille cible, <code>arc_c</code>. Il s’ouvre sur un
-          ensemble chaud, H1 à H6, lu deux fois à une seconde d’intervalle, donc tout entier dans MFU. Chaque liste va de sa
-          tête, le plus récent, à sa queue, évincée en premier. Lisez un nouveau bloc, parcourez-en douze nouveaux, relisez
-          l’ensemble chaud, ou sélectionnez n’importe quel bloc pour le lire, en cache, fantôme ou oublié. Une horloge avance
-          d’une seconde avant chaque action, ou de 10 ms si vous le choisissez.
+          Le cache ci-dessous tient 16 blocs. Il commence avec un ensemble chaud, H1 à H6, lu deux fois à une seconde
+          d’intervalle : les six blocs sont donc dans MFU. Chaque liste va de sa tête, le dernier bloc utilisé, à sa queue,
+          le bloc qui sort en premier. Appuyez sur Lecture suivante pour lire un bloc. Le bloc lu est entouré, et un bloc
+          qu’il a fait sortir est entouré en pointillés. Une horloge avance d’une seconde avant chaque lecture que vous
+          faites, ou de 10 ms si vous le choisissez.
         </p>
         <p>
-          Essayez d’abord un parcours : il traverse MRU, et l’ensemble chaud reste. Lisez ensuite un bloc de la liste MRU
-          fantôme et regardez <code>arc_pd</code> et la cible de MRU monter. Relisez quelques blocs du parcours pour les
-          promouvoir, lisez de nouveaux blocs jusqu’à ce que MFU cède un bloc chaud, et relisez celui-ci depuis la liste MFU
-          fantôme : l’équilibre repart dans l’autre sens. Enfin, à 10 ms, lisez deux fois le même nouveau bloc.
+          Commencez par Parcourir 12 nouveaux blocs, puis appuyez sur Lecture suivante pour chaque bloc du parcours. À
+          partir de S11, le cache est plein : chaque nouveau bloc fait sortir de MRU le plus ancien bloc du parcours, et
+          l’ensemble chaud reste dans MFU. Sélectionnez ensuite S2 dans la liste MRU fantôme. Il est relu sur le disque et
+          passe dans MFU, et la cible de MRU monte de 8 à 8,5 blocs. Relisez quelques blocs du parcours pour les faire
+          passer dans MFU, appuyez sur Lecture suivante jusqu’à ce que MFU cède un bloc chaud, puis relisez ce bloc depuis
+          la liste MFU fantôme : la cible de MRU redescend. Enfin, choisissez 10 ms et lisez deux fois le même nouveau
+          bloc. La seconde lecture arrive trop tôt pour compter comme une deuxième utilisation, et le bloc reste dans MRU.
         </p>
       </div>
       <ArcLab lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">L’idée, à trois profondeurs</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">Dans le code</h2>
+      <p class="prose">
+        L’ARC se trouve dans <code>arc.c</code>. Ouvrez une note Source pour voir les lignes, tirées de la version
+        zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>En une phrase</h3>
-        <p class="lead prose">
-          L’ARC sépare les blocs vus une fois des blocs vus deux fois, garde les en-têtes de ce qu’il a évincé, et quand une
-          lecture tombe sur l’un de ces fantômes, il donne plus de place à la liste qui aurait gardé le bloc.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>En un paragraphe</h3>
+      <div class="step">
+        <h3>Lu une fois, lu deux fois</h3>
         <p class="prose">
-          Un nouveau bloc entre dans MRU. Une deuxième lecture plus d’<code>ARC_MINTIME</code>, environ 62 ms, après la
-          première le promeut dans MFU ; des relectures dans une même rafale comptent pour un seul usage. Quand le cache
-          dépasse <code>arc_c</code>, une passe d’éviction prend des blocs à la queue de MRU si MRU dépasse sa part, et à la
-          queue de MFU sinon. Un bloc évincé perd ses données, mais son en-tête passe dans la liste fantôme correspondante,
-          qui peut tenir la moitié de ce que tiennent les autres listes. Lire un fantôme est un échec : le bloc est relu sur
-          le disque, passe dans MFU, et sa taille compte comme un succès fantôme. Il n’y a plus d’<code>arc_p</code> dans
-          OpenZFS 2.4.4. Les parts sont des fractions en virgule fixe, <code>arc_pd</code> pour la part de MRU dans les
-          données, <code>arc_pm</code> pour les métadonnées et <code>arc_meta</code> entre les deux, et la passe d’éviction
-          suivante les déplace selon les succès fantômes qu’elle trouve : vers le haut pour des succès dans la liste MRU
-          fantôme, vers le bas pour des succès dans la liste MFU fantôme, d’environ 1/32 au plus à chaque fois.
+          Une lecture qui trouve son bloc dans MRU passe par <code>arc_access</code>. Si plus de 62 ms environ se sont
+          écoulées depuis la dernière lecture comptée du bloc, celui-ci passe dans MFU. Des lectures plus rapprochées
+          comptent pour une seule utilisation : un programme qui lit plusieurs fois le même bloc d’une traite ne le fait
+          pas paraître populaire.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>arc_access</code>, un succès dans MRU, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={5423}
+            to={5428}
+            symbol="arc_access"
+            notes={[
+              {
+                from: 5423,
+                to: 5424,
+                text: `<code>b_arc_access</code> est l’heure de la dernière lecture comptée. <code>ARC_MINTIME</code> vaut <a href="${L.mintime}"><code>hz &gt;&gt; 4</code>, « 62 ms »</a>. Le test est strict : 62 ms exactement ne suffisent pas pour la promotion.`,
+              },
+              {
+                from: 5425,
+                to: 5427,
+                text: `L’heure est mise à jour et l’en-tête passe dans MFU. Sinon rien ne change, pas même <code>b_arc_access</code> : une série de relectures se mesure donc depuis la première. Un nouveau bloc entre dans MRU <a href="${L.anon}">quelques lignes plus haut</a>, et un succès sur un bloc de MFU <a href="${L.mfuHit}">le laisse dans MFU</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>En détail</h3>
-        <div class="prose">
-          <p>
-            <strong>États et en-têtes.</strong> Un bloc dans l’ARC a un en-tête, <code>arc_buf_hdr_t</code>, indexé par
-            <a href={L.key}>le DVA et le txg de naissance du bloc</a>, et l’en-tête est dans <a href={L.states}>l’un de sept
-            états</a> : anon, MRU, MRU fantôme, MFU, MFU fantôme, L2C seul et non caché. La figure en dessine quatre, en
-            listes. L’en-tête note son état, <a href={L.counters}>l’heure de son dernier accès, <code>b_arc_access</code>, et
-            des compteurs de succès</a>. Un nouveau bloc passe d’anon <a href={L.anon}>à MRU</a>.
-          </p>
-          <p><strong>Vu une fois, vu deux fois.</strong> Un succès sur un bloc de MRU :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={A}
-          from={5398}
-          to={5428}
-          symbol="arc_access"
-          notes={[
-            {
-              from: 5403,
-              to: 5406,
-              text: "Un succès sur un bloc dont la lecture est encore en cours ne fait que rafraîchir son heure. Dans la figure, chaque lecture se termine aussitôt.",
-            },
-            { from: 5407, to: 5408, text: "Le succès est compté sur l’en-tête." },
-            {
-              from: 5414,
-              to: 5417,
-              text: "Un bloc lu d’abord par préchargement n’est pas promu par la lecture à la demande qui suit. La figure n’a pas de préchargement.",
-            },
-            {
-              from: 5423,
-              to: 5428,
-              text: "Plus d’<code>ARC_MINTIME</code> après <code>b_arc_access</code> : vers MFU, et l’heure est rafraîchie. Sinon rien ne bouge, pas même <code>b_arc_access</code>, si bien qu’une série de relectures à moins de 62 ms d’intervalle se mesure depuis la première. Le test est strict : 62 ms tout juste ne promeut pas.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <code>ARC_MINTIME</code> vaut <a href={L.mintime}><code>hz &gt;&gt; 4</code>, « 62 ms »</a>. Un succès sur un
-            bloc de MFU <a href={L.mfuHit}>reste dans MFU</a> et rafraîchit <code>b_arc_access</code>.
-          </p>
-          <p>
-            <strong>Tête et queue.</strong> <code>arc_read</code> appelle <code>arc_access</code> <a href={L.hit}>sur un
-            succès</a>, et sur un échec <a href={L.miss}>avant d’allouer les données</a>. Tant qu’un lecteur tient un bloc,
-            son en-tête est <a href={L.hold}>hors de sa liste</a> ; la dernière libération <a href={L.release}>l’y remet</a>,
-            <a href={L.head}>en tête</a>, et l’éviction <a href={L.tail}>prend à la queue</a>. Chaque liste est donc dans
-            l’ordre du dernier usage. Dans la figure, le lecteur lâche chaque bloc aussitôt.
-          </p>
-          <p><strong>L’éviction garde l’en-tête.</strong> Quand un bloc est évincé de MRU ou de MFU :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={A}
-          from={3876}
-          to={3891}
-          symbol="arc_evict_hdr"
-          notes={[
-            { from: 3876, to: 3880, text: "Les données sont libérées." },
-            {
-              from: 3882,
-              text: `L’en-tête passe dans l’état fantôme <a href="${L.evictedState}">choisi plus haut</a> : MRU vers MRU fantôme, MFU vers MFU fantôme. Dans la figure, il glisse en tête de la liste fantôme, sans données.`,
-            },
-            {
-              from: 3884,
-              to: 3889,
-              text: "Seul l’en-tête d’un tampon non caché est détruit. Un en-tête fantôme reste dans la table de hachage : une lecture ultérieure du même bloc le retrouve.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Quelle liste cède un bloc.</strong> La passe d’éviction, après ses étapes de métadonnées :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={A}
-          from={4527}
-          to={4556}
-          symbol="arc_evict"
-          notes={[
-            {
-              from: 4527,
-              to: 4541,
-              text: "Les métadonnées d’abord : celles de MRU jusqu’à leur cible, puis celles de MFU jusqu’à la part des métadonnées. La figure ne tient que des blocs de données : ces étapes n’évincent rien.",
-            },
-            {
-              from: 4543,
-              to: 4550,
-              text: "Les données de MRU, jusqu’à leur cible <code>w = wt · arc_pd</code>, et pas plus que le dépassement d’<code>arc_c</code> (<code>asize - ac</code>). Un MRU à sa cible ou en dessous ne cède rien.",
-            },
-            { from: 4552, to: 4556, text: "Les données de MFU cèdent ce qui reste du dépassement." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <code>wt</code> est <a href={L.wt}>ce qui peut être évincé</a>, <code>arc_c</code> lui-même quand tout bloc du
-            cache est évinçable, comme dans la figure. Chaque étape évince <a href={L.evictImpl}>au plus ce que tient la liste,
-            et rien pour une quantité négative</a>, depuis la queue, jusqu’à avoir évincé au moins ce qui est demandé. MRU
-            n’est donc pas ramené à sa cible d’un coup : il ne cède sa queue que tant que le cache dépasse <code>arc_c</code>.
-            Le premier parcours de la figure le montre : MRU garde 10 blocs pour une cible de 8, parce que chaque nouveau bloc
-            ne fait dépasser le cache que d’un bloc.
-          </p>
-          <p><strong>Combien de temps durent les fantômes.</strong> À la fin de la même passe :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={A}
-          from={4558}
-          to={4587}
-          symbol="arc_evict"
-          notes={[
-            {
-              from: 4569,
-              to: 4572,
-              text: "La liste fantôme des données de MRU peut tenir la moitié des trois autres listes vivantes. La figure n’a pas de listes de métadonnées : c’est la moitié de MFU.",
-            },
-            {
-              from: 4579,
-              to: 4582,
-              text: "La liste fantôme des données de MFU : la moitié de MRU dans la figure.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Une liste fantôme n’a pas la taille du cache. Dans la figure, avec un MFU vide, la liste MRU fantôme ne tient
-            rien. Un en-tête retiré d’une liste fantôme <a href={L.ghostDestroy}>est détruit</a> ; la figure le range parmi
-            les oubliés, et relire le bloc, c’est un nouveau bloc pour l’ARC.
-          </p>
-          <p><strong>Un succès fantôme.</strong> Lire un bloc dont l’en-tête est dans la liste MRU fantôme :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={A}
-          from={5429}
-          to={5449}
-          symbol="arc_access"
-          notes={[
-            {
-              from: 5432,
-              to: 5435,
-              text: "« Would we have bigger MRU, it would be an MRU hit » : un succès fantôme est un échec qu’une liste plus grande aurait évité. Les données sont relues sur le disque.",
-            },
-            {
-              from: 5437,
-              to: 5441,
-              text: `Compté sur l’en-tête, et la taille du bloc (<a href="${L.hdrSize}">sa taille compressée s’il est compressé</a>) ajoutée au compteur de succès de la liste MRU fantôme. La figure montre ce compteur sous chaque liste fantôme.`,
-            },
-            {
-              from: 5442,
-              to: 5449,
-              text: "Retour dans le cache, dans MFU, puisque c’est son deuxième usage ; dans MRU si le bloc venait d’un préchargement.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Un succès dans MFU fantôme <a href={L.mfuGhost}>fait de même avec le compteur de la liste MFU fantôme</a> et
-            revient dans MFU. <code>arc_access</code> ne change aucune cible : il ne fait qu’additionner des octets. La passe
-            d’éviction les lit.
-          </p>
-          <p><strong>Des succès fantômes à un équilibre.</strong> Au début de chaque passe :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={A}
-          from={4479}
-          to={4497}
-          symbol="arc_evict"
-          notes={[
-            {
-              from: 4480,
-              to: 4491,
-              text: `Les octets de succès fantômes depuis la passe précédente, en quatre : MRU fantôme et MFU fantôme, données et métadonnées. Les valeurs précédentes <a href="${L.statics}">sont gardées d’une passe à l’autre</a>.`,
-            },
-            {
-              from: 4494,
-              to: 4495,
-              text: `<code>arc_meta</code>, la part des métadonnées : vers le haut avec les succès fantômes de métadonnées, vers le bas avec ceux de données, le pas vers le bas divisé par <code>zfs_arc_meta_balance / 100</code>, <a href="${L.balance}">5 par défaut</a>.`,
-            },
-            {
-              from: 4496,
-              text: "<code>arc_pd</code>, la part de MRU dans les données : vers le haut avec les succès fantômes de données dans MRU, vers le bas avec ceux dans MFU. La jauge de la figure.",
-            },
-            { from: 4497, text: "<code>arc_pm</code>, de même pour les métadonnées." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Ces trois-là remplacent <code>arc_p</code>. Ce sont <a href={L.fractions}>des fractions de 2<sup>32</sup></a>, qui
-            partent <a href={L.init}>de 1/4 pour les métadonnées et de 1/2 pour chaque part de MRU</a>. Le premier argument
-            après la fraction est la taille cible des fantômes à la passe précédente : un succès déplace donc une fraction
-            d’environ sa taille rapportée à celle des listes fantômes.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={A}
-          from={4405}
-          to={4442}
-          symbol="arc_evict_adj"
-          notes={[
-            {
-              from: 4409,
-              to: 4410,
-              text: "Aucun changement tant qu’il n’y a pas de cible fantôme (la première passe de la figure), ni sans succès.",
-            },
-            {
-              from: 4417,
-              to: 4421,
-              text: "Des succès d’au moins 1/16 du total fantôme sont ramenés à environ 1/32 de celui-ci : une passe déplace une fraction d’environ 1/32 de son étendue au plus. Dans la figure, un seul succès fantôme suffit à atteindre cette limite.",
-            },
-            {
-              from: 4424,
-              to: 4426,
-              text: "Un décalage choisi pour que la division garde le plus de bits possible.",
-            },
-            {
-              from: 4428,
-              to: 4435,
-              text: "Près de 0 ou de 1 (un côté quatre fois l’autre), le pas vers cette extrémité est encore divisé : une fraction approche ses bornes de plus en plus lentement.",
-            },
-            {
-              from: 4436,
-              text: "Le pas vers le bas divisé par <code>balance / 100</code> : 1 pour <code>arc_pd</code>.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Le premier succès fantôme de la figure, pas à pas : <code>arc_pd</code> = 2<sup>31</sup>, la moitié ; des cibles
-            fantômes de 8 blocs, <code>total</code> = 2<sup>20</sup> octets ; un succès de 128 Kio, 2<sup>17</sup>. C’est plus
-            de 1/16 du total, il est donc divisé par 4, à 2<sup>15</sup> ; le décalage vaut 32 ; <code>up</code> =
-            2<sup>47</sup> / 2<sup>20</sup> = 2<sup>27</sup>, et <code>arc_pd</code> devient 2<sup>31</sup> + 2<sup>27</sup>,
-            53,125 %. La cible de MRU passe de 8 à 8,5 blocs. Un succès dans la liste MFU fantôme retire ces mêmes
-            2<sup>27</sup>.
-          </p>
-          <p>
-            <strong>Quand une passe s’exécute.</strong> Pas sur un succès : un succès n’alloue rien. Allouer les données d’un
-            échec <a href={L.alloc}>peut réveiller le fil d’éviction</a>, une fois que le cache dépasse <code>arc_c</code> de
-            plus de <a href={L.overflowing}><code>zfs_max_recordsize</code></a>, <a href={L.recordsize}>16 Mio sur les systèmes
-            64 bits</a>. Le fil <a href={L.evictCb}>exécute <code>arc_evict</code></a> et <a href={L.evictLoop}>continue tant
-            qu’il évince quelque chose et que le cache dépasse encore <code>arc_c</code></a>.
-          </p>
-          <p>
-            <strong><code>arc_c</code> lui-même</strong> relève d’un autre réglage. Il grandit <a href={L.adapt}>de la taille de
-            chaque allocation, au moins 128 Kio, tant que le cache en est à moins de 32 Mio</a> (<a href={L.blockSizes}>deux
-            fois la plus grande taille de bloc</a>), jusqu’à <a href={L.cMax}><code>arc_c_max</code></a>, et rétrécit
-            <a href={L.reduce}>sous la pression mémoire</a>. Les succès fantômes déplacent les parts d’<code>arc_c</code>,
-            jamais <code>arc_c</code>. La figure le garde à son maximum.
-          </p>
-        </div>
+      <div class="step">
+        <h3>Quelle liste cède un bloc</h3>
+        <p class="prose">
+          Quand le cache dépasse sa taille cible, <code>arc_c</code>, une passe d’éviction s’exécute dans
+          <code>arc_evict</code>. La cible de MRU est une fraction du cache, <code>arc_pd</code>. MRU ne cède des blocs de
+          sa queue que tant qu’elle dépasse cette cible, et seulement autant que le cache est en excès. MFU cède le reste.
+          C’est ainsi qu’un parcours reste dans MRU : chaque nouveau bloc du parcours met le cache un bloc au-dessus de sa
+          taille, et MRU, qui dépasse sa cible, cède son propre bloc le plus ancien.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>arc_evict</code>, MRU puis MFU, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={4543}
+            to={4556}
+            symbol="arc_evict"
+            notes={[
+              {
+                from: 4545,
+                text: `La cible des données de MRU : <code>wt</code>, <a href="${L.wt}">ce qui peut être évincé</a>, multiplié par <code>arc_pd</code>, une fraction de 2<sup>32</sup>. Dans la figure, <code>wt</code> vaut <code>arc_c</code>, 16 blocs, et <code>arc_pd</code> part d’une moitié.`,
+              },
+              {
+                from: 4546,
+                to: 4547,
+                text: `Au plus ce que MRU tient au-dessus de sa cible, et pas plus que l’excès du cache sur <code>arc_c</code>. <a href="${L.evictImpl}">Une quantité négative n’évince rien</a>. Au premier parcours de la figure, MRU garde 10 blocs pour une cible de 8, parce que chaque nouveau bloc ne met le cache qu’un bloc au-dessus.`,
+              },
+              {
+                from: 4553,
+                to: 4554,
+                text: "MFU cède ce qui dépasse encore. Avant ces lignes, les mêmes étapes s’exécutent pour les métadonnées, que la figure n’a pas.",
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
-    </section>
 
-    <section class="section" aria-labelledby="l2arc">
-      <h2 id="l2arc">Coda : le L2ARC</h2>
-      <div class="prose">
-        <p>
-          Un périphérique de cache peut prolonger l’ARC : selon son commentaire de conception, <a href={L.l2arcWhat}>« a cache
-          layer in-between main memory and disk »</a>, sur des disques SSD par exemple. Le même commentaire dit comment on
-          l’alimente :
+      <div class="step">
+        <h3>Sorti, mais pas oublié</h3>
+        <p class="prose">
+          Évincer un bloc dans <code>arc_evict_hdr</code> libère ses données, et son en-tête passe dans la liste fantôme
+          correspondante : MRU fantôme pour un bloc de MRU, MFU fantôme pour un bloc de MFU. L’en-tête reste dans la table
+          de hachage de l’ARC, si bien qu’une lecture ultérieure du même bloc le retrouve.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>arc_evict_hdr</code>, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={3876}
+            to={3882}
+            symbol="arc_evict_hdr"
+            notes={[
+              { from: 3876, to: 3880, text: "Les données sont libérées, ainsi que la copie brute si le bloc en a une." },
+              {
+                from: 3882,
+                text: `<code>evicted_state</code> est <a href="${L.evictedState}">choisi juste au-dessus</a> : MRU fantôme pour MRU, MFU fantôme pour MFU. Seul l’en-tête d’un tampon non mis en cache (uncached) <a href="${L.destroy}">est détruit ici</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
-      <Excerpt
-        lang={lang}
-        path={A}
-        from={8261}
-        to={8274}
-        symbol="Level 2 ARC"
-        notes={[
-          {
-            from: 8261,
-            to: 8264,
-            text: "L’éviction n’écrit pas sur le périphérique de cache : elle libère les données et laisse les en-têtes sur les listes fantômes, comme plus haut.",
-          },
-          {
-            from: 8266,
-            to: 8270,
-            text: "Un fil d’alimentation copie des blocs depuis le côté éviction de MRU et de MFU avant qu’ils ne soient évincés.",
-          },
-        ]}
-      />
-      <div class="prose after">
-        <p>
-          Ce fil, <a href={L.feed}><code>l2arc_feed_thread</code></a>, se réveille <a href={L.feedHz}>environ une fois par
-          seconde</a> et lit les listes <a href={L.feedTail}>depuis leur queue</a>. Un en-tête fantôme dont le bloc est sur le
-          périphérique de cache n’est pas détruit quand il est retiré : il reste, <a href={L.l2cOnly}>en L2C seul</a>, et une
-          lecture de ce bloc <a href={L.l2cHit}>le ramène dans MRU</a>.
+
+      <div class="step">
+        <h3>Combien de fantômes garder</h3>
+        <p class="prose">
+          À la fin de la même passe, chaque liste fantôme est rognée. Une liste fantôme aussi grande que tout le cache se
+          souviendrait de lectures trop anciennes : le code limite donc chacune à la moitié de ce que tiennent les autres
+          listes. Un en-tête retiré d’une liste fantôme est détruit. Relire ce bloc revient alors, pour l’ARC, à lire un
+          nouveau bloc, sans succès fantôme.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>arc_evict</code>, les listes fantômes, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={4561}
+            to={4572}
+            symbol="arc_evict"
+            notes={[
+              { from: 4565, to: 4567, text: "La raison de la moitié : une liste fantôme plus grande donnerait des succès fantômes venus de trop loin." },
+              {
+                from: 4569,
+                to: 4572,
+                text: `La cible de la liste MRU fantôme des données, <code>gsrd</code>, vaut la moitié des trois autres listes vivantes : dans la figure, qui n’a pas de métadonnées, la moitié de MFU. La liste est rognée par sa queue jusqu’à cette cible, et les en-têtes retirés <a href="${L.ghostDestroy}">sont détruits</a>. <a href="${L.mfuTrim}">La liste MFU fantôme</a> reçoit de la même façon la moitié de MRU. La valeur est gardée pour la passe suivante.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Un succès fantôme</h3>
+        <p class="prose">
+          Une lecture qui trouve l’en-tête de son bloc dans une liste fantôme reste un échec, et les données sont lues sur
+          le disque. <code>arc_access</code> ajoute la taille du bloc au compteur de succès de cette liste fantôme et remet
+          le bloc dans le cache, dans MFU, puisque c’est sa deuxième utilisation. Il ne change lui-même aucune cible. Il ne
+          fait qu’additionner des octets, que la passe d’éviction suivante lit.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>arc_access</code>, un succès dans MRU fantôme, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={5432}
+            to={5441}
+            symbol="arc_access"
+            notes={[
+              { from: 5432, to: 5435, text: "Le commentaire donne l’idée : avec une MRU plus grande, cette lecture aurait été un succès." },
+              {
+                from: 5437,
+                to: 5441,
+                text: `Compté sur l’en-tête, et la taille du bloc (<a href="${L.hdrSize}">sa taille compressée s’il est compressé</a>) ajoutée au compteur de succès de la liste MRU fantôme, que la figure affiche sous chaque liste fantôme. Ensuite <a href="${L.toMfu}">l’en-tête passe dans MFU</a>, ou dans MRU si la lecture était un préchargement. <a href="${L.mfuGhost}">Un succès dans la liste MFU fantôme</a> fait de même avec le compteur de cette liste.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Des succès fantômes à une nouvelle part</h3>
+        <p class="prose">
+          Au début de chaque passe d’éviction, <code>arc_evict</code> prend les succès fantômes comptés depuis la passe
+          précédente et déplace les parts avec <code>arc_evict_adj</code>. Les succès dans la liste MRU fantôme augmentent la
+          part de MRU dans les données, <code>arc_pd</code>, et les succès dans la liste MFU fantôme la diminuent.
+          <code>arc_meta</code> et <code>arc_pm</code> font de même pour les métadonnées, que la figure laisse de côté.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>arc_evict</code>, l’équilibre, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={4493}
+            to={4497}
+            symbol="arc_evict"
+            notes={[
+              {
+                from: 4494,
+                to: 4495,
+                text: `<code>arc_meta</code>, la part des métadonnées dans le cache : en hausse avec les succès fantômes de métadonnées, en baisse avec ceux de données, divisés par <code>zfs_arc_meta_balance / 100</code>, <a href="${L.balance}">5 par défaut</a>.`,
+              },
+              {
+                from: 4496,
+                text: `<code>arc_pd</code>, la part de MRU dans les données et la jauge de la figure : en hausse avec les succès fantômes de données dans MRU (<code>grd</code>), en baisse avec ceux dans MFU (<code>gfd</code>), tous deux <a href="${L.hits}">comptés depuis la passe précédente</a>. Le deuxième argument est la taille des cibles des deux listes fantômes à la passe précédente.`,
+              },
+              {
+                from: 4497,
+                text: `<code>arc_pm</code>, la même chose pour les métadonnées. Toutes trois sont <a href="${L.fractions}">des fractions de 2<sup>32</sup></a> et partent <a href="${L.init}">de 1/4, 1/2 et 1/2</a>. Elles remplacent l’<code>arc_p</code> des versions plus anciennes.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Un petit pas à chaque fois</h3>
+        <p class="prose">
+          <code>arc_evict_adj</code> déplace une part d’environ les octets des succès divisés par la taille des listes
+          fantômes, et jamais de plus de 1/32 environ à la fois. Dans la figure, un succès fantôme de 128 Kio, pour des
+          listes fantômes de 8 blocs, atteint cette limite : <code>arc_pd</code> passe de 50 % à 53,125 %, et la cible de MRU
+          de 8 à 8,5 blocs.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>arc_evict_adj</code>, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={4412}
+            to={4422}
+            symbol="arc_evict_adj"
+            notes={[
+              { from: 4412, to: 4416, text: "Deux raisons à la limite : pas de dépassement de capacité dans les calculs qui suivent, et un plafond à la vitesse des parts." },
+              {
+                from: 4418,
+                to: 4422,
+                text: `Des succès de 1/16 du total fantôme ou plus sont ramenés à environ 1/32 de ce total. Dans la figure, un succès de 2<sup>17</sup> octets pour un total de 2<sup>20</sup> est divisé par 4, à 2<sup>15</sup>, ce qui déplace <code>arc_pd</code> de 2<sup>27</sup>, 1/32 de sa plage. <a href="${L.adjRest}">La suite de la fonction</a> ralentit aussi une part qui approche de 0 ou de 1.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Un second cache sur des disques rapides</h3>
+        <p class="prose">
+          Un périphérique de cache, le L2ARC, peut prolonger l’ARC, sur des disques SSD par exemple. L’éviction n’y écrit
+          rien. Un thread d’alimentation copie sur le périphérique des blocs pris à la queue de MRU et de MFU avant qu’ils ne
+          sortent, et un en-tête fantôme dont le bloc est sur le périphérique est gardé quand il est retiré de sa liste.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label">Le commentaire de conception du L2ARC, arc.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={A}
+            from={8266}
+            to={8270}
+            symbol="Level 2 ARC"
+            notes={[
+              {
+                from: 8266,
+                to: 8268,
+                text: `Le thread d’alimentation, <a href="${L.feed}"><code>l2arc_feed_thread</code></a>, se réveille <a href="${L.feedHz}">environ une fois par seconde</a> et lit les listes <a href="${L.feedTail}">par leur queue</a>, le côté qui sort en premier. <a href="${L.noEvictPath}">Le point 1</a> du même commentaire dit que l’éviction n’écrit rien sur le périphérique.`,
+              },
+              {
+                from: 8269,
+                to: 8270,
+                text: `Il ne copie que ce qui n’y est pas encore, et garde une marge d’avance sur l’éviction. Un en-tête fantôme dont le bloc est sur le périphérique <a href="${L.l2cOnly}">reste en L2C only</a>, et sa lecture <a href="${L.l2cHit}">le ramène dans MRU</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Ce que la figure laisse de côté</h2>
       <p class="prose muted">
-        La figure exécute les fonctions ci-dessus sur des blocs de données seulement, tous de 128 Kio et non compressés : les
-        listes de métadonnées sont vides, les termes de métadonnées de la passe valent donc zéro, et <code>arc_meta</code> et
-        <code>arc_pm</code>, qui ne changent alors aucune cible de données, ne sont pas dessinés. Chaque état est une seule
-        liste ; le code répartit les en-têtes en <a href={L.sublists}>sous-listes selon un hachage</a> et les évince
-        <a href={L.randomSublist}>à tour de rôle</a>, si bien que son ordre est proche de celui du dernier usage, sans lui
-        être identique. Une passe s’exécute juste après chaque échec qui fait dépasser <code>arc_c</code>, plutôt que dans un
-        fil réveillé 16 Mio plus tard, ce qui à l’échelle de la figure ferait huit caches. <code>arc_c</code> est fixe,
-        l’horloge est logique, et chaque bloc est libéré dès qu’il est lu. Pas de préchargement (les blocs préchargés ont aussi
-        <a href={L.prefetchLife}>une durée de vie minimale</a>), pas de tampons <a href={L.uncached}>non cachés</a> ni sales,
-        pas de copies compressées ou chiffrées, pas de L2ARC.
+        La figure exécute les fonctions ci-dessus sur des blocs de données seulement, tous de 128 Kio et non compressés.
+        Les listes de métadonnées sont vides, si bien que les parts des métadonnées, <code>arc_meta</code> et
+        <code>arc_pm</code>, ne changent rien et ne sont pas dessinées. Chaque état est une seule liste. Le code répartit
+        les en-têtes sur plusieurs sous-listes et les évince à tour de rôle : son ordre est proche de l’ordre de dernière
+        utilisation, sans être exactement celui-là. Ici, une passe s’exécute juste après chaque lecture qui met le cache
+        au-dessus de sa taille. Dans le code, c’est un thread qui l’exécute, réveillé quand le cache dépasse sa taille de
+        plus que la plus grande taille d’enregistrement, 16 Mio sur les systèmes 64 bits, soit huit caches à l’échelle de
+        la figure. <code>arc_c</code> est fixe, alors que le code le fait grandir quand des données arrivent et le réduit
+        quand la mémoire manque. L’horloge est logique, et chaque bloc est relâché dès qu’il est lu. Il n’y a ni
+        préchargement, ni tampon non mis en cache ou modifié, ni copie compressée ou chiffrée, ni L2ARC.
       </p>
     </section>
   </article>
@@ -448,7 +380,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -457,10 +389,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -468,8 +400,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

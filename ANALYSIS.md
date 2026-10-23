@@ -3089,6 +3089,150 @@ The design comment opens with what the L2ARC is: "a cache layer in-between main 
 - `arc_c` grows by `MAX(bytes, SPA_OLD_MAXBLOCKSIZE)` per allocation when near the target — [`module/zfs/arc.c#L5076-L5081`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5076-L5081).
 - Hand-checked sequence (the unit tests replay it; `arc_c` = 16 blocks of 128 KiB, data only, one sublist). Opening: H1-H6 read, then read again a second later: six MRU hits after more than `ARC_MINTIME`, all six in MFU, `arc_pd` = 2^31, nothing evicted. A scan of S1-S12, 1 ms apart: S1-S10 fill the cache; S11 is over `arc_c` by one block: first pass, ghost targets still 0, `total < 32`, `arc_pd` unchanged; MRU holds 11 blocks, target 8: `e = MIN(1, 3)` blocks, S1 to the MRU ghost list; ghost targets 6/2 = 3 blocks (MRU ghost) and 10/2 = 5 (MFU ghost). S12: the same, S2 to the MRU ghost list. MRU S12...S3, MFU H6...H1 intact, MRU ghost S2 S1. Read S2 (MRU-ghost hit): to MFU, `arcs_hits` + 128 KiB; pass: `total` = 8 blocks = 2^20, `arc_pd` = 2^31 + 2^27 (53.125 %), MRU target 8.5 blocks, MRU 10 blocks: `e = MIN(1, 1.5)`, S3 to the MRU ghost list; MFU nothing. Read S12, S11, S10 again: MRU hits after more than 62 ms, to MFU, no pass. Read N1 (new): over by one; MRU 7 blocks, under its target 8.5: nothing from MRU, H1 (MFU tail) to the MFU ghost list; ghost targets 9/2 = 4.5 and 7/2 = 3.5 blocks. Read H1 (MFU-ghost hit): to MFU; pass: `total` = 8 blocks, `arc_pd` = 2^31 + 2^27 − 2^27 = 2^31, target 8; MRU 7: nothing; H2 to the MFU ghost list. A new block N2 read again 10 ms later stays in MRU (MRU hit, `b_arc_access` unchanged), again 52 ms later (62 ms, not after `b_arc_access + ARC_MINTIME`) stays, one more millisecond later goes to MFU.
 
+**Short excerpts for the question-first room (v1.4, ALG-193).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 10. `arc_access`, promotion to MFU — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5423-L5428
+
+```c
+		if (ddi_time_after(now, hdr->b_l1hdr.b_arc_access +
+		    ARC_MINTIME)) {
+			hdr->b_l1hdr.b_arc_access = now;
+			DTRACE_PROBE1(new_state__mfu, arc_buf_hdr_t *, hdr);
+			arc_change_state(arc_mfu, hdr);
+		}
+```
+
+The end of excerpt 1. A hit on an MRU block more than `ARC_MINTIME` after `b_arc_access` refreshes the time and moves the header to MFU; otherwise nothing changes, so re-reads within one burst count as one use. `ARC_MINTIME` is `hz >> 4`, "62 ms" ([L1318](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L1318)); `ddi_time_after` is strict, so exactly 62 ms does not promote. A new block enters MRU in the anon branch ([L5381-L5397](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5381-L5397)).
+
+### 11. `arc_evict_hdr`, the data goes, the header stays — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3876-L3882
+
+```c
+	if (hdr->b_l1hdr.b_pabd != NULL)
+		arc_hdr_free_abd(hdr, B_FALSE);
+
+	if (HDR_HAS_RABD(hdr))
+		arc_hdr_free_abd(hdr, B_TRUE);
+
+	arc_change_state(evicted_state, hdr);
+```
+
+Excerpt 7 without its last lines. L3876-L3880: the data (and its raw copy, if any) is freed. L3882: the header moves to `evicted_state`, MRU ghost for an MRU header and MFU ghost for an MFU header ([L3829-L3830](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3829-L3830)). Only an uncached header goes to anon and is destroyed (L3884-L3889); a ghost header stays in the hash table, so a later read of the same block finds it.
+
+### 12. `arc_evict`, MRU data down to its target, then MFU data — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4543-L4556
+
+```c
+	/* Evict MRU data. */
+	wt -= m - total_evicted;
+	w = wt * (int64_t)(arc_pd >> 16) >> 16;
+	e = MIN((int64_t)(asize - ac), (int64_t)(mrud - w));
+	bytes = arc_evict_impl(arc_mru, ARC_BUFC_DATA, e);
+	total_evicted += bytes;
+	mrud -= bytes;
+	asize -= bytes;
+
+	/* Evict MFU data. */
+	e = asize - ac;
+	bytes = arc_evict_impl(arc_mfu, ARC_BUFC_DATA, e);
+	mfud -= bytes;
+	total_evicted += bytes;
+```
+
+The data half of excerpt 3. L4545: the MRU data target `w` is `wt` times `arc_pd`, a fraction of 2^32. L4546-L4547: MRU gives up at most what it holds above `w`, and no more than the cache is over `arc_c` (`asize - ac`); a negative amount evicts nothing ([L4386-L4398](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4386-L4398)). L4553-L4554: MFU gives up whatever is still over. `wt` is the evictable part of `arc_c` ([L4499-L4501](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4499-L4501)).
+
+### 13. `arc_evict`, how many ghosts to keep — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4561-L4572
+
+```c
+	 * Size of each state's ghost list represents how much that state
+	 * may grow by shrinking the other states.  Would it need to shrink
+	 * other states to zero (that is unlikely), its ghost size would be
+	 * equal to sum of other three state sizes.  But excessive ghost
+	 * size may result in false ghost hits (too far back), that may
+	 * never result in real cache hits if several states are competing.
+	 * So choose some arbitraty point of 1/2 of other state sizes.
+	 */
+	gsrd = (mrum + mfud + mfum) / 2;
+	e = zfs_refcount_count(&arc_mru_ghost->arcs_size[ARC_BUFC_DATA]) -
+	    gsrd;
+	(void) arc_evict_impl(arc_mru_ghost, ARC_BUFC_DATA, e);
+```
+
+Part of excerpt 6: its comment without the first two lines, and the trim of the MRU data ghost list. L4561-L4567: a ghost list as large as the three other live lists would give false ghost hits, so it is held to half of them. L4569-L4572: the MRU data ghost list is trimmed to `gsrd` from its tail; the trimmed headers are destroyed ([L3820-L3823](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3820-L3823)) unless the block is on an L2ARC device. `gsrd` is static ([L4465](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4465)) and becomes the next pass's `total`. The MFU data ghost list is trimmed the same way at L4579-L4582.
+
+### 14. `arc_access`, an MRU ghost hit — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5432-L5441
+
+```c
+		 * This buffer has been accessed once recently, but was
+		 * evicted from the cache.  Would we have bigger MRU, it
+		 * would be an MRU hit, so handle it the same way, except
+		 * we don't need to check the previous access time.
+		 */
+		hdr->b_l1hdr.b_mru_ghost_hits++;
+		ARCSTAT_BUMP(arcstat_mru_ghost_hits);
+		hdr->b_l1hdr.b_arc_access = now;
+		wmsum_add(&arc_mru_ghost->arcs_hits[arc_buf_type(hdr)],
+		    arc_hdr_size(hdr));
+```
+
+The start of excerpt 4. L5432-L5435: "Would we have bigger MRU, it would be an MRU hit". L5437-L5441: the hit is counted on the header and the header's size ([L1795-L1807](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L1795-L1807), compressed if the block is) is added to the MRU ghost list's `arcs_hits` for its buffer type. L5442-L5449: the header goes to MFU, or to MRU if the read was a prefetch. `arc_access` changes no target; an MFU ghost hit does the same with the MFU ghost list's counter ([L5466-L5472](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L5466-L5472)).
+
+### 15. `arc_evict`, the balance moves — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4493-L4497
+
+```c
+	/* Adjust ARC states balance based on ghost hits. */
+	arc_meta = arc_evict_adj(arc_meta, gsrd + gsrm + gsfd + gsfm,
+	    grm + gfm, grd + gfd, zfs_arc_meta_balance);
+	arc_pd = arc_evict_adj(arc_pd, gsrd + gsfd, grd, gfd, 100);
+	arc_pm = arc_evict_adj(arc_pm, gsrm + gsfm, grm, gfm, 100);
+```
+
+The end of excerpt 2. Each pass passes the ghost-hit bytes since the previous pass (L4480-L4491) to `arc_evict_adj`: `arc_meta`, the metadata share, up with metadata ghost hits and down with data ghost hits divided by `zfs_arc_meta_balance / 100` ([L459](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L459), 500 by default); `arc_pd`, the MRU share of data, up with MRU-ghost data hits and down with MFU-ghost data hits; `arc_pm`, the same for metadata. They are fractions of 2^32 ([include/sys/arc_impl.h L1032-L1035](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/arc_impl.h#L1032-L1035)) and start at 1/4, 1/2 and 1/2 ([L8038-L8040](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L8038-L8040)).
+
+### 16. `arc_evict_adj`, at most about 1/32 per pass — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L4412-L4422
+
+```c
+	/*
+	 * We should not have more ghost hits than ghost size, but they may
+	 * get close.  To avoid overflows below up/down should not be bigger
+	 * than 1/5 of total.  But to limit maximum adjustment speed restrict
+	 * it some more.
+	 */
+	if (up + down >= total / 16) {
+		uint64_t scale = (up + down) / (total / 32);
+		up /= scale;
+		down /= scale;
+	}
+```
+
+Part of excerpt 5. When the hits reach 1/16 of the ghost total, `up` and `down` are divided by `(up + down) / (total / 32)`, so they come to about 1/32 of the total, and a pass moves a fraction by at most about 1/32 of its range. In the figure one 128 KiB ghost hit (2^17 bytes) against ghost targets of 8 blocks (2^20) reaches that limit: it is scaled by 4 to 2^15, the shift is 32, `up` = 2^47 / 2^20 = 2^27, and `arc_pd` goes from 2^31 to 2^31 + 2^27, 53.125% (the hand-checked sequence above).
+
+### 17. The L2ARC is fed from the lists' tails — module/zfs/arc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L8266-L8270
+
+```c
+ * 2. The L2ARC attempts to cache data from the ARC before it is evicted.
+ * It does this by periodically scanning buffers from the eviction-end of
+ * the MFU and MRU ARC lists, copying them to the L2ARC devices if they are
+ * not already there. It scans until a headroom of buffers is satisfied,
+ * which itself is a buffer for ARC eviction. If a compressible buffer is
+```
+
+Point 2 of excerpt 9. The feed thread copies blocks from the eviction end of MRU and MFU to the cache device before they are evicted; eviction itself writes nothing to it (point 1, L8261-L8264). `l2arc_feed_thread` ([L9771](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L9771)) wakes about once a second ([L9791](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L9791)) and reads the lists from their tails ([L9530-L9538](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L9530-L9538)). A ghost header whose block is on the device stays as L2C only ([L3805-L3819](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/arc.c#L3805-L3819)).
+
 ## Room: Metaslabs and space maps
 
 **Problem.** A copy-on-write pool allocates a new block for every write and frees the old one, so allocation is the hottest path in the system. A single bitmap of the whole pool would be enormous to keep in memory and would have to be rewritten in place on every change, which is exactly what copy-on-write forbids. ZFS instead cuts each vdev into a few hundred metaslabs, keeps only some of them loaded in memory, and records each metaslab's history as an append-only log of ALLOC and FREE extents.

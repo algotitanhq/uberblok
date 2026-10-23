@@ -714,8 +714,8 @@ for (const lang of ["en", "fr"]) {
 // each state read back from the DOM and compared with the model (src/lib/arc.ts).
 const ARC = PAGES.find((p) => p.id === "arc");
 const ARL = {
-  en: { scan: "Scan 12 new blocks", new: "Read a new block", hot: "Read the hot set again", reset: "Start again", ms10: "10 ms", s1: "1 s" },
-  fr: { scan: "Parcourir 12 nouveaux blocs", new: "Lire un nouveau bloc", hot: "Relire l’ensemble chaud", reset: "Recommencer", ms10: "10 ms", s1: "1 s" },
+  en: { scan: "Scan 12 new blocks", new: "Next read", rest: "Read the rest", hot: "Read the hot set again", reset: "Start again", ms10: "10 ms", s1: "1 s" },
+  fr: { scan: "Parcourir 12 nouveaux blocs", new: "Lecture suivante", rest: "Lire le reste", hot: "Relire l’ensemble chaud", reset: "Recommencer", ms10: "10 ms", s1: "1 s" },
 };
 const arcState = (page) =>
   page.evaluate(() => {
@@ -776,7 +776,9 @@ for (const lang of ["en", "fr"]) {
       sameLists(r[k], exp[k], `${lang}-${vp}-${k}`);
     };
     await check("opening");
+    // One read per press of Next read (D25.1): the scan's first read, then the rest at once.
     await b(L.scan).click();
+    await b(L.rest).click();
     await check("scan");
     await shot(`arc-${lang}-${vp}-scan.png`);
     await chip("S2").click();
@@ -811,7 +813,8 @@ for (const lang of ["en", "fr"]) {
   const fig = page.locator("[data-arc]");
   const t0 = Date.now();
   await fig.getByRole("button", { name: "Scan 12 new blocks", exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll("[data-arc] [data-log] li").length >= 16);
+  await fig.getByRole("button", { name: "Read the rest", exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll("[data-arc] [data-log] li").length >= 15);
   report.reducedMotion.arc = { scanMs: Date.now() - t0, running: await page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length) };
   await page.screenshot({ path: join(out, "arc-en-iphone-reduced-motion.png"), fullPage: true });
   report.captures.push("arc-en-iphone-reduced-motion.png");
@@ -865,6 +868,9 @@ for (const lang of ["en", "fr"]) {
   const pRadio = () => document.activeElement?.type === "radio";
   const drive = {};
   drive.scan = await tabTo(pText, L.scan);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(400);
+  drive.rest = await tabTo(pText, L.rest);
   await page.keyboard.press("Enter");
   await page.waitForTimeout(400);
   drive.s2 = await tabTo(pChip, "S2");

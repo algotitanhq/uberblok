@@ -1,35 +1,22 @@
 ---
 // The figure of the ARC room: the data lists of MRU, MFU and their ghosts, the
 // blocks forgotten, and a gauge of arc_c with the MRU target. The visitor
-// reads blocks; src/lib/arc.ts (a transcription of arc_access, arc_evict,
-// arc_evict_adj and arc_evict_hdr) decides every outcome, and
-// src/lib/arc-view.ts draws it, at build time for the opening state (readable
-// without JavaScript) and in the browser after. Refs: ANALYSIS.md, room
-// "The ARC"; simplifications: DECISIONS.md D6.2.
+// reads blocks, one read per press of Next read; src/lib/arc.ts (a
+// transcription of arc_access, arc_evict, arc_evict_adj and arc_evict_hdr)
+// decides every outcome, and src/lib/arc-view.ts draws it, at build time for
+// the opening state (readable without JavaScript) and in the browser after.
+// Each read outlines the block read and the blocks it pushed out (D25.1).
+// Refs: ANALYSIS.md, room "The ARC"; simplifications: DECISIONS.md D6.2.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { opening } from "../lib/arc";
-import { board, gauge, balance, clock, describe, summary, type ArcStrings } from "../lib/arc-view";
+import { board, gauge, balance, clock, describe, summary, queueLine, type ArcStrings } from "../lib/arc-view";
 
 interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const A = "module/zfs/arc.c";
-const refs = {
-  anon: gh(A, 5381, 5397),
-  mintime: gh(A, 5423, 5428),
-  ghostMru: gh(A, 5437, 5449),
-  mfu: gh(A, 5450, 5459),
-  ghostMfu: gh(A, 5466, 5472),
-  hits: gh(A, 4479, 4497),
-  adj: gh(A, 4405, 4442),
-  order: gh(A, 4543, 4556),
-  hdr: gh(A, 3876, 3882),
-  ghosts: gh(A, 4569, 4582),
-};
 const S0 = {
   en: {
     figure: "The ARC as four lists, MRU, MFU and their ghost lists, with the share of the cache MRU may keep",
@@ -38,60 +25,80 @@ const S0 = {
     nMruGhost: "MRU ghost",
     nMfuGhost: "MFU ghost",
     nGone: "Forgotten",
+    rMru: "read once, recently",
+    rMfu: "read more than once",
+    rMruGhost: "headers of blocks pushed out of MRU",
+    rMfuGhost: "headers of blocks pushed out of MFU",
+    rGone: "headers destroyed: the cache no longer knows these blocks",
     liveMeta: "{n}, data in memory",
     blk1: "{n} block",
     blkN: "{n} blocks",
     hdr1: "{n} header",
     hdrN: "{n} headers",
     ghostMeta: "{n}, no data · at most {cap} · ghost hits {hits}",
-    goneMeta: "headers destroyed: the ARC no longer knows these blocks",
     head: "head, most recent",
-    tail: "tail, evicted first",
+    tail: "tail, pushed out first",
     none: "empty",
     aRead: "Read {id} ({where})",
     aGone: "forgotten",
     free: "free {n}",
-    balance: "arc_pd {pd}: the MRU target is {target} of {c}.",
+    balance: "MRU target: {target} of {c} (arc_pd {pd}).",
     percent: "{n}%",
     kib: "{n} KiB",
     clock: "t = {t} s",
     summary: "MRU {mru} and MFU {mfu}, of {c}; MRU ghost {mrug} and MFU ghost {mfug}. {balance}",
-    tIntro: "arc_c is {c} blocks of {size}. Clock: {t} s. Each list from head (most recent) to tail (evicted first):",
+    tIntro: "The cache holds {c} blocks of {size}. Clock: {t} s. Each list from head (most recent) to tail (pushed out first):",
     tList: "{name}, {n}: {list}.",
     tGone: "Forgotten (headers destroyed), most recent first: {list}.",
     tHits: "Ghost hits so far: MRU ghost {mru}, MFU ghost {mfu}.",
-    eNew: "{id}: not in the ARC. Read from disk; a new header at the head of MRU.",
-    eNewForgotten: "{id}: its header was destroyed, so the ARC does not know this block: read from disk, a new header at the head of MRU, and no ghost hit.",
-    eGhostMru: "{id}: MRU ghost hit. Only its header was left: the data is read from disk again, the header goes to the head of MFU, and {kib} go to the MRU ghost list’s hit counter.",
-    eGhostMfu: "{id}: MFU ghost hit. Only its header was left: the data is read from disk again, the header goes back to the head of MFU, and {kib} go to the MFU ghost list’s hit counter.",
-    eHitMfu: "{id}: MFU hit, served from memory. To the head of MFU.",
-    eHitPromote: "{id}: MRU hit, served from memory, {dt} ms after its b_arc_access: more than ARC_MINTIME ({min} ms), promoted to the head of MFU.",
-    eHitStay: "{id}: MRU hit, served from memory, {dt} ms after its b_arc_access: not more than ARC_MINTIME ({min} ms), so it stays in MRU, at its head, and b_arc_access is not refreshed.",
-    ePass: "The cache is one block over arc_c: eviction pass.",
-    eAdjSmall: "No ghost target yet (total < 32 bytes): arc_pd stays at {pd}.",
-    eAdjNone: "No ghost hit since the last pass: arc_pd stays at {pd}.",
-    eAdjMoved: "Ghost hits since the last pass: MRU ghost {grd}, MFU ghost {gfd}, against ghost targets of {total}. arc_pd {before} → {after}, the MRU target {tb} → {ta}.",
-    eShareOver: "MRU holds {mru}, above its target of {target}: MRU gives up its tail.",
-    eShareUnder: "MRU holds {mru}, not above its target of {target}: MFU gives up its tail.",
-    eEvictMru: "{id}: evicted from the tail of MRU. Its data is freed; its header goes to the head of the MRU ghost list.",
-    eEvictMfu: "{id}: evicted from the tail of MFU. Its data is freed; its header goes to the head of the MFU ghost list.",
-    eForgetMru: "{id}: trimmed from the tail of the MRU ghost list, which may hold {cap}, half of MFU. Header destroyed.",
-    eForgetMfu: "{id}: trimmed from the tail of the MFU ghost list, which may hold {cap}, half of MRU. Header destroyed.",
-    see: "code",
-    logLabel: "What the last action did",
-    newBtn: "Read a new block",
+    qNew: "Next read: a new block, {id}.",
+    qScan: "Next read: {id}, block {i} of {total} of the scan.",
+    qHot: "Next read: {id}, block {i} of {total} of the hot set.",
+    nNew: "{id} is not in the cache, so it is read from disk into MRU.",
+    nNewForgotten: "The cache had forgotten {id}, so it is read from disk into MRU as a new block.",
+    nGhostMru: "{id} was an MRU ghost, so it is read from disk again, into MFU.",
+    nGhostMfu: "{id} was an MFU ghost, so it is read from disk again, back into MFU.",
+    nHitMfu: "{id} is in MFU and is served from memory.",
+    nHitPromote: "{id} is in MRU and was last counted {dt} ms ago: served from memory, it moves to MFU.",
+    nHitStay: "{id} is in MRU and was last counted only {dt} ms ago: served from memory, it stays in MRU.",
+    nShare: "MRU’s share goes from {before} to {after}.",
+    nOutMru: "The cache was full: MRU pushed out {id} and kept only its header.",
+    nOutMfu: "The cache was full: MFU pushed out {id} and kept only its header.",
+    nForget: "{id} drops off the {ghost} list and is forgotten.",
+    eNew: "{id}: not in the cache. Read from disk, it goes to the head of MRU.",
+    eNewForgotten: "{id}: the cache had forgotten it. Read from disk as a new block, it goes to the head of MRU, with no ghost hit.",
+    eGhostMru: "{id}: only its header was left, on the MRU ghost list. Read from disk again, it goes to the head of MFU, since this is its second use, and the MRU ghost list counts a hit of {kib}.",
+    eGhostMfu: "{id}: only its header was left, on the MFU ghost list. Read from disk again, it goes back to the head of MFU, and the MFU ghost list counts a hit of {kib}.",
+    eHitMfu: "{id}: in MFU, served from memory. It moves to the head of MFU.",
+    eHitPromote: "{id}: in MRU, served from memory. Its last counted read was {dt} ms ago, more than {min} ms: it moves to the head of MFU.",
+    eHitStay: "{id}: in MRU, served from memory. Its last counted read was only {dt} ms ago, not more than {min} ms: it stays in MRU, at the head, and this read does not count as a new use.",
+    ePass: "The cache is over its {c} blocks: an eviction pass.",
+    eAdjSmall: "The ghost lists have no target size yet, so MRU’s share stays at {pd}.",
+    eAdjNone: "No ghost hit since the last pass: MRU’s share stays at {pd}.",
+    eAdjMoved: "Ghost hits since the last pass: {grd} on the MRU ghost list and {gfd} on the MFU ghost list, against ghost lists of {total}. MRU’s share goes from {before} to {after}, and its target from {tb} to {ta}.",
+    eShareOver: "MRU holds {mru}, more than its target of {target}: MRU gives up its oldest block.",
+    eShareUnder: "MRU holds {mru}, not more than its target of {target}: MFU gives up its oldest block.",
+    eEvictMru: "{id}: pushed out of MRU. Its data is freed, and its header goes to the head of the MRU ghost list.",
+    eEvictMfu: "{id}: pushed out of MFU. Its data is freed, and its header goes to the head of the MFU ghost list.",
+    eForgetMru: "{id}: dropped from the tail of the MRU ghost list, which may hold {cap}, half of MFU. The cache forgets it.",
+    eForgetMfu: "{id}: dropped from the tail of the MFU ghost list, which may hold {cap}, half of MRU. The cache forgets it.",
+    logLabel: "What the last read did",
+    next: "Next read",
     scanBtn: "Scan 12 new blocks",
     hotBtn: "Read the hot set again",
+    rest: "Read the rest",
     reset: "Start again",
     gapLabel: "Before the next read",
     gap1: "1 s",
     gap10: "10 ms",
-    hint: "Select any block to read it.",
+    hint: "Or select any block to read it.",
     logEmpty: "Nothing yet. The opening state: the hot set H1 to H6 was read twice, a second apart.",
     legendLive: "block in memory",
     legendGhost: "header only",
     legendGone: "forgotten",
-    gaugeLabel: "arc_c, 16 blocks: MRU from the left, MFU from the right, the MRU target as a line",
+    legendHit: "the block just read",
+    legendOut: "pushed out by this read",
+    gaugeLabel: "The cache, 16 blocks: MRU from the left, MFU from the right, the MRU target as a line",
   },
   fr: {
     figure: "L’ARC en quatre listes, MRU, MFU et leurs listes fantômes, avec la part du cache que MRU peut garder",
@@ -100,60 +107,80 @@ const S0 = {
     nMruGhost: "MRU fantôme",
     nMfuGhost: "MFU fantôme",
     nGone: "Oubliés",
+    rMru: "lus une fois, récemment",
+    rMfu: "lus plus d’une fois",
+    rMruGhost: "en-têtes des blocs sortis de MRU",
+    rMfuGhost: "en-têtes des blocs sortis de MFU",
+    rGone: "en-têtes détruits : le cache ne connaît plus ces blocs",
     liveMeta: "{n}, données en mémoire",
     blk1: "{n} bloc",
     blkN: "{n} blocs",
     hdr1: "{n} en-tête",
     hdrN: "{n} en-têtes",
     ghostMeta: "{n}, sans données · au plus {cap} · succès fantômes {hits}",
-    goneMeta: "en-têtes détruits : l’ARC ne connaît plus ces blocs",
     head: "tête, le plus récent",
-    tail: "queue, évincé en premier",
+    tail: "queue, sorti en premier",
     none: "vide",
     aRead: "Lire {id} ({where})",
     aGone: "oublié",
     free: "libre {n}",
-    balance: "arc_pd {pd} : la cible de MRU est de {target} sur {c}.",
-    percent: "{n} %",
+    balance: "Cible de MRU : {target} sur {c} (arc_pd {pd}).",
+    percent: "{n} %",
     kib: "{n} Kio",
     clock: "t = {t} s",
     summary: "MRU {mru} et MFU {mfu}, sur {c} ; MRU fantôme {mrug} et MFU fantôme {mfug}. {balance}",
-    tIntro: "arc_c vaut {c} blocs de {size}. Horloge : {t} s. Chaque liste de la tête (le plus récent) à la queue (évincé en premier) :",
+    tIntro: "Le cache tient {c} blocs de {size}. Horloge : {t} s. Chaque liste de la tête (le plus récent) à la queue (sorti en premier) :",
     tList: "{name}, {n} : {list}.",
     tGone: "Oubliés (en-têtes détruits), du plus récent au plus ancien : {list}.",
     tHits: "Succès fantômes jusqu’ici : MRU fantôme {mru}, MFU fantôme {mfu}.",
-    eNew: "{id} : absent de l’ARC. Lu sur le disque ; un nouvel en-tête en tête de MRU.",
-    eNewForgotten: "{id} : son en-tête a été détruit, l’ARC ne connaît donc pas ce bloc : lu sur le disque, un nouvel en-tête en tête de MRU, et aucun succès fantôme.",
-    eGhostMru: "{id} : succès fantôme dans MRU. Il ne restait que son en-tête : les données sont relues sur le disque, l’en-tête passe en tête de MFU, et {kib} s’ajoutent au compteur de succès de la liste MRU fantôme.",
-    eGhostMfu: "{id} : succès fantôme dans MFU. Il ne restait que son en-tête : les données sont relues sur le disque, l’en-tête revient en tête de MFU, et {kib} s’ajoutent au compteur de succès de la liste MFU fantôme.",
-    eHitMfu: "{id} : succès dans MFU, servi depuis la mémoire. En tête de MFU.",
-    eHitPromote: "{id} : succès dans MRU, servi depuis la mémoire, {dt} ms après son b_arc_access : plus qu’ARC_MINTIME ({min} ms), promu en tête de MFU.",
-    eHitStay: "{id} : succès dans MRU, servi depuis la mémoire, {dt} ms après son b_arc_access : pas plus qu’ARC_MINTIME ({min} ms), il reste donc dans MRU, en tête, et b_arc_access n’est pas rafraîchi.",
-    ePass: "Le cache dépasse arc_c d’un bloc : passe d’éviction.",
-    eAdjSmall: "Pas encore de cible fantôme (total < 32 octets) : arc_pd reste à {pd}.",
-    eAdjNone: "Aucun succès fantôme depuis la dernière passe : arc_pd reste à {pd}.",
-    eAdjMoved: "Succès fantômes depuis la dernière passe : MRU fantôme {grd}, MFU fantôme {gfd}, rapportés à des cibles fantômes de {total}. arc_pd {before} → {after}, la cible de MRU {tb} → {ta}.",
-    eShareOver: "MRU tient {mru}, au-dessus de sa cible de {target} : MRU cède sa queue.",
-    eShareUnder: "MRU tient {mru}, pas au-dessus de sa cible de {target} : MFU cède sa queue.",
-    eEvictMru: "{id} : évincé de la queue de MRU. Ses données sont libérées ; son en-tête passe en tête de la liste MRU fantôme.",
-    eEvictMfu: "{id} : évincé de la queue de MFU. Ses données sont libérées ; son en-tête passe en tête de la liste MFU fantôme.",
-    eForgetMru: "{id} : retiré de la queue de la liste MRU fantôme, qui peut tenir {cap}, la moitié de MFU. En-tête détruit.",
-    eForgetMfu: "{id} : retiré de la queue de la liste MFU fantôme, qui peut tenir {cap}, la moitié de MRU. En-tête détruit.",
-    see: "code",
-    logLabel: "Ce que la dernière action a fait",
-    newBtn: "Lire un nouveau bloc",
+    qNew: "Lecture suivante : un nouveau bloc, {id}.",
+    qScan: "Lecture suivante : {id}, bloc {i} sur {total} du parcours.",
+    qHot: "Lecture suivante : {id}, bloc {i} sur {total} de l’ensemble chaud.",
+    nNew: "{id} n’est pas dans le cache : il est donc lu sur le disque, dans MRU.",
+    nNewForgotten: "Le cache avait oublié {id} : il est donc lu sur le disque, dans MRU, comme un nouveau bloc.",
+    nGhostMru: "{id} était un fantôme de MRU : il est donc relu sur le disque, dans MFU.",
+    nGhostMfu: "{id} était un fantôme de MFU : il est donc relu sur le disque et revient dans MFU.",
+    nHitMfu: "{id} est dans MFU et il est servi depuis la mémoire.",
+    nHitPromote: "{id} est dans MRU et sa dernière lecture comptée date de {dt} ms : servi depuis la mémoire, il passe dans MFU.",
+    nHitStay: "{id} est dans MRU et sa dernière lecture comptée ne date que de {dt} ms : servi depuis la mémoire, il reste dans MRU.",
+    nShare: "La part de MRU passe de {before} à {after}.",
+    nOutMru: "Le cache était plein : MRU a sorti {id} et n’en garde que l’en-tête.",
+    nOutMfu: "Le cache était plein : MFU a sorti {id} et n’en garde que l’en-tête.",
+    nForget: "{id} sort de la liste {ghost} et il est oublié.",
+    eNew: "{id} : absent du cache. Lu sur le disque, il entre en tête de MRU.",
+    eNewForgotten: "{id} : le cache l’avait oublié. Lu sur le disque comme un nouveau bloc, il entre en tête de MRU, sans succès fantôme.",
+    eGhostMru: "{id} : il ne restait que son en-tête, dans la liste MRU fantôme. Relu sur le disque, il passe en tête de MFU, puisque c’est sa deuxième utilisation, et la liste MRU fantôme compte un succès de {kib}.",
+    eGhostMfu: "{id} : il ne restait que son en-tête, dans la liste MFU fantôme. Relu sur le disque, il revient en tête de MFU, et la liste MFU fantôme compte un succès de {kib}.",
+    eHitMfu: "{id} : dans MFU, servi depuis la mémoire. Il passe en tête de MFU.",
+    eHitPromote: "{id} : dans MRU, servi depuis la mémoire. Sa dernière lecture comptée date de {dt} ms, plus de {min} ms : il passe en tête de MFU.",
+    eHitStay: "{id} : dans MRU, servi depuis la mémoire. Sa dernière lecture comptée ne date que de {dt} ms, pas plus de {min} ms : il reste dans MRU, en tête, et cette lecture ne compte pas comme une nouvelle utilisation.",
+    ePass: "Le cache dépasse ses {c} blocs : passe d’éviction.",
+    eAdjSmall: "Les listes fantômes n’ont pas encore de taille cible : la part de MRU reste à {pd}.",
+    eAdjNone: "Aucun succès fantôme depuis la dernière passe : la part de MRU reste à {pd}.",
+    eAdjMoved: "Succès fantômes depuis la dernière passe : {grd} dans la liste MRU fantôme et {gfd} dans la liste MFU fantôme, rapportés à des listes fantômes de {total}. La part de MRU passe de {before} à {after}, et sa cible de {tb} à {ta}.",
+    eShareOver: "MRU tient {mru}, plus que sa cible de {target} : MRU cède son bloc le plus ancien.",
+    eShareUnder: "MRU tient {mru}, pas plus que sa cible de {target} : MFU cède son bloc le plus ancien.",
+    eEvictMru: "{id} : sorti de MRU. Ses données sont libérées, et son en-tête passe en tête de la liste MRU fantôme.",
+    eEvictMfu: "{id} : sorti de MFU. Ses données sont libérées, et son en-tête passe en tête de la liste MFU fantôme.",
+    eForgetMru: "{id} : retiré de la queue de la liste MRU fantôme, qui peut tenir {cap}, la moitié de MFU. Le cache l’oublie.",
+    eForgetMfu: "{id} : retiré de la queue de la liste MFU fantôme, qui peut tenir {cap}, la moitié de MRU. Le cache l’oublie.",
+    logLabel: "Ce que la dernière lecture a fait",
+    next: "Lecture suivante",
     scanBtn: "Parcourir 12 nouveaux blocs",
     hotBtn: "Relire l’ensemble chaud",
+    rest: "Lire le reste",
     reset: "Recommencer",
     gapLabel: "Avant la lecture suivante",
     gap1: "1 s",
     gap10: "10 ms",
-    hint: "Sélectionnez n’importe quel bloc pour le lire.",
+    hint: "Ou sélectionnez n’importe quel bloc pour le lire.",
     logEmpty: "Rien encore. L’état de départ : l’ensemble chaud H1 à H6 a été lu deux fois, à une seconde d’intervalle.",
     legendLive: "bloc en mémoire",
     legendGhost: "en-tête seul",
     legendGone: "oublié",
-    gaugeLabel: "arc_c, 16 blocs : MRU depuis la gauche, MFU depuis la droite, la cible de MRU en trait",
+    legendHit: "le bloc qui vient d’être lu",
+    legendOut: "sorti par cette lecture",
+    gaugeLabel: "Le cache, 16 blocs : MRU depuis la gauche, MFU depuis la droite, la cible de MRU en trait",
   },
   es: {
     figure: "El ARC en cuatro listas, MRU, MFU y sus listas fantasma, con la parte de la caché que MRU puede conservar",
@@ -162,74 +189,101 @@ const S0 = {
     nMruGhost: "MRU fantasma",
     nMfuGhost: "MFU fantasma",
     nGone: "Olvidados",
+    rMru: "leídos una vez, hace poco",
+    rMfu: "leídos más de una vez",
+    rMruGhost: "cabeceras de bloques que salieron de MRU",
+    rMfuGhost: "cabeceras de bloques que salieron de MFU",
+    rGone: "cabeceras destruidas: la caché ya no conoce estos bloques",
     liveMeta: "{n}, datos en memoria",
     blk1: "{n} bloque",
     blkN: "{n} bloques",
     hdr1: "{n} cabecera",
     hdrN: "{n} cabeceras",
     ghostMeta: "{n}, sin datos · como máximo {cap} · aciertos fantasma {hits}",
-    goneMeta: "cabeceras destruidas: el ARC ya no conoce estos bloques",
     head: "cabeza, el más reciente",
-    tail: "cola, el primero en ser expulsado",
+    tail: "cola, el primero en salir",
     none: "vacía",
     aRead: "Leer {id} ({where})",
     aGone: "olvidado",
     free: "libre {n}",
-    balance: "arc_pd {pd}: el objetivo de MRU es {target} de {c}.",
-    percent: "{n} %",
-    kib: "{n} KiB",
-    clock: "t = {t} s",
+    balance: "Objetivo de MRU: {target} de {c} (arc_pd {pd}).",
+    percent: "{n} %",
+    kib: "{n} KiB",
+    clock: "t = {t} s",
     summary: "MRU {mru} y MFU {mfu}, de {c}; MRU fantasma {mrug} y MFU fantasma {mfug}. {balance}",
-    tIntro: "arc_c son {c} bloques de {size}. Reloj: {t} s. Cada lista de la cabeza (el más reciente) a la cola (el primero en ser expulsado):",
+    tIntro: "La caché contiene {c} bloques de {size}. Reloj: {t} s. Cada lista de la cabeza (el más reciente) a la cola (el primero en salir):",
     tList: "{name}, {n}: {list}.",
     tGone: "Olvidados (cabeceras destruidas), del más reciente al más antiguo: {list}.",
     tHits: "Aciertos fantasma hasta ahora: MRU fantasma {mru}, MFU fantasma {mfu}.",
-    eNew: "{id}: no está en el ARC. Se lee del disco; una cabecera nueva en la cabeza de MRU.",
-    eNewForgotten: "{id}: su cabecera se destruyó, así que el ARC no conoce este bloque: se lee del disco, una cabecera nueva en la cabeza de MRU, y ningún acierto fantasma.",
-    eGhostMru: "{id}: acierto fantasma en MRU. Solo quedaba su cabecera: los datos se vuelven a leer del disco, la cabecera pasa a la cabeza de MFU, y {kib} se suman al contador de aciertos de la lista MRU fantasma.",
-    eGhostMfu: "{id}: acierto fantasma en MFU. Solo quedaba su cabecera: los datos se vuelven a leer del disco, la cabecera vuelve a la cabeza de MFU, y {kib} se suman al contador de aciertos de la lista MFU fantasma.",
-    eHitMfu: "{id}: acierto en MFU, servido desde la memoria. A la cabeza de MFU.",
-    eHitPromote: "{id}: acierto en MRU, servido desde la memoria, {dt} ms después de su b_arc_access: más de ARC_MINTIME ({min} ms), promovido a la cabeza de MFU.",
-    eHitStay: "{id}: acierto en MRU, servido desde la memoria, {dt} ms después de su b_arc_access: no más de ARC_MINTIME ({min} ms), así que se queda en MRU, en la cabeza, y b_arc_access no se actualiza.",
-    ePass: "La caché supera arc_c en un bloque: pasada de expulsión.",
-    eAdjSmall: "Aún no hay objetivo fantasma (total < 32 bytes): arc_pd se queda en {pd}.",
-    eAdjNone: "Ningún acierto fantasma desde la última pasada: arc_pd se queda en {pd}.",
-    eAdjMoved: "Aciertos fantasma desde la última pasada: MRU fantasma {grd}, MFU fantasma {gfd}, frente a objetivos fantasma de {total}. arc_pd {before} → {after}, el objetivo de MRU {tb} → {ta}.",
-    eShareOver: "MRU contiene {mru}, por encima de su objetivo de {target}: MRU cede su cola.",
-    eShareUnder: "MRU contiene {mru}, no por encima de su objetivo de {target}: MFU cede su cola.",
-    eEvictMru: "{id}: expulsado de la cola de MRU. Sus datos se liberan; su cabecera pasa a la cabeza de la lista MRU fantasma.",
-    eEvictMfu: "{id}: expulsado de la cola de MFU. Sus datos se liberan; su cabecera pasa a la cabeza de la lista MFU fantasma.",
-    eForgetMru: "{id}: recortado de la cola de la lista MRU fantasma, que puede contener {cap}, la mitad de MFU. Cabecera destruida.",
-    eForgetMfu: "{id}: recortado de la cola de la lista MFU fantasma, que puede contener {cap}, la mitad de MRU. Cabecera destruida.",
-    see: "código",
-    logLabel: "Lo que hizo la última acción",
-    newBtn: "Leer un bloque nuevo",
+    qNew: "Lectura siguiente: un bloque nuevo, {id}.",
+    qScan: "Lectura siguiente: {id}, bloque {i} de {total} del recorrido.",
+    qHot: "Lectura siguiente: {id}, bloque {i} de {total} del conjunto caliente.",
+    nNew: "{id} no está en la caché, así que se lee del disco y entra en MRU.",
+    nNewForgotten: "La caché había olvidado {id}, así que se lee del disco y entra en MRU como un bloque nuevo.",
+    nGhostMru: "{id} era un fantasma de MRU, así que se vuelve a leer del disco y entra en MFU.",
+    nGhostMfu: "{id} era un fantasma de MFU, así que se vuelve a leer del disco y vuelve a MFU.",
+    nHitMfu: "{id} está en MFU y se sirve desde la memoria.",
+    nHitPromote: "{id} está en MRU y su última lectura contada fue hace {dt} ms: se sirve desde la memoria y pasa a MFU.",
+    nHitStay: "{id} está en MRU y su última lectura contada fue hace solo {dt} ms: se sirve desde la memoria y se queda en MRU.",
+    nShare: "La parte de MRU pasa de {before} a {after}.",
+    nOutMru: "La caché estaba llena: MRU sacó {id} y solo conserva su cabecera.",
+    nOutMfu: "La caché estaba llena: MFU sacó {id} y solo conserva su cabecera.",
+    nForget: "{id} sale de la lista {ghost} y queda olvidado.",
+    eNew: "{id}: no está en la caché. Se lee del disco y entra en la cabeza de MRU.",
+    eNewForgotten: "{id}: la caché lo había olvidado. Se lee del disco como un bloque nuevo y entra en la cabeza de MRU, sin acierto fantasma.",
+    eGhostMru: "{id}: solo quedaba su cabecera, en la lista MRU fantasma. Se vuelve a leer del disco y pasa a la cabeza de MFU, porque es su segundo uso, y la lista MRU fantasma cuenta un acierto de {kib}.",
+    eGhostMfu: "{id}: solo quedaba su cabecera, en la lista MFU fantasma. Se vuelve a leer del disco y vuelve a la cabeza de MFU, y la lista MFU fantasma cuenta un acierto de {kib}.",
+    eHitMfu: "{id}: en MFU, se sirve desde la memoria. Pasa a la cabeza de MFU.",
+    eHitPromote: "{id}: en MRU, se sirve desde la memoria. Su última lectura contada fue hace {dt} ms, más de {min} ms: pasa a la cabeza de MFU.",
+    eHitStay: "{id}: en MRU, se sirve desde la memoria. Su última lectura contada fue hace solo {dt} ms, no más de {min} ms: se queda en MRU, en la cabeza, y esta lectura no cuenta como un uso nuevo.",
+    ePass: "La caché supera sus {c} bloques: pasada de expulsión.",
+    eAdjSmall: "Las listas fantasma aún no tienen tamaño objetivo, así que la parte de MRU se queda en {pd}.",
+    eAdjNone: "Ningún acierto fantasma desde la última pasada: la parte de MRU se queda en {pd}.",
+    eAdjMoved: "Aciertos fantasma desde la última pasada: {grd} en la lista MRU fantasma y {gfd} en la lista MFU fantasma, frente a listas fantasma de {total}. La parte de MRU pasa de {before} a {after}, y su objetivo de {tb} a {ta}.",
+    eShareOver: "MRU contiene {mru}, más que su objetivo de {target}: MRU cede su bloque más antiguo.",
+    eShareUnder: "MRU contiene {mru}, no más que su objetivo de {target}: MFU cede su bloque más antiguo.",
+    eEvictMru: "{id}: sale de MRU. Sus datos se liberan, y su cabecera pasa a la cabeza de la lista MRU fantasma.",
+    eEvictMfu: "{id}: sale de MFU. Sus datos se liberan, y su cabecera pasa a la cabeza de la lista MFU fantasma.",
+    eForgetMru: "{id}: se recorta de la cola de la lista MRU fantasma, que puede contener {cap}, la mitad de MFU. La caché lo olvida.",
+    eForgetMfu: "{id}: se recorta de la cola de la lista MFU fantasma, que puede contener {cap}, la mitad de MRU. La caché lo olvida.",
+    logLabel: "Lo que hizo la última lectura",
+    next: "Lectura siguiente",
     scanBtn: "Recorrer 12 bloques nuevos",
     hotBtn: "Volver a leer el conjunto caliente",
+    rest: "Leer el resto",
     reset: "Reiniciar",
     gapLabel: "Antes de la lectura siguiente",
-    gap1: "1 s",
-    gap10: "10 ms",
-    hint: "Selecciona cualquier bloque para leerlo.",
+    gap1: "1 s",
+    gap10: "10 ms",
+    hint: "O selecciona cualquier bloque para leerlo.",
     logEmpty: "Nada todavía. El estado inicial: el conjunto caliente H1 a H6 se leyó dos veces, con un segundo de intervalo.",
     legendLive: "bloque en memoria",
     legendGhost: "solo la cabecera",
     legendGone: "olvidado",
-    gaugeLabel: "arc_c, 16 bloques: MRU desde la izquierda, MFU desde la derecha, el objetivo de MRU como una línea",
+    legendHit: "el bloque recién leído",
+    legendOut: "sacado por esta lectura",
+    gaugeLabel: "La caché, 16 bloques: MRU desde la izquierda, MFU desde la derecha, el objetivo de MRU como una línea",
   },
 }[lang];
-const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as ArcStrings;
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as ArcStrings;
 const t = UI[lang];
 const s0 = opening();
 const gapName = `arc-gap-${lang}`;
 ---
 
 <figure class="arc" data-arc data-strings={JSON.stringify(S)} aria-label={S.figure}>
+  <div class="stepbar" hidden>
+    <button class="btn btn--primary" type="button" data-act="next">{S.next}</button>
+    <div class="say">
+      <p class="queue" data-queue>{queueLine(S, [], null, 0, "N1")}</p>
+      <p class="narration" data-narration aria-live="polite"></p>
+    </div>
+  </div>
   <div class="arc-bar" hidden>
     <div class="buttons">
-      <button class="btn btn--primary" type="button" data-act="new">{S.newBtn}</button>
       <button class="btn" type="button" data-act="scan">{S.scanBtn}</button>
       <button class="btn" type="button" data-act="hot">{S.hotBtn}</button>
+      <button class="btn" type="button" data-act="rest" disabled>{S.rest}</button>
       <button class="btn" type="button" data-act="reset">{S.reset}</button>
     </div>
     <fieldset class="gap">
@@ -250,11 +304,12 @@ const gapName = `arc-gap-${lang}`;
     <li><span class="chip mfu">H1</span>{S.legendLive}</li>
     <li><span class="chip mru_ghost">S1</span>{S.legendGhost}</li>
     <li><span class="chip gone">S1</span>{S.legendGone}</li>
+    <li class="js-only" hidden><span class="chip mru hit">S2</span>{S.legendHit}</li>
+    <li class="js-only" hidden><span class="chip mru_ghost out">S1</span>{S.legendOut}</li>
   </ul>
   <noscript><p class="muted">{t.noScript}</p></noscript>
   <section class="arc-log" aria-labelledby={`arc-log-${lang}`} hidden>
     <h3 id={`arc-log-${lang}`}>{S.logLabel}</h3>
-    <p class="visually-hidden" data-status aria-live="polite"></p>
     <ol data-log><li class="muted">{S.logEmpty}</li></ol>
   </section>
   <details class="text-version">
@@ -265,17 +320,24 @@ const gapName = `arc-gap-${lang}`;
 
 <script>
   import { strings, wait, reducedMotion } from "../lib/svg";
-  import { opening, read, readAll, next, HOT, type Arc, type Ev } from "../lib/arc";
-  import { board, gauge, balance, clock, describe, summary, eventLine, eventClass, type ArcStrings } from "../lib/arc-view";
+  import { opening, read, next, HOT, type Arc, type Ev } from "../lib/arc";
+  import { board, gauge, balance, clock, describe, summary, eventLine, eventClass, marks, narrate, queueLine, NO_MARKS, type ArcStrings, type Marks } from "../lib/arc-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-arc]")) {
     const S = strings<ArcStrings>(root);
     const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
     const boardEl = q("[data-board]");
     const logEl = q("[data-log]");
+    const narration = q("[data-narration]");
     let s: Arc = opening();
     let run = 0;
+    // The reads still to come of a scan or of the hot set: one per press of Next read.
+    let queue: string[] = [];
+    let kind: "scan" | "hot" | null = null;
+    let total = 0;
     const gap = () => Number(root.querySelector<HTMLInputElement>("input[type=radio]:checked")?.value ?? 1000);
+    // The name Next read gives a new block, without taking it from the model's counter.
+    const nextNew = () => `N${s.seq.N + 1}`;
 
     const keyOf = (el: Element | null) => {
       if (!(el instanceof HTMLElement) || !root.contains(el)) return null;
@@ -284,14 +346,21 @@ const gapName = `arc-gap-${lang}`;
       return null;
     };
 
-    function render(fresh: string[] = [], focusKey: string | null = keyOf(document.activeElement)) {
-      boardEl.innerHTML = board(s, S, true, fresh);
+    function render(m: Marks = NO_MARKS, focusKey: string | null = keyOf(document.activeElement)) {
+      boardEl.innerHTML = board(s, S, true, m);
       q("[data-gauge]").innerHTML = gauge(s, S);
       q("[data-balance]").textContent = balance(s, S);
+      q(".arc-gauge").classList.toggle("hit", m.balance);
       q("[data-clock]").textContent = clock(s, S);
       q("[data-summary]").textContent = summary(s, S);
       q("[data-describe]").innerHTML = describe(s, S);
-      if (focusKey) root.querySelector<HTMLElement>(focusKey)?.focus({ preventScroll: true });
+      q("[data-queue]").textContent = queueLine(S, queue, kind, total, nextNew());
+      q<HTMLButtonElement>('[data-act="rest"]').disabled = queue.length < 2;
+      if (focusKey) {
+        const el = root.querySelector<HTMLElement>(focusKey);
+        // A disabled button cannot keep the focus: hand it to Next read.
+        (el && !(el as HTMLButtonElement).disabled ? el : q('[data-act="next"]')).focus({ preventScroll: true });
+      }
     }
 
     // FLIP: each chip that changed list slides from where it was; a new one fades in.
@@ -301,12 +370,33 @@ const gapName = `arc-gap-${lang}`;
       return m;
     };
 
-    async function act(ids: string[], step = 1) {
+    // On a phone the figure is taller than the screen: after a read, bring the
+    // block read into view if it is not, above the bar with Next read, which
+    // sticks to the bottom (as in the TXG room, D24.1). A chip may still be
+    // gliding from its old place: measure where it lands.
+    const phone = matchMedia("(max-width: 40rem)");
+    function show(el: Element | null) {
+      if (!el || !phone.matches) return;
+      const r = el.getBoundingClientRect();
+      const dy = new DOMMatrix(getComputedStyle(el).transform).m42;
+      const top = r.top - dy;
+      const bottom = r.bottom - dy;
+      const room = Math.min(q(".stepbar").getBoundingClientRect().top, innerHeight) - 8;
+      if (top >= 8 && bottom <= room) return;
+      window.scrollBy({ top: top < 8 ? top - 8 : bottom - room, behavior: reducedMotion() ? "auto" : "smooth" });
+    }
+
+    /** Reads `ids` in order, the first after the chosen gap, the others 1 ms apart, as a scan does. */
+    async function act(ids: string[], first = gap()) {
       const me = ++run;
       const before = rects();
-      s.now += gap();
-      const ev: Ev[] = ids.length === 1 ? read(s, ids[0]) : readAll(s, ids, step);
-      render(ids);
+      const ev: Ev[] = [];
+      ids.forEach((id, i) => {
+        s.now += i ? 1 : first;
+        ev.push(...read(s, id));
+      });
+      const m = marks(ev);
+      render(m);
       if (!reducedMotion()) {
         for (const c of boardEl.querySelectorAll<HTMLElement>("[data-id]")) {
           const from = before.get(c.dataset.id!);
@@ -316,46 +406,100 @@ const gapName = `arc-gap-${lang}`;
             c.animate([{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }], { duration: 560, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
         }
       }
+      narration.textContent = ids.length === 1 ? narrate(S, ev) : summary(s, S);
+      const hit = m.hit[m.hit.length - 1];
+      requestAnimationFrame(() => show(hit ? boardEl.querySelector(`[data-id="${hit}"]`) : null));
       logEl.replaceChildren();
-      const lines = ev.map((e) => eventLine(S, e));
-      q("[data-status]").textContent = ids.length === 1 ? lines.map((l) => l.replace(/<[^>]+>/g, "")).join(" ").split(` ${S.see}`).join("") : summary(s, S);
       for (let i = 0; i < ev.length; i++) {
         const li = document.createElement("li");
         li.className = eventClass(ev[i]);
-        li.innerHTML = lines[i];
+        li.innerHTML = eventLine(S, ev[i]);
         logEl.append(li);
-        if (ev.length < 12) {
+        if (ev.length < 12 && !reducedMotion()) {
           await wait(70);
           if (me !== run) return;
         }
       }
     }
 
+    // A scan or the hot set: its first read now, the others one per Next read.
+    function start(ids: string[], k: "scan" | "hot") {
+      kind = k;
+      total = ids.length;
+      queue = ids.slice(1);
+      if (!queue.length) kind = null;
+      void act([ids[0]]);
+    }
+    function step() {
+      if (!queue.length) return void act(next(s, "N"));
+      const id = queue.shift()!;
+      const k = kind;
+      if (!queue.length) kind = null;
+      // Within a scan or the hot set, reads are 1 ms apart.
+      void act([id], k ? 1 : gap());
+    }
+
     root.addEventListener("click", (e) => {
       const el = (e.target as Element).closest<HTMLElement>("button");
       if (!el || !root.contains(el)) return;
       const d = el.dataset;
-      if (d.act === "new") void act(next(s, "N"));
-      else if (d.act === "scan") void act(next(s, "S", 12));
-      else if (d.act === "hot") void act(HOT);
-      else if (d.act === "reset") {
+      if (d.act === "next") step();
+      else if (d.act === "scan") start(next(s, "S", 12), "scan");
+      else if (d.act === "hot") start(HOT, "hot");
+      else if (d.act === "rest") {
+        const ids = queue;
+        queue = [];
+        kind = null;
+        void act(ids, 1);
+      } else if (d.act === "reset") {
         run++;
         s = opening();
+        queue = [];
+        kind = null;
         logEl.innerHTML = `<li class="muted">${S.logEmpty}</li>`;
-        q("[data-status]").textContent = "";
+        narration.textContent = "";
         render();
       } else if (d.id) void act([d.id]);
     });
 
-    render([], null);
-    q(".arc-bar").hidden = false;
-    q(".arc-log").hidden = false;
+    render(NO_MARKS, null);
+    for (const el of root.querySelectorAll<HTMLElement>(".arc-bar, .stepbar, .arc-log, .js-only")) el.hidden = false;
   }
 </script>
 
 <style>
+  /* A column: Next read and the narration come first, in the DOM and on
+     screen; on a phone they move below the board (order) and stick there. */
   .arc {
     margin: var(--space-6) 0 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .stepbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    align-items: flex-start;
+    margin-bottom: var(--space-4);
+  }
+  .stepbar .btn {
+    flex: none;
+  }
+  .say {
+    flex: 1 1 22rem;
+    max-width: 44rem;
+    min-height: 4.5em;
+  }
+  .queue {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .narration {
+    margin-top: var(--space-1);
+  }
+  .stepbar[hidden],
+  .js-only[hidden] {
+    display: none;
   }
   .arc-bar {
     display: flex;
@@ -510,6 +654,10 @@ const gapName = `arc-gap-${lang}`;
   .arc-board :global(.mfu h3) {
     color: var(--ok);
   }
+  .arc-board :global(.role) {
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
   .arc-board :global(.meta) {
     font-size: 0.75rem;
     color: var(--fg-muted);
@@ -581,9 +729,36 @@ const gapName = `arc-gap-${lang}`;
     font-weight: 400;
     text-decoration: line-through;
   }
-  .arc-board :global(.fresh .chip) {
-    outline: 2px solid var(--fg);
-    outline-offset: 1px;
+  /* What the last read changed (D25.1): the block read, in the accent, and the
+     blocks it pushed out, dashed. Static outlines, so they read under reduced
+     motion; they fade in only when motion is allowed. */
+  .arc-board :global(.hit .chip),
+  .chip.hit {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .arc-board :global(.out .chip),
+  .chip.out {
+    outline: 2px dashed var(--fg);
+    outline-offset: 2px;
+  }
+  .arc-gauge.hit .balance {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+    width: fit-content;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .arc-board :global(.hit .chip),
+    .arc-board :global(.out .chip),
+    .arc-gauge.hit .balance {
+      animation: arc-hit var(--dur-2) var(--ease);
+    }
+  }
+  @keyframes arc-hit {
+    from {
+      outline-color: transparent;
+    }
   }
   .arc-legend {
     list-style: none;
@@ -660,10 +835,6 @@ const gapName = `arc-gap-${lang}`;
   .arc-log :global(li.forget) {
     color: var(--fg-muted);
   }
-  .arc :global(a.see) {
-    font-size: 0.85em;
-    color: var(--fg-muted);
-  }
   .text-version {
     margin-top: var(--space-5);
     max-width: var(--measure);
@@ -693,6 +864,40 @@ const gapName = `arc-gap-${lang}`;
     }
     .arc-board :global(.list.mfu_ghost) {
       order: 4;
+    }
+  }
+  /* Phone: the board is taller than the screen, so Next read and the narration
+     stay in a bar at the bottom while the figure is on screen (as in the TXG
+     room, D24.1). The bar is drawn after the board, so its sticky range is the
+     figure; it stays first in the DOM, so Tab reaches it first on every screen. */
+  @media (max-width: 40rem) {
+    .arc-log,
+    .text-version {
+      order: 2;
+    }
+    .stepbar {
+      order: 1;
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: var(--space-3);
+      margin: var(--space-4) calc(-1 * var(--space-2)) 0;
+      padding: var(--space-2);
+      background: var(--bg);
+      border-top: 1px solid var(--line-strong);
+    }
+    .say {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .narration {
+      font-size: var(--step--1);
+      line-height: 1.35;
+    }
+    .queue {
+      font-size: 0.75rem;
     }
   }
   @media (max-width: 30rem) {

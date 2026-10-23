@@ -209,8 +209,8 @@ export function didLine(s: State, S: SnStrings, ev: Event[]): string {
     if (e.k === "destroy") out.push(fill(S.dDestroy, { snap: code(e.name) }));
     if (e.k === "refused") out.push(fill(e.err === "EAGAIN" ? S.eEagain : e.err === "EEXIST" ? S.eexist : S.eEnoent, {}));
   }
-  if (kept.length) out.push(fill(S.dKept, { list: list(S, kept.map(bn)) }));
-  if (freed.length) out.push(fill(S.dFreed, { list: list(S, freed.map(bn)) }));
+  if (kept.length) out.push(fill(kept.length === 1 ? S.dKept1 : S.dKept, { list: list(S, kept.map(bn)) }));
+  if (freed.length) out.push(fill(freed.length === 1 ? S.dFreed1 : S.dFreed, { list: list(S, freed.map(bn)) }));
   if (!kept.length && !freed.length && !out.length) out.push(S.dNothing);
   return `${fill(S.dSynced, { txg })} ${out.join(" ")}`;
 }

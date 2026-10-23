@@ -587,7 +587,7 @@ for (const lang of ["en", "fr"]) {
 const SN = PAGES.find((p) => p.id === "snapshots");
 const SNL = {
   en: { sync: /^Sync txg \d+$/, snap: "Snapshot fs", clone: "Clone", destroy: "Destroy", ow: (d) => `Overwrite in ${d}`, write: "Write D", reset: "Start again" },
-  fr: { sync: /^Synchroniser le txg \d+$/, snap: "Instantané de fs", clone: "Cloner", destroy: "Détruire", ow: (d) => `Réécrire dans ${d}`, write: "Écrire D", reset: "Recommencer" },
+  fr: { sync: /^Synchroniser le txg \d+$/, snap: "Prendre un instantané de fs", clone: "Cloner", destroy: "Détruire", ow: (d) => `Réécrire dans ${d}`, write: "Écrire D", reset: "Recommencer" },
 };
 const snState = (page) =>
   page.evaluate(() => {

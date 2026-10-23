@@ -2196,3 +2196,42 @@ reversed step list noted in D23.1).
 **Verification.** `npm test` 244 pass; `npm run build` 44 pages, typography check 0 failures;
 `scripts/verify.mjs` on the whole visit at `b3ef3b5`: 457 captures, 0 console errors, every
 mismatch list empty.
+
+## v1.4 snapshots room (ALG-195): a question, and a figure that says what each sync freed and kept
+
+**What changed.** The snapshots and clones room, in EN, FR and ES, asks one question ("Why
+doesn't deleting a file give me my space back?"), answers it in three plain paragraphs, keeps
+its figure with what to try, then shows the code in five Source notes (D21.1, D28.1). In the
+figure, a line says what each sync did, a ring marks the blocks it touched, blocks kept only for
+snapshots are hatched, and each snapshot says what destroying it would free. Four short excerpts
+are new in `ANALYSIS.md` (snapshots room, 9 to 12). The other rooms are unchanged, except the
+Engine room's computed excerpt count (141 → 145) and, in `scripts/verify.mjs`, the French label
+of the snapshot button ("Prendre un instantané de fs", a verb like the other languages).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 44 | 24 |
+| of them in the prose | 27 | 0 |
+| in excerpts and Source notes | 17 | 24 |
+| "code" links narrated by the figure (script strings) | 10 | 0 |
+| Code excerpts | 7 | 5 |
+| Lines of code shown | 141 | 35 |
+
+**Proof.** `npm run build` (typography check: 14 files, 0 failures), `npm test` (247 pass,
+including two new model tests: a destroy frees exactly the blocks only that snapshot held, over
+300 random sequences; the opening state's pinned blocks), `check-permalinks` (ANALYSIS.md 145
+excerpts, 954 line references; built site 1899 references), `check-sources` (156 references,
+44 pages) and `check-csp` (44 pages, no new hash): all pass. Captures in Chromium at 1440 and
+390 px in EN, FR and ES (not committed, `shots/`): the opening state, an overwrite, a snapshot,
+a destroy, a Source note in the side panel; 0 console errors.
+
+**Reviews.** `technical-writer` on the three languages and the figure's strings: four claims
+made precise (a snapshot with more than one child cannot be destroyed, not "with a child", since
+its next dataset counts as one; D starts empty; the key removed on a destroy is the snapshot's
+creation txg, from the head's deadlist; "cloned blocks" in what is left out means block
+cloning), the counter argument softened, "The work comes later." folded into the next sentence,
+glosses made explicit, fragments in two notes made sentences, calques in FR and ES ("lâcher",
+"soltar", "quels deux", "né au plus tard avec"), a French button with no verb, a Spanish verb
+agreement. Not taken: none of substance.

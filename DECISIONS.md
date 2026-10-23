@@ -2650,3 +2650,42 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   readers keep the oldest-first order and the live region announces each new step. The key
   gains the two damage states, and the first read step says what each damaged child holds of
   the block, so damaging a parity-only or empty child explains why nothing is rebuilt.
+
+## v1.4 snapshots room (ALG-195)
+
+### D28.1 The snapshots room as a question; a figure that says what each sync did and what a destroy would free
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 7 excerpts (141 lines of code) and 44 links to GitHub in each language, 27 of
+  them in the prose, plus a "code" link after every line the figure narrated (10 targets). The
+  issue asks for a figure where the reader takes a snapshot, changes blocks, deletes the
+  snapshot, and sees which blocks it pins and which are freed.
+- **Question.** "Why doesn't deleting a file give me my space back?" (« Pourquoi supprimer un
+  fichier ne me rend-il pas de place ? », « ¿Por qué borrar un archivo no me devuelve
+  espacio? »). It is the question operators ask about snapshots. The answer goes from the
+  problem (a snapshot is instant, the cost comes when blocks are let go of) to the birth txg
+  compared with the latest snapshot, the deadlist, the space coming back when the last snapshot
+  holding a block is destroyed, and clones. txg, birth txg, deadlist and clone are glossed once.
+- **Figure.** `SnapshotLab` is improved, not rebuilt; the model's outcomes are unchanged. A line
+  under the controls says what the last sync did, in plain words ("Txg 11 is synced. Kept for a
+  snapshot: B8. Freed: R10."), and is there from the start, where it explains the opening state.
+  The blocks a sync touched (born, kept, freed) carry a ring until the next action other than a
+  selection: a static outline, faded in only when motion is allowed. A block kept only for
+  snapshots (on disk, in no head's tree) is hatched wherever it is drawn. Each snapshot row says
+  what destroying it would free, with the blocks; `heldOnlyBy` computes it from the references,
+  and a new test checks over 300 random sequences that a destroy alone in its txg frees exactly
+  those blocks. The legend lists every look from the start. The narration and the owner panel
+  say "lets go of" and "latest snapshot: fs@s1, txg 9" rather than `kill` and `ds_prev_snap_txg`,
+  and carry no code links (D21.1); the live region reads the summary line once per sync. Without
+  script the board, the opening line and the text version show, as before.
+- **Code.** Five Source notes, 35 lines: four new short cuts in `ANALYSIS.md` (snapshots room,
+  excerpts 9 to 12: the test of `dsl_dataset_block_kill`, the copied `ds_bp`, the entry lookup
+  of `dsl_deadlist_insert`, the free and merge of a destroy), checked against `zfs-2.4.4`, and
+  the clone excerpt (6) as it was. The "three depths" section is gone: its sentence and
+  paragraph repeated the answer, and its detail now lives in the notes. The `dsl_pool_sync`
+  ordering and the `$ORIGIN` keys are links inside the notes.
+- **Rejected.** A per-block "destroy frees" preview on hover: hover does not exist on a phone or
+  for a keyboard, and the row already says it. Animating the sync's kills one by one on the
+  board: the log already steps through them, and a timer cannot be read at the reader's pace.
+  "lâcher" and "soltar" for "let go of" (the writing review called them calques): the French and
+  Spanish say "abandonner" and "descartar", in the prose and the figure alike.

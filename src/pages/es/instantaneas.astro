@@ -8,7 +8,7 @@ import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomNumber } from "../../lib/rooms";
 
-// The question-first format (DECISIONS.md D21.1, D25.1): the question, a plain
+// The question-first format (DECISIONS.md D21.1, D28.1): the question, a plain
 // answer, the figure, then the code in Source notes. Links to the code live in
 // the notes only.
 const lang = "es";
@@ -42,7 +42,7 @@ const L = {
   lang={lang}
   roomId="snapshots"
   title="¿Por qué borrar un archivo no me devuelve espacio? Instantáneas y clones · Uberblok"
-  description="Una instantánea de ZFS copia un solo puntero de bloque, y una comparación de txg de nacimiento decide si un bloque que el sistema de archivos suelta se libera o se guarda para una instantánea. Interactivo, con el código de OpenZFS."
+  description="Una instantánea de ZFS copia un solo puntero de bloque, y una comparación de txg de nacimiento decide si un bloque que el sistema de archivos descarta se libera o se guarda para una instantánea. Interactivo, con el código de OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
@@ -52,25 +52,28 @@ const L = {
         <p class="lead">
           Una instantánea es una copia de solo lectura de un sistema de archivos tal como estaba en un momento dado. ZFS
           toma una al instante, sea cual sea el tamaño, porque nunca modifica un bloque en su sitio: un cambio va a un
-          bloque nuevo, así que a la instantánea le basta con guardar la cima del árbol de bloques tal como estaba. El
-          trabajo llega después. Cada vez que el sistema de archivos vivo sobrescribe o borra algo, ZFS suelta un bloque
+          bloque nuevo, así que a la instantánea le basta con guardar la cima del árbol de bloques tal como estaba.
+          Después, cada vez que el sistema de archivos vivo sobrescribe o borra algo, ZFS descarta un bloque
           antiguo y tiene que decidir si alguna instantánea lo sigue necesitando. Recorrer todas las instantáneas cada vez
-          sería lento, y llevar un contador en cada bloque costaría una escritura por bloque en cada instantánea.
+          sería lento, y llevar un contador en cada bloque exigiría escrituras de más para ponerlo al día en cada instantánea y en
+          cada liberación.
         </p>
         <p>
           ZFS escribe por lotes llamados grupos de transacciones, o txg, numerados en orden. Cada bloque guarda el txg en
-          el que se escribió, su nacimiento, y el sistema de archivos recuerda el txg de su última instantánea. Cuando
-          suelta un bloque, ZFS compara esos dos números. Un bloque nacido después de la última instantánea no está en
-          ninguna, así que su espacio se libera. Un bloque nacido como muy tarde con la instantánea sigue en ella, así que
-          ZFS lo guarda en una lista de los bloques que el sistema de archivos ya no usa, su deadlist. Por eso borrar un
+          el que se escribió, que se llama su txg de nacimiento. El sistema de archivos guarda también el txg de su
+          última instantánea. Cuando
+          descarta un bloque, ZFS compara esos dos números. Un bloque nacido después de la última instantánea no está en
+          ninguna, así que su espacio se libera. Un bloque nacido en el txg de la instantánea o antes sigue en ella, así que
+          ZFS lo guarda en una lista de los bloques que el sistema de archivos ya no usa, llamada su deadlist. Por eso borrar un
           archivo que ya tenías en tu última instantánea no libera nada: la instantánea todavía retiene sus bloques.
         </p>
         <p>
           El espacio vuelve cuando se destruye la última instantánea que retiene esos bloques. La deadlist está dividida
           por los txg de las instantáneas, así que ZFS sabe entre qué dos instantáneas nació cada bloque. Cuando destruyes
           una instantánea, las partes que solo ella retenía se liberan enteras, sin mirar los bloques uno por uno. Un
-          clon, un sistema de archivos modificable creado a partir de una instantánea, usa la misma comparación. Comparte
-          todos sus bloques con esa instantánea hasta que escribe los suyos, y la instantánea no se puede destruir
+          clon, un sistema de archivos en el que se puede escribir creado a partir de una instantánea, usa la misma comparación. Al
+          principio comparte todos sus bloques con esa instantánea, y los bloques que escribe después son suyos. La
+          instantánea no se puede destruir
           mientras exista el clon.
         </p>
       </div>
@@ -80,7 +83,8 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Toma una instantánea, cambia bloques, destrúyela</h2>
       <div class="prose">
         <p>
-          <code>fs</code> es un sistema de archivos de cuatro bloques de datos, de la A a la D, bajo un bloque raíz. El
+          <code>fs</code> es un sistema de archivos con sitio para cuatro bloques de datos, de la A a la D, bajo un
+          bloque raíz; D empieza vacío. El
           número pequeño de cada bloque es su txg de nacimiento: A<sub>8</sub> nació en el txg 8. La figura empieza
           después de tres txg: A, B y C escritos en el txg 8, la instantánea <code>fs@s1</code> tomada en el txg 9, y A
           sobrescrito en el txg 10. El antiguo A<sub>8</sub> y la antigua raíz R<sub>8</sub> están rayados:
@@ -104,15 +108,15 @@ const L = {
     <section class="section" aria-labelledby="code">
       <h2 id="code">En el código</h2>
       <p class="prose">
-        La figura sigue cinco sitios del código de los datasets y las deadlists. Abre una nota Fuente para ver las
+        La figura sigue cinco puntos del código de los datasets y las deadlists. Abre una nota Fuente para ver las
         líneas, tomadas de la versión zfs-2.4.4.
       </p>
 
       <div class="step">
         <h3>Liberarlo o guardarlo para una instantánea</h3>
         <p class="prose">
-          Cada bloque que un sistema de archivos suelta pasa por <code>dsl_dataset_block_kill</code>, en el txg que se
-          está escribiendo. Su primera prueba es toda la decisión: el nacimiento del bloque frente a
+          Cada bloque que un sistema de archivos descarta pasa por <code>dsl_dataset_block_kill</code>, en el txg que se
+          está escribiendo. Una sola comparación decide: el nacimiento del bloque frente a
           <code>ds_prev_snap_txg</code>, el txg de la última instantánea del sistema de archivos.
         </p>
         <SourceNote lang={lang}>
@@ -126,7 +130,7 @@ const L = {
             notes={[
               {
                 from: 294,
-                text: `Nacido después de la última instantánea: <a href="${L.free}">se libera</a> en este txg. Si no, <a href="${L.elseBranch}">el <code>else</code></a> <a href="${L.insert}">lo pone en la deadlist</a>. El nacimiento se fijó <a href="${L.alloc}">al asignar el bloque</a>. La prueba es estricta: un bloque nacido en el txg de una instantánea está en esa instantánea, porque <a href="${L.order}">un txg escribe sus datos antes de tomar sus instantáneas</a>.`,
+                text: `Nacido después de la última instantánea: <a href="${L.free}">se libera</a> en este txg. Si no, <a href="${L.elseBranch}">el <code>else</code></a> <a href="${L.insert}">lo pone en la deadlist</a>. El nacimiento se fijó <a href="${L.alloc}">al asignar el bloque</a>. La comparación es estricta: un bloque nacido en el txg de una instantánea está en esa instantánea, porque <a href="${L.order}">un txg escribe sus datos antes de tomar sus instantáneas</a>.`,
               },
             ]}
           />
@@ -176,9 +180,9 @@ const L = {
               {
                 from: 487,
                 to: 488,
-                text: `El nacimiento del bloque se busca entre las claves, que están <a href="${L.zapKey}">guardadas en el disco</a>. Una clave <a href="${L.notInclusive}">«no es inclusiva»</a>: la entrada &gt;&#8239;9 contiene los bloques nacidos después del txg 9.`,
+                text: `El nacimiento del bloque se busca entre las claves, que están <a href="${L.zapKey}">guardadas en el disco</a>. Una clave es un límite excluido (<a href="${L.notInclusive}">«not inclusive»</a>, dice el código): la entrada &gt;&#8239;9 contiene los bloques nacidos después del txg 9.`,
               },
-              { from: 489, to: 492, text: "Sin clave exacta: la más cercana anterior. Con clave exacta: la anterior a ella. En los dos casos, la clave más alta estrictamente por debajo del nacimiento." },
+              { from: 489, to: 492, text: "Si no hay clave exacta, toma la más cercana por debajo. Si la hay, toma la anterior. En los dos casos es la clave más alta estrictamente por debajo del nacimiento." },
             ]}
           />
         </SourceNote>
@@ -188,7 +192,7 @@ const L = {
         <h3>Destruir una instantánea</h3>
         <p class="prose">
           <code>dsl_destroy_snapshot_sync_impl</code> usa esas claves. Los bloques que solo retenía la instantánea
-          destruida nacieron después de la instantánea anterior y se soltaron antes de la siguiente, así que llenan
+          destruida nacieron después de la instantánea anterior y se descartaron antes de tomarse la siguiente, así que llenan
           entradas enteras de la deadlist del dataset siguiente.
         </p>
         <SourceNote lang={lang}>
@@ -209,7 +213,7 @@ const L = {
               {
                 from: 422,
                 to: 424,
-                text: `La deadlist de la propia instantánea, bloques que la instantánea anterior todavía retiene, <a href="${L.insertBpobj}">se une a la siguiente, entrada por entrada</a>. Después su clave <a href="${L.removeKey}">se elimina</a> del sistema de archivos <a href="${L.headKey}">cuando el dataset siguiente es una instantánea</a>.`,
+                text: `La deadlist de la propia instantánea, bloques que la instantánea anterior todavía retiene, <a href="${L.insertBpobj}">se une a la siguiente, entrada por entrada</a>. Después su txg de creación <a href="${L.removeKey}">se elimina de las claves</a> de la deadlist del sistema de archivos, <a href="${L.headKey}">cuando el dataset siguiente es una instantánea</a>.`,
               },
             ]}
           />
@@ -235,12 +239,12 @@ const L = {
               {
                 from: 1216,
                 to: 1218,
-                text: "La última instantánea del clon es su origen, con el txg de creación del origen. Un bloque nacido como muy tarde con él se comparte con el origen y va a la deadlist del clon; un bloque que escribió el clon se libera.",
+                text: "La última instantánea del clon es su origen, con el txg de creación del origen. Un bloque nacido en ese txg o antes se comparte con el origen y va a la deadlist del clon; un bloque que escribió el clon se libera.",
               },
               {
                 from: 1225,
                 to: 1227,
-                text: `Su <code>ds_bp</code> es el del origen. El origen <a href="${L.numChildren}">gana un hijo</a>, y una instantánea con un hijo <a href="${L.branch}">no se puede destruir</a>, <code>EEXIST</code>.`,
+                text: `Su <code>ds_bp</code> es el del origen. El origen <a href="${L.numChildren}">gana un hijo</a>. Con el dataset que le sigue son dos, y una instantánea con más de un hijo <a href="${L.branch}">no se puede destruir</a>, <code>EEXIST</code>.`,
               },
             ]}
           />
@@ -252,10 +256,10 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Lo que la figura deja fuera</h2>
       <p class="prose muted">
-        La figura ejecuta las funciones de arriba sobre un sistema de archivos de cuatro bloques de datos, con hasta
-        cuatro instantáneas y un clon al que no se le pueden tomar instantáneas ni destruir. El bloque raíz representa
-        el objset, los dnodes y los bloques indirectos, que se sueltan con la misma regla. Los bloques gang, deduplicados
-        o clonados, que ZFS libera más tarde y no en el acto, aquí se liberan en el acto, igual que los bloques de una
+        La figura ejecuta las funciones de arriba sobre un sistema de archivos con sitio para cuatro bloques de datos, con hasta
+        cuatro instantáneas y un clon que no se puede destruir y del que no se pueden tomar instantáneas. El bloque raíz representa
+        el objset, los dnodes y los bloques indirectos, que se descartan con la misma regla. Los bloques gang, los deduplicados
+        y los compartidos por la clonación de bloques, que ZFS libera más tarde y no en el acto, aquí se liberan en el acto, igual que los bloques de una
         instantánea destruida. No se dibuja la contabilidad del espacio (tamaños usado y referenciado), ni la livelist
         del clon, una lista de los bloques que escribió que acelera su destrucción; ninguna de las dos cambia si un
         bloque se libera o se guarda. Quedan fuera los holds, la destrucción diferida, los pools anteriores a las

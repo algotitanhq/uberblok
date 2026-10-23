@@ -8,7 +8,7 @@ import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomNumber } from "../../lib/rooms";
 
-// The question-first format (DECISIONS.md D21.1, D25.1): the question, a plain
+// The question-first format (DECISIONS.md D21.1, D28.1): the question, a plain
 // answer, the figure, then the code in Source notes. Links to the code live in
 // the notes only.
 const lang = "fr";
@@ -42,7 +42,7 @@ const L = {
   lang={lang}
   roomId="snapshots"
   title="Pourquoi supprimer un fichier ne me rend-il pas de place ? Instantanés et clones · Uberblok"
-  description="Un instantané ZFS copie un seul pointeur de bloc, et une comparaison de txg de naissance décide si un bloc lâché par le système de fichiers est libéré ou gardé pour un instantané. En interactif, avec le code d’OpenZFS."
+  description="Un instantané ZFS copie un seul pointeur de bloc, et une comparaison de txg de naissance décide si un bloc abandonné par le système de fichiers est libéré ou gardé pour un instantané. En interactif, avec le code d’OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
@@ -53,27 +53,27 @@ const L = {
           Un instantané est une copie en lecture seule d’un système de fichiers tel qu’il était à un moment donné. ZFS
           en prend un en un instant, quelle que soit la taille, parce qu’il ne modifie jamais un bloc sur place : une
           modification va dans un nouveau bloc, et l’instantané n’a qu’à garder le haut de l’arbre des blocs tel qu’il
-          était. Le travail vient après. Chaque fois que le système de fichiers vivant réécrit ou supprime quelque chose,
-          ZFS lâche un ancien bloc et doit savoir si un instantané en a encore besoin. Parcourir tous les instantanés à
-          chaque fois serait lent, et tenir un compteur sur chaque bloc coûterait une écriture par bloc à chaque
-          instantané.
+          était. Ensuite, chaque fois que le système de fichiers vivant réécrit ou supprime quelque chose,
+          ZFS abandonne un ancien bloc et doit savoir si un instantané en a encore besoin. Parcourir tous les instantanés à
+          chaque fois serait lent, et tenir un compteur sur chaque bloc demanderait des écritures en plus pour le
+          mettre à jour à chaque instantané et à chaque libération.
         </p>
         <p>
           ZFS écrit par lots appelés groupes de transactions, ou txg, numérotés dans l’ordre. Chaque bloc garde le
-          numéro du txg où il a été écrit, sa naissance, et le système de fichiers retient le txg de son dernier
-          instantané. Quand il lâche un bloc, ZFS compare ces deux nombres. Un bloc né après le dernier instantané n’est
-          dans aucun instantané : sa place est libérée. Un bloc né au plus tard avec l’instantané y est encore, alors
-          ZFS le garde dans une liste des blocs dont le système de fichiers ne se sert plus, sa deadlist. Voilà pourquoi
+          numéro du txg où il a été écrit, qu’on appelle son txg de naissance. Le système de fichiers retient aussi le
+          txg de son dernier instantané. Quand il abandonne un bloc, ZFS compare ces deux nombres. Un bloc né après le dernier instantané n’est
+          dans aucun instantané : sa place est libérée. Un bloc né dans le txg de l’instantané ou avant y est encore, alors
+          ZFS le garde dans une liste des blocs dont le système de fichiers ne se sert plus, qu’on appelle sa deadlist. Voilà pourquoi
           supprimer un fichier que vous aviez déjà au dernier instantané ne libère rien : l’instantané détient encore
           ses blocs.
         </p>
         <p>
           La place revient quand le dernier instantané qui détient ces blocs est détruit. La deadlist est découpée selon
-          les txg des instantanés, si bien que ZFS sait entre quels deux instantanés chaque bloc est né. Quand vous
+          les txg des instantanés, si bien que ZFS sait entre quels instantanés successifs chaque bloc est né. Quand vous
           détruisez un instantané, les parties que lui seul détenait sont libérées en entier, sans examiner les blocs un
-          par un. Un clone, un système de fichiers modifiable créé à partir d’un instantané, utilise la même
-          comparaison. Il partage tous ses blocs avec cet instantané jusqu’à ce qu’il écrive les siens, et l’instantané
-          ne peut pas être détruit tant que le clone existe.
+          par un. Un clone, un système de fichiers accessible en écriture créé à partir d’un instantané, utilise la même
+          comparaison. Au départ, il partage tous ses blocs avec cet instantané, et les blocs qu’il écrit ensuite sont à
+          lui. L’instantané ne peut pas être détruit tant que le clone existe.
         </p>
       </div>
     </header>
@@ -82,7 +82,8 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Prendre un instantané, modifier des blocs, le détruire</h2>
       <div class="prose">
         <p>
-          <code>fs</code> est un système de fichiers de quatre blocs de données, A à D, sous un bloc racine. Le petit
+          <code>fs</code> est un système de fichiers qui a de la place pour quatre blocs de données, A à D, sous un bloc
+          racine ; D est vide au départ. Le petit
           nombre sur chaque bloc est son txg de naissance : A<sub>8</sub> est né au txg 8. La figure s’ouvre après trois
           txg : A, B et C écrits au txg 8, l’instantané <code>fs@s1</code> pris au txg 9, et A réécrit au txg 10.
           L’ancien A<sub>8</sub> et l’ancienne racine R<sub>8</sub> sont hachurés : <code>fs</code> ne s’en sert plus,
@@ -91,7 +92,7 @@ const L = {
         <p>
           Sélectionnez B dans <code>fs</code>, réécrivez-le et synchronisez. La ligne sous les boutons dit quels anciens
           blocs ont été libérés et lesquels ont été gardés pour un instantané, et un anneau les marque sur le plateau.
-          Prenez un instantané et réécrivez B encore une fois : la même chose se produit, cette fois face au nouvel
+          Prenez un instantané et réécrivez B encore une fois : la même chose se produit, cette fois par rapport au nouvel
           instantané. Chaque instantané dit ce que sa destruction libérerait : détruisez-en un, synchronisez, et ces
           blocs s’en vont. Clonez un instantané et réécrivez un bloc dans le clone : l’ancien bloc reste, parce que
           l’instantané le détient encore.
@@ -114,8 +115,8 @@ const L = {
       <div class="step">
         <h3>Le libérer, ou le garder pour un instantané</h3>
         <p class="prose">
-          Chaque bloc qu’un système de fichiers lâche passe par <code>dsl_dataset_block_kill</code>, dans le txg en
-          cours d’écriture. Son premier test est toute la décision : la naissance du bloc face à
+          Chaque bloc qu’un système de fichiers abandonne passe par <code>dsl_dataset_block_kill</code>, dans le txg en
+          cours d’écriture. Un seul test décide de tout : la naissance du bloc face à
           <code>ds_prev_snap_txg</code>, le txg du dernier instantané du système de fichiers.
         </p>
         <SourceNote lang={lang}>
@@ -164,8 +165,8 @@ const L = {
         <h3>Où va un bloc gardé</h3>
         <p class="prose">
           Une deadlist est découpée en entrées, chacune avec pour clé le txg d’un instantané.
-          <code>dsl_deadlist_insert</code> range un bloc dans l’entrée dont la clé est la plus grande sous sa naissance :
-          l’entrée dit entre quels deux instantanés le bloc est né.
+          <code>dsl_deadlist_insert</code> range un bloc dans l’entrée dont la clé est la plus grande strictement inférieure à sa naissance :
+          l’entrée dit entre quels instantanés successifs le bloc est né.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>dsl_deadlist_insert</code>, dsl_deadlist.c</Fragment>
@@ -179,9 +180,9 @@ const L = {
               {
                 from: 487,
                 to: 488,
-                text: `La naissance du bloc est cherchée parmi les clés, qui sont <a href="${L.zapKey}">rangées sur le disque</a>. Une clé <a href="${L.notInclusive}">« n’est pas incluse »</a> : l’entrée &gt;&#8239;9 contient les blocs nés après le txg 9.`,
+                text: `La naissance du bloc est cherchée parmi les clés, qui sont <a href="${L.zapKey}">rangées sur le disque</a>. Une clé est une borne exclue (<a href="${L.notInclusive}">« not inclusive »</a>, dit le code) : l’entrée &gt;&#8239;9 contient les blocs nés après le txg 9.`,
               },
-              { from: 489, to: 492, text: "Pas de clé exacte : la plus proche avant. Une clé exacte : celle d’avant. Dans les deux cas, la plus grande clé strictement sous la naissance." },
+              { from: 489, to: 492, text: "Sans clé exacte, il prend la plus proche en dessous. Avec une clé exacte, il prend celle d’avant. Dans les deux cas, c’est la plus grande clé strictement inférieure à la naissance." },
             ]}
           />
         </SourceNote>
@@ -191,7 +192,7 @@ const L = {
         <h3>Détruire un instantané</h3>
         <p class="prose">
           <code>dsl_destroy_snapshot_sync_impl</code> se sert de ces clés. Les blocs que seul l’instantané détruit
-          détenait sont nés après l’instantané précédent et ont été lâchés avant le suivant : ils remplissent des entrées
+          détenait sont nés après l’instantané précédent et ont été abandonnés avant la prise du suivant : ils remplissent des entrées
           entières de la deadlist du dataset suivant.
         </p>
         <SourceNote lang={lang}>
@@ -212,7 +213,7 @@ const L = {
               {
                 from: 422,
                 to: 424,
-                text: `La deadlist de l’instantané lui-même, des blocs que l’instantané précédent détient encore, <a href="${L.insertBpobj}">rejoint la suivante, entrée par entrée</a>. Puis sa clé <a href="${L.removeKey}">est retirée</a> du système de fichiers <a href="${L.headKey}">quand le dataset suivant est un instantané</a>.`,
+                text: `La deadlist de l’instantané lui-même, des blocs que l’instantané précédent détient encore, <a href="${L.insertBpobj}">rejoint la suivante, entrée par entrée</a>. Puis son txg de création <a href="${L.removeKey}">est retiré des clés</a> de la deadlist du système de fichiers, <a href="${L.headKey}">quand le dataset suivant est un instantané</a>.`,
               },
             ]}
           />
@@ -238,12 +239,12 @@ const L = {
               {
                 from: 1216,
                 to: 1218,
-                text: "Le dernier instantané du clone est son origine, avec le txg de création de l’origine. Un bloc né au plus tard avec elle est partagé avec l’origine et va dans la deadlist du clone ; un bloc écrit par le clone est libéré.",
+                text: "Le dernier instantané du clone est son origine, avec le txg de création de l’origine. Un bloc né dans ce txg ou avant est partagé avec l’origine et va dans la deadlist du clone ; un bloc écrit par le clone est libéré.",
               },
               {
                 from: 1225,
                 to: 1227,
-                text: `Son <code>ds_bp</code> est celui de l’origine. L’origine <a href="${L.numChildren}">gagne un enfant</a>, et un instantané qui a un enfant <a href="${L.branch}">ne peut pas être détruit</a>, <code>EEXIST</code>.`,
+                text: `Son <code>ds_bp</code> est celui de l’origine. L’origine <a href="${L.numChildren}">gagne un enfant</a>. Avec le dataset qui la suit, cela fait deux, et un instantané qui a plus d’un enfant <a href="${L.branch}">ne peut pas être détruit</a>, <code>EEXIST</code>.`,
               },
             ]}
           />
@@ -255,10 +256,10 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Ce que la figure laisse de côté</h2>
       <p class="prose muted">
-        La figure fait tourner les fonctions ci-dessus sur un système de fichiers de quatre blocs de données, avec
-        jusqu’à quatre instantanés et un clone qui ne peut pas lui-même être pris en instantané ni détruit. Le bloc racine
-        tient lieu de l’objset, des dnodes et des blocs indirects, lâchés selon la même règle. Les blocs gang, dédupliqués
-        ou clonés, que ZFS libère plus tard plutôt que tout de suite, sont libérés tout de suite ici, comme les blocs
+        La figure fait tourner les fonctions ci-dessus sur un système de fichiers qui a de la place pour quatre blocs de données, avec
+        jusqu’à quatre instantanés et un clone dont on ne peut ni prendre d’instantané ni demander la destruction. Le bloc racine
+        tient lieu de l’objset, des dnodes et des blocs indirects, abandonnés selon la même règle. Les blocs gang, les blocs dédupliqués
+        et ceux partagés par le clonage de blocs, que ZFS libère plus tard plutôt que tout de suite, sont libérés tout de suite ici, comme les blocs
         d’un instantané détruit. La comptabilité de l’espace (tailles utilisée et référencée) n’est pas dessinée, ni la
         livelist du clone, une liste des blocs qu’il a écrits qui accélère sa destruction ; ni l’une ni l’autre ne
         change le sort d’un bloc. Les holds, la destruction différée, les pools antérieurs aux deadlists à clés, les

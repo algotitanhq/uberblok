@@ -1971,3 +1971,11 @@ dead constants.
 **Debts.** Inside a Source note the Excerpt's own symbol heading still shows; ALG-183 hides it
 in shared code, and this room gets it on rebase. `scripts/verify.mjs` still checks this room
 in EN and FR only; `verify-txg.mjs` covers ES.
+
+**Design review fixes.** On a phone, Next event and the narration stay in a bar at the bottom
+of the screen while the figure is in view, and each press brings the outlined part into view
+above it (D24.1). `verify-txg.mjs` now checks, at 390 px in EN, FR and ES, that after each of
+the 12 presses both the outline and Next event are on screen: 48 captures, 0 problems. The open
+card lost its accent border; "quiesced, waiting…" is lower case like the other status lines.
+`code-reviewer` on the fix: the bar's class name clashed with the card meters and the phone
+button row lost its flex layout; both fixed, and the scroll margin follows the bar's height.

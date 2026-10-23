@@ -31,6 +31,15 @@ const state = (page) =>
       links: f.querySelectorAll(".narration a, .log a").length,
       hits: [...f.querySelectorAll(".hit")].map((x) => x.className + (x.dataset.cpu ? ` cpu${x.dataset.cpu}` : "") + (x.dataset.pass ? ` pass${x.dataset.pass}` : "")),
       overflow: document.documentElement.scrollWidth > innerWidth,
+      // On a phone the bar with Next event is sticky: the outlined part must be
+      // on screen above it, and the button on screen (design review of ALG-189).
+      seen: (() => {
+        const hit = f.querySelector(".hit")?.getBoundingClientRect();
+        const bar = f.querySelector(".stepbar").getBoundingClientRect();
+        const b = f.querySelector('[data-act="step"]').getBoundingClientRect();
+        const floor = getComputedStyle(f.querySelector(".stepbar")).position === "sticky" ? bar.top : innerHeight;
+        return { hit: !!hit && hit.top >= 0 && hit.bottom <= floor + 1, step: b.top >= 0 && b.bottom <= innerHeight };
+      })(),
     };
   });
 
@@ -69,7 +78,9 @@ for (const lang of ["en", "fr", "es"]) {
     const seq = [];
     for (let i = 0; i < 12; i++) {
       await btn(L.step).click();
+      if (vp === "phone") await page.waitForTimeout(700);
       const st = await state(page);
+      if (vp === "phone" && !(st.seen.hit && st.seen.step)) problem(`${tag} step ${i}: outline or Next event off screen ${JSON.stringify(st.seen)}`);
       seq.push({ narration: st.narration, hits: st.hits, stages: st.stages });
       if (st.hits.length !== 1) problem(`${tag} step ${i}: ${st.hits.length} outlined parts`);
       if (st.links) problem(`${tag} step ${i}: links in the narration or log`);

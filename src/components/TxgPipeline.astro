@@ -19,7 +19,7 @@ const S0 = {
     figure: "The transaction group pipeline",
     open: "Open",
     quiescing: "Quiescing",
-    quiesced: "Quiesced, waiting for the sync thread",
+    quiesced: "quiesced, waiting for the sync thread",
     syncing: "Syncing",
     openRole: "takes the new writes",
     quiescingRole: "closed to new writes, waits for those still under way",
@@ -89,7 +89,7 @@ const S0 = {
     figure: "Le pipeline des groupes de transactions",
     open: "Ouvert",
     quiescing: "En clôture",
-    quiesced: "Clos, attend le thread de synchronisation",
+    quiesced: "clos, attend le thread de synchronisation",
     syncing: "En synchronisation",
     openRole: "reçoit les nouvelles écritures",
     quiescingRole: "fermé aux nouvelles écritures, attend la fin de celles en cours",
@@ -159,7 +159,7 @@ const S0 = {
     figure: "El pipeline de los grupos de transacciones",
     open: "Abierto",
     quiescing: "En cierre",
-    quiesced: "Cerrado, esperando al hilo de sincronización",
+    quiesced: "cerrado, esperando al hilo de sincronización",
     syncing: "En sincronización",
     openRole: "recibe las escrituras nuevas",
     quiescingRole: "cerrado a escrituras nuevas, espera a que terminen las que están en curso",
@@ -283,8 +283,11 @@ const textVersion = {
       <div data-hit="quiesce-thread"><dt>{S.quiesceThread} <code>txg_quiesce_thread</code></dt><dd data-quiesce-thread></dd></div>
     </dl>
     <div class="controls">
-      <div class="buttons">
+      <div class="stepbar">
         <button class="btn btn--primary" type="button" data-act="step">{S.step}</button>
+        <p class="narration" aria-live="polite"></p>
+      </div>
+      <div class="buttons">
         <button class="btn" type="button" data-act="write">{S.write}</button>
         <button class="btn" type="button" data-act="zsync"><code>{S.zsync}</code></button>
         <button class="btn" type="button" data-act="free">{S.free}</button>
@@ -296,7 +299,6 @@ const textVersion = {
         <p class="clock"><span data-clock></span> <span class="muted">· {S.clockNote}</span></p>
       </div>
     </div>
-    <p class="narration" aria-live="polite"></p>
     <div class="log">
       <h4>{S.log}</h4>
       <ol reversed></ol>
@@ -483,6 +485,20 @@ const textVersion = {
       for (const x of root.querySelectorAll(".hit")) x.classList.remove("hit");
       const el = e && target(e);
       if (el) el.classList.add("hit");
+      return el;
+    }
+    // On a phone the figure is taller than the screen: after a press, bring the
+    // outlined part into view if it is not; the bar with Next event is sticky,
+    // so the button stays under the thumb.
+    const phone = matchMedia("(max-width: 40rem)");
+    function show(el: Element | null | undefined) {
+      if (!el || !phone.matches) return;
+      const r = el.getBoundingClientRect();
+      const bar = q(".stepbar").getBoundingClientRect();
+      if (r.top >= 0 && r.bottom <= bar.top) return;
+      // Stop above the bar, whose height follows the narration.
+      (el as HTMLElement).style.scrollMarginBottom = `${bar.height + 8}px`;
+      el.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
     // Returns the event the narration shows: the last one after a press, the last
@@ -534,7 +550,7 @@ const textVersion = {
       const evs = Array.isArray(r) ? r : [r];
       const e = tell(evs, true);
       render();
-      mark(e);
+      show(mark(e));
     };
     btn("write").addEventListener("click", act(() => write(m)));
     btn("zsync").addEventListener("click", act(() => zpoolSync(m)));
@@ -648,8 +664,8 @@ const textVersion = {
     align-content: start;
     font-size: var(--step--1);
   }
+  /* The accent tint marks the open txg; the accent frame is kept for the outline. */
   .slot :global(.card--open) {
-    border-color: var(--accent);
     background: var(--accent-soft);
   }
   .slot :global(.num) {
@@ -837,10 +853,21 @@ const textVersion = {
     height: 100%;
     background: var(--accent);
   }
+  /* Desktop: Next event leads the first row of buttons and the narration sits
+     below both rows, as before; .stepbar only groups them for the phone layout. */
   .controls {
     margin-top: var(--space-5);
-    display: grid;
-    gap: var(--space-3);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-2);
+    align-items: center;
+  }
+  .stepbar,
+  .stepbar + .buttons {
+    display: contents;
+  }
+  .controls > .buttons:last-child {
+    flex-basis: 100%;
   }
   .buttons {
     display: flex;
@@ -856,7 +883,9 @@ const textVersion = {
     font-variant-numeric: tabular-nums;
   }
   .narration {
-    margin-top: var(--space-4);
+    order: 1;
+    flex-basis: 100%;
+    margin-top: var(--space-2);
     min-height: 5em;
     max-width: 44rem;
   }
@@ -918,6 +947,41 @@ const textVersion = {
     }
     .timer {
       grid-column: 1;
+    }
+  }
+  /* Phone (design review of ALG-189): the figure is taller than the screen, so
+     Next event and the narration stay in a bar at the bottom while the figure
+     is on screen. .live and .controls lend no box, so the bar's sticky range
+     is the whole figure; the other buttons stay where they are. */
+  @media (max-width: 40rem) {
+    .live:not([hidden]),
+    .controls {
+      display: contents;
+    }
+    .controls > .buttons {
+      display: flex;
+      margin-top: var(--space-3);
+    }
+    .stepbar {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      display: flex;
+      gap: var(--space-3);
+      align-items: center;
+      margin: var(--space-4) calc(-1 * var(--space-2)) 0;
+      padding: var(--space-2);
+      background: var(--bg);
+      border-top: 1px solid var(--line-strong);
+    }
+    .stepbar .btn {
+      flex: none;
+    }
+    .narration {
+      margin: 0;
+      min-height: 0;
+      font-size: var(--step--1);
+      line-height: 1.35;
     }
   }
 </style>

@@ -2460,3 +2460,11 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   question speaks to does not know them, and the notes show them. Emitting one release per
   step inside the model: it changes a tested model to fix what staggering the first two writes
   fixes.
+- **Phone (design review).** Below 40rem the figure is taller than the screen, so the outline
+  was off screen for most presses. Next event and the narration now sit in a bar that sticks to
+  the bottom of the screen while the figure is in view (`.live` and `.controls` lend no box
+  there, so the bar's sticky range is the whole figure), and after a press the outlined part is
+  scrolled into view above the bar if it is not visible. The other buttons stay where they were;
+  the desktop layout is unchanged. The open txg card keeps its accent tint but takes the neutral
+  border, so an accent frame means only "this changed". Rejected: scrolling alone, which moves
+  Next event away from the thumb.

@@ -5556,6 +5556,190 @@ L2520-L2521: every block of an encrypted objset gets `zp_encrypt`. L2523-L2526: 
 - *Dedup* (`copies=1`, one write per txg from txg 100). A (100): miss, entry A refcount 1, written at DVA d1. B (101): miss, entry B, d2. A (102): hit, the block pointer gets d1, logical birth 102, physical birth 100, A refcount 2, nothing written. Quota on. C (103): `ddt_lookup` returns NULL, D bit cleared, written at d3, no entry. A (104): hit, refcount 3. C (105): NULL again, written at d4, a second copy of C. Six writes, six lookups, four blocks written, two entries.
 - *Encryption.* Word roles, from `spa.h`: not encrypted 0-5 DVAs 1-3, 6 properties, 7 R and padding, 8 padding, 9 physical birth, a logical birth, b fill, c-f checksum; encrypted level 0: 4 salt, 5 IV1, b IV2 and fill, c-d checksum, e-f MAC, at most 2 DVAs; authenticated level 0 and indirect: DVAs 1-3, c-d checksum, e-f MAC (indirect: of the MACs below). Key unloaded: scrub verifies the five blocks of the file (its dnode block, its indirect block, its three data blocks) by words c-d; reading a data block gives `EACCES`; the dnode core and the indirect block are in clear on disk, the bonus buffer and the data are not. A flipped bit in data block 1: scrub reports one checksum error, with or without the key.
 
+**Short excerpts for the question-first room (v1.4, ALG-203).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis. Excerpt 16 is new; 17 to 25 are cuts of excerpts 1, 4, 5, 6, 2, 8, 10, 3 and 14. Each is checked against the frozen commit like the others.
+
+### 16. The write stages, in order — include/sys/zio_impl.h
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/zio_impl.h#L135-L144
+
+```c
+	ZIO_STAGE_WRITE_COMPRESS	= 1 << 5,	/* -W---- */
+
+	ZIO_STAGE_ENCRYPT		= 1 << 6,	/* -W---- */
+	ZIO_STAGE_CHECKSUM_GENERATE	= 1 << 7,	/* -W---- */
+
+	ZIO_STAGE_NOP_WRITE		= 1 << 8,	/* -W---- */
+
+	ZIO_STAGE_DDT_READ_START	= 1 << 9,	/* R----- */
+	ZIO_STAGE_DDT_READ_DONE		= 1 << 10,	/* R----- */
+	ZIO_STAGE_DDT_WRITE		= 1 << 11,	/* -W---- */
+```
+
+New. The stages of the write pipeline, in the order they run: L135 compression, L137 encryption, L138 the checksum of what will be written, L140 nop-write, L142-L144 the dedup stages. The dedup lookup therefore sees the checksum of the compressed and, in an encrypted dataset, encrypted block. For the room's "In the code" introduction; the bit values give the order, since `__zio_execute` moves from a stage to the next higher bit set in the zio's pipeline ([L2452-L2454](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L2452-L2454)).
+
+### 17. `zio_get_compression_max_size`, the limit — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L1797-L1807
+
+```c
+	/* minimum 12.5% must be saved (legacy value, may be changed later) */
+	d_len = s_len - (s_len >> 3);
+
+	/* ZLE can't use exactly d_len bytes, it needs more, so ignore it */
+	if (compress == ZIO_COMPRESS_ZLE)
+		return (d_len);
+
+	d_len = d_len - d_len % gcd_alloc;
+
+	if (d_len < min_alloc)
+		return (BPE_PAYLOAD_SIZE);
+```
+
+Excerpt 1 without its signature and last return. L1797-L1798: seven eighths of the source. L1800-L1802: ZLE is exempt from the snap. L1804: the snap down to a multiple of `spa_gcd_alloc`, the sector on a pool of plain disks of one ashift. L1806-L1807: below the minimum allocation, only an output that fits in a block pointer is worth keeping (`BPE_PAYLOAD_SIZE`, 112 bytes).
+
+### 18. `zio_write_compress`, zeros, the compressor, the three early outcomes — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L1986-L2004
+
+```c
+		if (abd_cmp_zero(zio->io_abd, lsize) == 0)
+			psize = 0;
+		else if (compress == ZIO_COMPRESS_EMPTY)
+			psize = lsize;
+		else
+			psize = zio_compress_data(compress, zio->io_abd, &cabd,
+			    lsize,
+			    zio_get_compression_max_size(compress,
+			    spa->spa_gcd_alloc, spa->spa_min_alloc, lsize),
+			    zp->zp_complevel);
+		if (psize == 0) {
+			compress = ZIO_COMPRESS_OFF;
+		} else if (psize >= lsize) {
+			compress = ZIO_COMPRESS_OFF;
+			if (cabd != NULL)
+				abd_free(cabd);
+		} else if (psize <= BPE_PAYLOAD_SIZE && !zp->zp_encrypt &&
+		    zp->zp_level == 0 && !DMU_OT_HAS_FILL(zp->zp_type) &&
+		    spa_feature_is_enabled(spa, SPA_FEATURE_EMBEDDED_DATA)) {
+```
+
+Excerpt 4 from the zero test to the embed test. L1986-L1987: an all-zero block gets PSIZE 0. L1991-L1995: the compressor runs with the limit of excerpt 17 as its output size; `zio_compress_data` returns the source size when the output does not fit ([`module/zfs/zio_compress.c#L148-L149`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio_compress.c#L148-L149)). L1996-L1997: PSIZE 0, a hole. L1998-L2001: nothing saved, stored uncompressed. L2002-L2004: at most 112 bytes, not encrypted, level 0, a type without a fill count, `embedded_data` enabled: the data goes into the block pointer and the write stops (L2005-L2017).
+
+### 19. `zio_write_compress`, rounding to the sector — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L2027-L2035
+
+```c
+			size_t rounded = (size_t)zio_roundup_alloc_size(spa,
+			    psize);
+			if (rounded >= lsize) {
+				compress = ZIO_COMPRESS_OFF;
+				abd_free(cabd);
+				psize = lsize;
+			} else {
+				abd_zero_off(cabd, psize, rounded - psize);
+				psize = rounded;
+```
+
+Excerpt 5 without its comment. L2027-L2028: the output rounded up to the minimum allocation (`zio_roundup_alloc_size`, [L1783-L1789](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L1783-L1789)). L2029-L2032: if that is not smaller than the block, it is stored uncompressed. L2034-L2035: otherwise the tail of the last sector is zeroed and PSIZE is the rounded size.
+
+### 20. `zio_ddt_write`, the lookup and the quota — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L3823-L3832
+
+```c
+	dde = ddt_lookup(ddt, bp, B_FALSE);
+	if (dde == NULL) {
+		/* DDT size is over its quota so no new entries */
+		ddt_exit(ddt);
+		zp->zp_dedup = B_FALSE;
+		BP_SET_DEDUP(bp, B_FALSE);
+		if (zio->io_bp_override == NULL)
+			zio->io_pipeline = ZIO_WRITE_PIPELINE;
+		return (zio);
+	}
+```
+
+Excerpt 6 from the lookup on. L3823: every dedup write looks its block pointer up, keyed by its checksum. L3824-L3832: NULL means the table is over its quota and the key was not in it (`ddt_lookup`, excerpt 7): the D bit is cleared and the block goes down the ordinary write pipeline.
+
+### 21. `zio_ddt_write`, a hit — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L3983-L3986
+
+```c
+			ddt_bp_fill(ddp, v, bp, txg);
+			ddt_phys_addref(ddp, v);
+			ddt_exit(ddt);
+			return (zio);
+```
+
+Excerpt 2, its last four lines. L3983: `ddt_bp_fill` copies the entry's DVAs into the new block pointer, with the current txg as logical birth and the entry's as physical birth ([`module/zfs/ddt.c#L724-L726`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/ddt.c#L724-L726)). L3984: `ddt_phys_addref` adds a reference ([`module/zfs/ddt.c#L880-L888`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/ddt.c#L880-L888)). L3986: the zio returns with no write I/O.
+
+### 22. `zio_ddt_write`, a miss — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L4161-L4165
+
+```c
+	ddt_phys_addref(ddp, v);
+
+	ddt_exit(ddt);
+
+	zio_nowait(cio);
+```
+
+Excerpt 8, the reference and the write. L4161: the new entry's refcount goes up before the write completes; it is undone if the write fails (comment L4156-L4160). L4165: the child write is issued; `zio_ddt_child_write_ready` copies its DVA into the entry (excerpt 9).
+
+### 23. The DDT, why updating it in place costs — module/zfs/ddt.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/ddt.c#L138-L142
+
+```c
+ * Historically, all entries modified on a txg were written back to dedup
+ * storage objects at the end of every txg. This could cause significant
+ * overheads, as each entry only takes up a tiny portion of a ZAP leaf node,
+ * and so required reading the whole node, updating the entry, and writing it
+ * back. On busy pools, this could add serious IO and memory overheads.
+```
+
+Excerpt 10, its first paragraph. Without the dedup log, every entry modified in a txg was written back at the end of the txg, and an entry is a small part of a ZAP leaf: the whole leaf is read, one entry updated, the leaf written back. The rest of excerpt 10 (L144-L156) describes the log that `fast_dedup` adds.
+
+### 24. The encrypted block pointer, in one comment — include/sys/spa.h
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/spa.h#L250-L257
+
+```c
+ * The MAC occupies half of the checksum space since it serves a very similar
+ * purpose: to prevent data corruption on disk. The only functional difference
+ * is that the checksum is used to detect on-disk corruption whether or not the
+ * encryption key is loaded and the MAC provides additional protection against
+ * malicious disk tampering. We use the 3rd DVA to store the salt and first
+ * 64 bits of the IV. As a result encrypted blocks can only have 2 copies
+ * maximum instead of the normal 3. The last 32 bits of the IV are stored in
+ * the upper bits of what is usually the fill count. Note that only blocks at
+```
+
+Excerpt 3, the middle of the comment. L250-L254: the MAC takes half of the checksum; the other half still detects corruption on disk whether or not the key is loaded. L254-L256: the third DVA holds the salt and the first 64 bits of the IV, so an encrypted block keeps at most two copies. L256-L257: the last 32 bits of the IV sit in the upper half of the fill count.
+
+### 25. `zio_checksum_error_impl`, the truncated comparison — module/zfs/zio_checksum.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio_checksum.c#L515-L525
+
+```c
+	if (bp != NULL && BP_USES_CRYPT(bp) &&
+	    BP_GET_TYPE(bp) != DMU_OT_OBJSET) {
+		if (!(ci->ci_flags & ZCHECKSUM_FLAG_DEDUP)) {
+			actual_cksum.zc_word[0] ^= actual_cksum.zc_word[2];
+			actual_cksum.zc_word[1] ^= actual_cksum.zc_word[3];
+		}
+
+		actual_cksum.zc_word[2] = 0;
+		actual_cksum.zc_word[3] = 0;
+		expected_cksum.zc_word[2] = 0;
+		expected_cksum.zc_word[3] = 0;
+```
+
+Excerpt 14 without its comment. L515-L516: a block pointer that uses encryption, except an objset block. L517-L520: for a checksum not made for dedup, words 2 and 3 are folded into words 0 and 1, as the writer did ([`module/zfs/zio_checksum.c#L324-L341`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio_checksum.c#L324-L341)). L522-L525: words 2 and 3, the MAC, are ignored on both sides; decryption checks the MAC. Scrub reads raw (`ZIO_FLAG_RAW`, [`module/zfs/dsl_scan.c#L4841`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L4841)), so this comparison is all it needs, and it needs no key.
+
 ## The Hall's dedication: the AUTHORS file
 
 The dedication says the release lists more than 700 people in its AUTHORS file:

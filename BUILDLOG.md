@@ -2337,7 +2337,7 @@ bottom. The model is unchanged. Eight short excerpts are new in `ANALYSIS.md` (Z
 | Code excerpts (citations) | 9 | 9 |
 | Lines of code shown | 220 | 74 |
 
-**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (254 pass),
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (261 pass after the merge of `main`),
 `check-permalinks` (ANALYSIS.md 157 excerpts, 0 failures; built pages 1698 line references,
 0 failures), `check-csp` (44 pages). `scripts/verify-zil.mjs` (new, scoped to this room): EN,
 FR, ES on desktop and a 390 px phone; write, fsync, write, fsync, power cut, import, mount, one
@@ -2348,7 +2348,11 @@ every step ends the action with the focus in the bar; a setting changed afterwar
 ring's key; reduced motion runs no animation; with no script the panels and the text version
 are shown and the controls are not; Enter and Space work with a visible focus; at 1280 px a
 Source note opens in the side panel; no horizontal overflow, no console error. 41 captures,
-0 problems.
+0 problems. The whole-site `scripts/verify.mjs` on the final head: 488 captures, 0 console
+errors, 0 mismatches in any room. Its ZIL checks now step through each action (the reduced-
+motion fsync primes the log first) and scroll a button to mid-screen before pressing it, since on
+a phone the sticky step bar can cover it. The `targets()` test parses the HTML itself: CI runs
+`npm test` before `npm ci`, so it cannot import a package.
 
 **Reviews.** `technical-writer` on the three languages: "Start again and sync the txg" led to a
 run with no record to replay, and the 128 KiB split needs a log that already exists (both

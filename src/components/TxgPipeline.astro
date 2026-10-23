@@ -493,12 +493,18 @@ const textVersion = {
     const phone = matchMedia("(max-width: 40rem)");
     function show(el: Element | null | undefined) {
       if (!el || !phone.matches) return;
+      // A card may still be gliding from its previous stage (FLIP above): measure
+      // where it lands, not where it is drawn now.
       const r = el.getBoundingClientRect();
-      const bar = q(".stepbar").getBoundingClientRect();
-      if (r.top >= 0 && r.bottom <= bar.top) return;
-      // Stop above the bar, whose height follows the narration.
-      (el as HTMLElement).style.scrollMarginBottom = `${bar.height + 8}px`;
-      el.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+      const dy = new DOMMatrix(getComputedStyle(el).transform).m42;
+      const top = r.top - dy;
+      const bottom = r.bottom - dy;
+      // Stop above the bar, whose height follows the narration. A part taller
+      // than the room above the bar is aligned on its top.
+      const room = q(".stepbar").getBoundingClientRect().top - 8;
+      if (top >= 8 && bottom <= room) return;
+      const by = top < 8 || bottom - top > room - 8 ? top - 8 : bottom - room;
+      window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
     // Returns the event the narration shows: the last one after a press, the last
@@ -550,7 +556,9 @@ const textVersion = {
       const evs = Array.isArray(r) ? r : [r];
       const e = tell(evs, true);
       render();
-      show(mark(e));
+      // Measure once the new card and narration have their full height.
+      const el = mark(e);
+      requestAnimationFrame(() => show(el));
     };
     btn("write").addEventListener("click", act(() => write(m)));
     btn("zsync").addEventListener("click", act(() => zpoolSync(m)));

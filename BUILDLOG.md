@@ -1979,3 +1979,11 @@ the 12 presses both the outline and Next event are on screen: 48 captures, 0 pro
 card lost its accent border; "quiesced, waiting…" is lower case like the other status lines.
 `code-reviewer` on the fix: the bar's class name clashed with the card meters and the phone
 button row lost its flex layout; both fixed, and the scroll margin follows the bar's height.
+
+**QA fixes.** `scripts/verify.mjs` still expected the capitalised status line, so its caption
+check reported false mismatches; both strings are lower case now. At 360 px, step 7 left the
+bottom of the syncing card under the bar: the card was measured while it still glided from the
+quiescing stage (FLIP), at its old place. `show()` now subtracts the glide's current offset,
+scrolls by the difference itself, and aligns a part taller than the room above the bar on its
+top. Measured over 14 presses at 360×740 and 390×844 in EN, FR and ES: the outline is fully
+above the bar every time.

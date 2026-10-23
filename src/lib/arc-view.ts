@@ -16,14 +16,17 @@ export interface Marks {
 }
 export const NO_MARKS: Marks = { hit: [], out: [], balance: false };
 
+/** The last event on a block wins: a block read, then pushed out within one Read the rest, is "out". */
 export function marks(ev: Ev[]): Marks {
-  const m: Marks = { hit: [], out: [], balance: false };
+  const last = new Map<string, "hit" | "out">();
+  let moved = false;
   for (const e of ev) {
-    if (e.k === "new" || e.k === "ghost" || e.k === "hit") m.hit.push(e.id);
-    else if (e.k === "evict" || e.k === "forget") m.out.push(e.id);
-    else if (e.k === "pass" && e.pd !== e.pdBefore) m.balance = true;
+    if (e.k === "new" || e.k === "ghost" || e.k === "hit") last.set(e.id, "hit");
+    else if (e.k === "evict" || e.k === "forget") last.set(e.id, "out");
+    else if (e.k === "pass" && e.pd !== e.pdBefore) moved = true;
   }
-  return m;
+  const of = (k: "hit" | "out") => [...last].filter(([, v]) => v === k).map(([id]) => id);
+  return { hit: of("hit"), out: of("out"), balance: moved };
 }
 
 const fill = (tpl: string, vars: Record<string, string | number>) =>

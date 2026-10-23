@@ -79,18 +79,13 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Read, scan, read again</h2>
       <div class="prose">
         <p>
-          The cache below holds 16 blocks. It starts with a hot set, H1 to H6, read twice a second apart, so all six are
-          in MFU. Each list runs from its head, the block used last, to its tail, the block that goes first. Press Next
+          The cache below holds 16 blocks. It starts with a hot set, H1 to H6. Each of these blocks was read twice, one second apart, so all six are in MFU. Each list runs from its head, the block used last, to its tail, the block that goes first. Press Next
           read to read one block. The block read is outlined, and a block it pushed out has a dashed outline. A clock
           moves one second before each read you make, or 10 ms if you choose.
         </p>
         <p>
-          Start with Scan 12 new blocks, then press Next read for each block of the scan. From S11 on the cache is full:
-          each new block pushes the oldest scan block out of MRU, and the hot set stays in MFU. Then select S2 on the MRU
-          ghost list. It is read from the disk again and goes to MFU, and the MRU target rises from 8 to 8.5 blocks. Read
-          a few scan blocks again to move them to MFU, then press Next read until MFU gives up a hot block, and read that
-          block back from the MFU ghost list: the MRU target goes down again. Last, choose 10 ms and read the same new
-          block twice. The second read comes too soon to count as a second use, so the block stays in MRU.
+          Start with Scan 12 new blocks, then press Next read for each block of the scan. After S10 the cache is full. From S11 on, each new block pushes the oldest scan block out of MRU, and the hot set stays in MFU. Then select S2 on the MRU
+          ghost list. It is read from the disk again and goes to MFU. The MRU target rises from 8 to 8.5 blocks, and MRU, still over that target, pushes S3 out. Then read S12, S11 and S10 again, which moves them to MFU, and press Next read once more: the new block N1 makes MFU give up H1. Read H1 back from the MFU ghost list, and the MRU target goes back down to 8 blocks. Last, choose 10 ms, press Next read, then select the new block in MRU to read it again. The second read comes too soon to count as a second use, so the block stays in MRU.
         </p>
       </div>
       <ArcLab lang={lang} />
@@ -200,7 +195,7 @@ const L = {
         <h3>How many ghosts to keep</h3>
         <p class="prose">
           At the end of the same pass, each ghost list is trimmed. A ghost list as large as the whole cache would remember
-          reads from too far back, so the code holds each one to half of what the other lists hold. A header trimmed off a
+          reads from too far back, so the code holds each one to half of the other lists. In the figure that is half of MFU for the MRU ghost list, and half of MRU for the MFU ghost list. A header trimmed off a
           ghost list is destroyed. Reading that block again is a new block to the ARC, with no ghost hit.
         </p>
         <SourceNote lang={lang}>
@@ -289,9 +284,7 @@ const L = {
       <div class="step">
         <h3>A small step each time</h3>
         <p class="prose">
-          <code>arc_evict_adj</code> moves a share by about the hit bytes divided by the size of the ghost lists, and never
-          by more than about 1/32 at once. In the figure one ghost hit of 128 KiB, against ghost lists of 8 blocks, reaches
-          that limit: <code>arc_pd</code> goes from 50% to 53.125%, and the MRU target from 8 to 8.5 blocks.
+          <code>arc_evict_adj</code> moves a share by about the hit bytes divided by the ghost lists’ targets, and never by more than about 1/32 at once. In the figure one ghost hit of 128 KiB, against ghost-list targets of 8 blocks in all, reaches that limit: <code>arc_pd</code> goes from 50% to 53.125%, and the MRU target from 8 to 8.5 blocks.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>arc_evict_adj</code>, arc.c</Fragment>

@@ -62,7 +62,7 @@ const L = {
         <p>
           El ARC mantiene dos listas en lugar de una. Un bloque leído una vez va a la primera, llamada MRU (most recently
           used, el usado más recientemente). Un bloque que se vuelve a leer más tarde pasa a la segunda, MFU (most
-          frequently used, el usado con más frecuencia). Cada lista tiene una parte objetivo de la caché. Cuando la caché
+          frequently used, el usado con más frecuencia). Cada lista tiene como objetivo una parte de la caché. Cuando la caché
           está llena, MRU cede su bloque más antiguo si supera su parte, y si no, MFU cede el suyo. Un recorrido solo añade
           bloques leídos una vez, así que entran en MRU y se sacan unos a otros, mientras los bloques de MFU se quedan.
         </p>
@@ -70,7 +70,7 @@ const L = {
           Las partes no son fijas. Cuando un bloque sale de la caché, el ARC libera sus datos pero guarda una pequeña ficha
           de él, su cabecera, en una lista fantasma. Hay una lista fantasma para MRU y otra para MFU. Leer un bloque que
           sigue en una lista fantasma obliga a ir al disco, pero muestra que una lista más grande habría conservado el
-          bloque, así que el ARC mueve un poco de la caché hacia esa lista. Una carga que vuelve una y otra vez a bloques
+          bloque, así que el ARC mueve un poco de la caché hacia esa lista. Una carga de trabajo que vuelve una y otra vez a bloques
           recientes hace crecer MRU, y una que vuelve a bloques más antiguos y leídos a menudo hace crecer MFU.
         </p>
       </div>
@@ -80,19 +80,14 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Leer, recorrer, volver a leer</h2>
       <div class="prose">
         <p>
-          La caché de abajo contiene 16 bloques. Empieza con un conjunto caliente, de H1 a H6, leído dos veces con un
-          segundo de intervalo, así que los seis están en MFU. Cada lista va de su cabeza, el último bloque usado, a su
+          La caché de abajo contiene 16 bloques. Empieza con un conjunto caliente, de H1 a H6. Cada uno de esos bloques se leyó dos veces, con un segundo de intervalo, así que los seis están en MFU. Cada lista va de su cabeza, el último bloque usado, a su
           cola, el bloque que sale primero. Pulsa Lectura siguiente para leer un bloque. El bloque leído aparece
-          recuadrado, y un bloque que haya sacado aparece recuadrado con línea discontinua. Un reloj avanza un segundo
-          antes de cada lectura que haces, o 10 ms si lo eliges.
+          recuadrado, y un bloque que esa lectura haya sacado aparece con un recuadro discontinuo. Un reloj avanza un segundo
+          antes de cada lectura que hagas, o 10 ms si lo eliges.
         </p>
         <p>
-          Empieza con Recorrer 12 bloques nuevos y pulsa Lectura siguiente para cada bloque del recorrido. A partir de S11
-          la caché está llena: cada bloque nuevo saca de MRU el bloque más antiguo del recorrido, y el conjunto caliente se
-          queda en MFU. Después selecciona S2 en la lista MRU fantasma. Se vuelve a leer del disco y pasa a MFU, y el
-          objetivo de MRU sube de 8 a 8,5 bloques. Vuelve a leer algunos bloques del recorrido para pasarlos a MFU, pulsa
-          Lectura siguiente hasta que MFU ceda un bloque caliente y vuelve a leer ese bloque desde la lista MFU fantasma:
-          el objetivo de MRU vuelve a bajar. Por último, elige 10 ms y lee dos veces el mismo bloque nuevo. La segunda
+          Empieza con Recorrer 12 bloques nuevos y pulsa Lectura siguiente para cada bloque del recorrido. Después de S10 la caché está llena. A partir de S11, cada bloque nuevo saca de MRU el bloque más antiguo del recorrido, y el conjunto caliente se
+          queda en MFU. Después selecciona S2 en la lista MRU fantasma. Se vuelve a leer del disco y pasa a MFU. El objetivo de MRU sube de 8 a 8,5 bloques, y MRU, que sigue por encima, saca S3. Después vuelve a leer S12, S11 y S10, que pasan a MFU, y pulsa Lectura siguiente una vez más: el bloque nuevo N1 hace que MFU ceda H1. Vuelve a leer H1 desde la lista MFU fantasma, y el objetivo de MRU baja otra vez a 8 bloques. Por último, elige 10 ms, pulsa Lectura siguiente y luego selecciona el bloque nuevo en MRU para leerlo otra vez. La segunda
           lectura llega demasiado pronto para contar como un segundo uso, así que el bloque se queda en MRU.
         </p>
       </div>
@@ -109,8 +104,7 @@ const L = {
         <h3>Leído una vez, leído dos veces</h3>
         <p class="prose">
           Una lectura que encuentra su bloque en MRU pasa por <code>arc_access</code>. Si han pasado más de unos 62 ms
-          desde la última lectura contada del bloque, el bloque pasa a MFU. Las lecturas más seguidas cuentan como un solo
-          uso, así que un programa que lee el mismo bloque varias veces de golpe no lo hace parecer popular.
+          desde la última lectura contada del bloque, el bloque pasa a MFU. Las lecturas más próximas en el tiempo cuentan como un solo uso, así que un programa que lee el mismo bloque varias veces de golpe no lo hace parecer popular.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>arc_access</code>, un acierto en MRU, arc.c</Fragment>
@@ -141,7 +135,7 @@ const L = {
         <p class="prose">
           Cuando la caché supera su tamaño objetivo, <code>arc_c</code>, se ejecuta una pasada de expulsión en
           <code>arc_evict</code>. El objetivo de MRU es una fracción de la caché, <code>arc_pd</code>. MRU solo cede bloques
-          de su cola mientras supera ese objetivo, y solo tantos como la caché se pasa. MFU cede el resto. Así es como un
+          de su cola mientras supera ese objetivo, y solo tantos como bloques le sobran a la caché. MFU cede el resto. Así es como un
           recorrido se queda en MRU: cada bloque nuevo del recorrido deja la caché un bloque por encima, y MRU, que supera
           su objetivo, cede su propio bloque más antiguo.
         </p>
@@ -203,8 +197,7 @@ const L = {
         <h3>Cuántos fantasmas conservar</h3>
         <p class="prose">
           Al final de la misma pasada, cada lista fantasma se recorta. Una lista fantasma tan grande como toda la caché
-          recordaría lecturas demasiado antiguas, así que el código limita cada una a la mitad de lo que contienen las otras
-          listas. Una cabecera recortada de una lista fantasma se destruye. Volver a leer ese bloque es, para el ARC, leer
+          recordaría lecturas demasiado antiguas, así que el código limita cada una a la mitad de las otras listas. En la figura es la mitad de MFU para la lista MRU fantasma, y la mitad de MRU para la lista MFU fantasma. Una cabecera recortada de una lista fantasma se destruye. Volver a leer ese bloque es, para el ARC, leer
           un bloque nuevo, sin acierto fantasma.
         </p>
         <SourceNote lang={lang}>
@@ -293,9 +286,8 @@ const L = {
       <div class="step">
         <h3>Un paso pequeño cada vez</h3>
         <p class="prose">
-          <code>arc_evict_adj</code> mueve una parte en aproximadamente los bytes de los aciertos divididos por el tamaño de
-          las listas fantasma, y nunca más de 1/32 de una vez, más o menos. En la figura, un acierto fantasma de 128 KiB,
-          frente a listas fantasma de 8 bloques, alcanza ese límite: <code>arc_pd</code> pasa del 50 % al 53,125 %, y el
+          <code>arc_evict_adj</code> mueve una parte en aproximadamente los bytes de los aciertos divididos entre los objetivos de las listas fantasma. El paso nunca supera 1/32, aproximadamente. En la figura, un acierto fantasma de 128 KiB,
+          frente a objetivos fantasma de 8 bloques en total, alcanza ese límite: <code>arc_pd</code> pasa del 50 % al 53,125 %, y el
           objetivo de MRU de 8 a 8,5 bloques.
         </p>
         <SourceNote lang={lang}>

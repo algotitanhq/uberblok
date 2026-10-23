@@ -75,7 +75,7 @@ const S0 = {
     ePass: "The cache is over its {c} blocks: an eviction pass.",
     eAdjSmall: "The ghost lists have no target size yet, so MRU’s share stays at {pd}.",
     eAdjNone: "No ghost hit since the last pass: MRU’s share stays at {pd}.",
-    eAdjMoved: "Ghost hits since the last pass: {grd} on the MRU ghost list and {gfd} on the MFU ghost list, against ghost lists of {total}. MRU’s share goes from {before} to {after}, and its target from {tb} to {ta}.",
+    eAdjMoved: "Ghost hits since the last pass: {grd} on the MRU ghost list and {gfd} on the MFU ghost list, against ghost-list targets of {total} in all. MRU’s share goes from {before} to {after}, and its target from {tb} to {ta}.",
     eShareOver: "MRU holds {mru}, more than its target of {target}: MRU gives up its oldest block.",
     eShareUnder: "MRU holds {mru}, not more than its target of {target}: MFU gives up its oldest block.",
     eEvictMru: "{id}: pushed out of MRU. Its data is freed, and its header goes to the head of the MRU ghost list.",
@@ -157,7 +157,7 @@ const S0 = {
     ePass: "Le cache dépasse ses {c} blocs : passe d’éviction.",
     eAdjSmall: "Les listes fantômes n’ont pas encore de taille cible : la part de MRU reste à {pd}.",
     eAdjNone: "Aucun succès fantôme depuis la dernière passe : la part de MRU reste à {pd}.",
-    eAdjMoved: "Succès fantômes depuis la dernière passe : {grd} dans la liste MRU fantôme et {gfd} dans la liste MFU fantôme, rapportés à des listes fantômes de {total}. La part de MRU passe de {before} à {after}, et sa cible de {tb} à {ta}.",
+    eAdjMoved: "Succès fantômes depuis la dernière passe : {grd} dans la liste MRU fantôme et {gfd} dans la liste MFU fantôme, rapportés à des cibles fantômes de {total} au total. La part de MRU passe de {before} à {after}, et sa cible de {tb} à {ta}.",
     eShareOver: "MRU tient {mru}, plus que sa cible de {target} : MRU cède son bloc le plus ancien.",
     eShareUnder: "MRU tient {mru}, pas plus que sa cible de {target} : MFU cède son bloc le plus ancien.",
     eEvictMru: "{id} : sorti de MRU. Ses données sont libérées, et son en-tête passe en tête de la liste MRU fantôme.",
@@ -239,7 +239,7 @@ const S0 = {
     ePass: "La caché supera sus {c} bloques: pasada de expulsión.",
     eAdjSmall: "Las listas fantasma aún no tienen tamaño objetivo, así que la parte de MRU se queda en {pd}.",
     eAdjNone: "Ningún acierto fantasma desde la última pasada: la parte de MRU se queda en {pd}.",
-    eAdjMoved: "Aciertos fantasma desde la última pasada: {grd} en la lista MRU fantasma y {gfd} en la lista MFU fantasma, frente a listas fantasma de {total}. La parte de MRU pasa de {before} a {after}, y su objetivo de {tb} a {ta}.",
+    eAdjMoved: "Aciertos fantasma desde la última pasada: {grd} en la lista MRU fantasma y {gfd} en la lista MFU fantasma, frente a objetivos fantasma de {total} en total. La parte de MRU pasa de {before} a {after}, y su objetivo de {tb} a {ta}.",
     eShareOver: "MRU contiene {mru}, más que su objetivo de {target}: MRU cede su bloque más antiguo.",
     eShareUnder: "MRU contiene {mru}, no más que su objetivo de {target}: MFU cede su bloque más antiguo.",
     eEvictMru: "{id}: sale de MRU. Sus datos se liberan, y su cabecera pasa a la cabeza de la lista MRU fantasma.",
@@ -273,9 +273,9 @@ const gapName = `arc-gap-${lang}`;
 
 <figure class="arc" data-arc data-strings={JSON.stringify(S)} aria-label={S.figure}>
   <div class="stepbar" hidden>
-    <button class="btn btn--primary" type="button" data-act="next">{S.next}</button>
+    <button class="btn btn--primary" type="button" data-act="next" aria-describedby={`arc-queue-${lang}`}>{S.next}</button>
     <div class="say">
-      <p class="queue" data-queue>{queueLine(S, [], null, 0, "N1")}</p>
+      <p class="queue" id={`arc-queue-${lang}`} data-queue>{queueLine(S, [], null, 0, "N1")}</p>
       <p class="narration" data-narration aria-live="polite"></p>
     </div>
   </div>
@@ -406,7 +406,10 @@ const gapName = `arc-gap-${lang}`;
             c.animate([{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: "none" }], { duration: 560, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
         }
       }
-      narration.textContent = ids.length === 1 ? narrate(S, ev) : summary(s, S);
+      // Cleared first, so that the same sentence twice is announced twice.
+      narration.textContent = "";
+      const said = ids.length === 1 ? narrate(S, ev) : summary(s, S);
+      requestAnimationFrame(() => (narration.textContent = said));
       const hit = m.hit[m.hit.length - 1];
       requestAnimationFrame(() => show(hit ? boardEl.querySelector(`[data-id="${hit}"]`) : null));
       logEl.replaceChildren();
@@ -423,6 +426,7 @@ const gapName = `arc-gap-${lang}`;
     }
 
     // A scan or the hot set: its first read now, the others one per Next read.
+    // Selecting a block meanwhile ends it (below).
     function start(ids: string[], k: "scan" | "hot") {
       kind = k;
       total = ids.length;
@@ -459,7 +463,13 @@ const gapName = `arc-gap-${lang}`;
         logEl.innerHTML = `<li class="muted">${S.logEmpty}</li>`;
         narration.textContent = "";
         render();
-      } else if (d.id) void act([d.id]);
+      } else if (d.id) {
+        // Selecting a block ends a scan or a hot set under way, so that the reads
+        // of a queue stay 1 ms apart, as in the hand-checked sequence.
+        queue = [];
+        kind = null;
+        void act([d.id]);
+      }
     });
 
     render(NO_MARKS, null);
@@ -498,7 +508,7 @@ const gapName = `arc-gap-${lang}`;
     margin-top: var(--space-1);
   }
   .stepbar[hidden],
-  .js-only[hidden] {
+  .arc-legend li[hidden] {
     display: none;
   }
   .arc-bar {
@@ -871,6 +881,10 @@ const gapName = `arc-gap-${lang}`;
      room, D24.1). The bar is drawn after the board, so its sticky range is the
      figure; it stays first in the DOM, so Tab reaches it first on every screen. */
   @media (max-width: 40rem) {
+    /* A block reached with Tab is not left under the bar. */
+    :global(html:has([data-arc])) {
+      scroll-padding-bottom: 8rem;
+    }
     .arc-log,
     .text-version {
       order: 2;

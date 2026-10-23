@@ -1928,3 +1928,49 @@ opened by find-in-page, one panel per page, print: fixed or documented.
 
 **Debts.** The other rooms and the FR/ES copy of this one keep the old format until the pilot
 is approved. The figures' own "see the code" links stay inside the figures.
+
+## v1.4 (ALG-205): the Hall, the History wing and the Engine room
+
+**What changed.** D21.1 applied page by page (D21.2). The Hall's uberblock section asks "How
+does ZFS find its data after a crash?", answers in three plain paragraphs, says what to try in
+the ring, then shows the code in three Source notes. The ring gains a **Next txg** button: one
+txg per press, the clock stops, and the live line says which slot the txg takes (`txg mod
+slots`) and that the previous uberblock stays intact; it works under reduced motion and without
+WebGL, where the clock never runs. History and Engine room take a question as their `h1`
+("Where does ZFS come from?", "How was this museum made?") with the catalogue title as the
+kicker; the History timeline keeps its 40 numbered notes (no Source notes, D21.2). After a
+Hacker News reader got lost at "Map of the visit", the wayfinding labels are plain: **All
+rooms** (Toutes les salles, Todas las salas) in the Hall, the room navigation and the footer,
+**Contents** for the footer group, "This is the last room." at the end of the visit, and an
+All rooms link on the Hall's first screen. EN, FR and ES alike.
+
+**Measures** (built pages, `<main>`; FR and ES equal to EN on every line):
+
+| Page | GitHub links, `main` → branch | of them in the prose | Code excerpts | Lines of code | Source citations |
+|---|---|---|---|---|---|
+| Hall | 13 → 12 | 13 → 3 | 0 → 3 | 0 → 15 | 7 → 7 |
+| History wing | 12 → 12 | 12 → 12 | 0 | 0 | 40 → 40 |
+| Engine room | 1 → 1 | 1 → 1 | 0 | 0 | 0 |
+
+The three Hall links left outside the notes are the caption of Fig. 1 (two) and the Dedication's
+`AUTHORS` note; the History links are its sources, not code (D21.2).
+
+**Proof.** `npm test` 240 pass; `npm run build` (astro check 0 errors, FR typography 14 files
+0 failures); `check-permalinks` (ANALYSIS.md 123 excerpts, built site 2430 references, 0
+failures), `check-sources` (43 entries, 156 references), `check-csp` (44 pages), `check-plate`:
+all pass. Because the labels in `src/lib/ui.ts` show on every page, the full suites ran on the
+preview: `scripts/audit.mjs` 42 pages, 0 problems (axe WCAG 2.2 AA in both themes, keyboard,
+no sideways scroll at 1440/390/320, reduced motion); `scripts/verify.mjs` 457 captures, 0
+console errors, with a new check that Next txg is the Tab stop after Pause and that Enter
+commits exactly one txg and announces its slot.
+
+**Reviews.** `technical-writer` on the three pages in EN, FR and ES against the punchy rule and
+D21.1: no punchy-rule breach; fixed three claims sharper than the code (a 512-byte slot is two
+sectors, not one; not every room has a figure and code; `ub_guid_sum` sits between the txg and
+the timestamp), the txg gloss that read as a third field, a "Press Pause" instruction for a
+button hidden under reduced motion, French units without a no-break space and a repeated
+History sentence. `code-reviewer` on the diff: nothing blocking; fixed the same Pause wording, a
+sentence the Engine room repeated after `RoomNav`, the hard-coded release name and three
+`ANALYSIS.md` ranges (comment end L1781, outer label loop L1577, the MMP tiebreak L1506-L1527).
+
+**Debts.** None found outside the issue.

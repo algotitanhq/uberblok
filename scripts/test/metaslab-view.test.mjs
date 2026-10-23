@@ -16,7 +16,7 @@ register(
       }`,
     ),
 );
-const { eventLine, bits, tapeMeta, summary, describe, changes } = await import("../../src/lib/metaslab-view.ts");
+const { eventLine, bits, tape, tapeMeta, summary, describe, changes, entryRange } = await import("../../src/lib/metaslab-view.ts");
 const { MS_STRINGS } = await import("../../src/lib/metaslab-strings.ts");
 const { fr } = await import("../../src/lib/fr.ts");
 const { opening, clone, write, del, sync, load, churn, condenseNow, MIB, MS_START, BLOCK, SM_ALLOC, SM_FREE } = await import("../../src/lib/metaslab.ts");
@@ -204,4 +204,35 @@ test("changes: a load changes nothing; a condense outlines the whole new map", (
   })((s) => condenseNow(s));
   assert.equal(k.c.fresh, 0);
   assert.ok(k.s.tape[0].condense);
+});
+
+test("the selected entry's range on the bar starts where its bits say, and debug words have none", () => {
+  const s = opening();
+  write(s, 160 * MIB);
+  sync(s);
+  const S = strings("en");
+  for (let i = 0; i < s.tape.length; i++) {
+    const e = s.tape[i];
+    const r = entryRange(s, i);
+    if (e.kind === "debug") assert.equal(r, null);
+    else {
+      assert.equal(r[0], MS_START + e.offset * 4096);
+      assert.match(text(bits(s, S, i)), new RegExp(`vdev offset 0x${r[0].toString(16).toUpperCase()}`));
+    }
+  }
+  assert.equal(entryRange(s, s.tape.length + 3), null);
+  assert.equal(entryRange(s, null), null);
+});
+
+test("the words an action wrote are one outlined run on the tape, and none without a change", () => {
+  const S = strings("en");
+  const s = opening();
+  const n = s.tape.length;
+  write(s, 160 * MIB);
+  sync(s);
+  const html = tape(s, S, true, null, n);
+  assert.equal(html.match(/class="chgrun"/g)?.length, 1);
+  const run = html.slice(html.indexOf('class="chgrun"'));
+  for (let i = 0; i < s.tape.length; i++) assert.equal(run.includes(`data-e="${i}"`), i >= n, `word ${i}`);
+  assert.doesNotMatch(tape(s, S, true, null, null), /chgrun/);
 });

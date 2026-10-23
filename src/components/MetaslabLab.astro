@@ -14,7 +14,7 @@ import { UI } from "../lib/ui";
 import { fr } from "../lib/fr";
 import { opening } from "../lib/metaslab";
 import { MS_STRINGS } from "../lib/metaslab-strings";
-import { vdev, bar, legend, trees, files, tape, tapeMeta, bits, check, describe, summary, type MsStrings } from "../lib/metaslab-view";
+import { vdev, bar, legend, trees, files, tape, tapeMeta, bits, check, describe, summary, entryRange, type MsStrings } from "../lib/metaslab-view";
 
 interface Props {
   lang: Lang;
@@ -57,7 +57,7 @@ const sizes = [4, 32, 160];
 
   <div class="msl-ms">
     <p class="cap" aria-hidden="true">{S.msLabel}</p>
-    <div data-ms set:html={bar(s0, S)} />
+    <div data-ms set:html={bar(s0, S, [], entryRange(s0, sel0))} />
     <Fragment set:html={legend(S)} />
   </div>
 
@@ -94,7 +94,7 @@ const sizes = [4, 32, 160];
 <script>
   import { strings, wait, reducedMotion, fill } from "../lib/svg";
   import { opening, write, del, sync, load, churn, condenseNow, replay, clone, MIB, type Ms, type Ev } from "../lib/metaslab";
-  import { vdev, bar, trees, files, tape, tapeMeta, bits, check, describe, summary, eventLine, eventClass, shownEntries, changes, NO_CHANGES, type Changes, type MsStrings } from "../lib/metaslab-view";
+  import { vdev, bar, trees, files, tape, tapeMeta, bits, check, describe, summary, eventLine, eventClass, shownEntries, changes, entryRange, NO_CHANGES, type Changes, type MsStrings } from "../lib/metaslab-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-msl]")) {
     const S = strings<MsStrings>(root);
@@ -117,7 +117,7 @@ const sizes = [4, 32, 160];
 
     function render(focusKey: string | null = keyOf(document.activeElement)) {
       q("[data-vdev]").innerHTML = vdev(s, S);
-      q("[data-ms]").innerHTML = bar(s, S, chg.segs);
+      q("[data-ms]").innerHTML = bar(s, S, chg.segs, entryRange(s, sel));
       q("[data-trees]").innerHTML = trees(s, S, chg.trees);
       q("[data-files]").innerHTML = files(s, S, true, chg.files);
       q("[data-tapemeta]").textContent = tapeMeta(s, S);
@@ -223,6 +223,7 @@ const sizes = [4, 32, 160];
       } else if (d.del) act(() => del(s, d.del!));
       else if (d.e) {
         sel = Number(d.e);
+        q("[data-ms]").innerHTML = bar(s, S, chg.segs, entryRange(s, sel));
         q("[data-tape]").innerHTML = tape(s, S, true, sel, chg.fresh);
         q("[data-bits]").innerHTML = bits(s, S, sel);
         // The one live region says what the selected entry's bits mean.
@@ -341,9 +342,14 @@ const sizes = [4, 32, 160];
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--fg);
+    background: var(--surface);
+    padding: 0 3px;
+    border-radius: 2px;
+    line-height: 1.3;
   }
   .msl-ms :global(.ticks) {
     position: relative;
+    margin-top: 8px;
     height: 1.4rem;
     border-top: 0;
   }
@@ -373,8 +379,9 @@ const sizes = [4, 32, 160];
     border-top: 9px solid var(--fg);
     transition: left var(--dur-3) var(--ease);
   }
+  /* --fg-faint: 4.3:1 against the free fill (--surface-2) in both themes (WCAG 1.4.11 asks 3:1). */
   .msl-ms :global(.used) {
-    fill: var(--line-strong);
+    fill: var(--fg-faint);
   }
   .msl-ms :global(.free) {
     fill: var(--surface-2);
@@ -436,7 +443,18 @@ const sizes = [4, 32, 160];
     border: 1px solid var(--line-strong);
   }
   .msl-ms :global(.sw.used) {
-    background: var(--line-strong);
+    background: var(--fg-faint);
+  }
+  /* Just under the bar, above the tick labels. */
+  .msl-ms :global(.flabels .selr) {
+    position: absolute;
+    top: calc(100% + 2px);
+    height: 6px;
+    background: var(--fg);
+  }
+  .msl-ms :global(.sw.selr) {
+    height: 0.3rem;
+    background: var(--fg);
   }
   .msl-ms :global(.sw.allocating) {
     background: var(--accent);
@@ -496,8 +514,8 @@ const sizes = [4, 32, 160];
     font-variant-numeric: tabular-nums;
   }
   .panel :global(.files li) {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-1) var(--space-2);
     min-height: 44px;
@@ -519,7 +537,6 @@ const sizes = [4, 32, 160];
   }
   .panel :global(.fmeta) {
     color: var(--fg-muted);
-    flex: 1 1 12rem;
   }
   .panel :global(.btn--small) {
     min-height: 44px;
@@ -630,18 +647,22 @@ const sizes = [4, 32, 160];
     color: var(--bg);
   }
   /* What the last action changed: a dashed ink outline (focus rings are solid), static, so the same under reduced motion. */
-  .tape :global(.tc.chg),
+  /* Rows are outlined inside their own box, so that two changed neighbours do not draw double lines. */
   .panel :global(li.chg) {
     outline: 2px dashed var(--fg);
-    outline-offset: 2px;
-  }
-  /* The keyboard focus ring stays visible on an outlined cell. */
-  .tape :global(.tc.chg:focus-visible) {
-    outline: 3px solid var(--focus);
-    outline-offset: 3px;
-  }
-  .panel :global(.trees li.chg) {
+    outline-offset: -2px;
     border-radius: 2px;
+  }
+  .panel :global(.trees li),
+  .panel :global(.files li) {
+    padding: 3px 6px;
+  }
+  /* The words the last action wrote: one box around the run, whatever its length. */
+  .tape :global(.chgrun) {
+    min-width: 0;
+    outline: 2px dashed var(--fg);
+    outline-offset: 2px;
+    border-radius: 3px;
   }
   .msl-ms :global(.chg) {
     fill: none;
@@ -734,6 +755,9 @@ const sizes = [4, 32, 160];
     display: inline-block;
     min-width: 2.6em;
     font-weight: 600;
+  }
+  .check :global(.verdict .yn) {
+    min-width: 0;
   }
   .check :global(.yn.yes) {
     color: var(--ok);

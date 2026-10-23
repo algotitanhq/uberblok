@@ -97,13 +97,13 @@ const L = {
           bajo los botones dice qué pasó, y todo lo que la acción cambió queda recuadrado.
         </p>
         <p>
-          Borra A. Su rango se vuelve rojo: está liberado en el grupo de transacciones abierto, pero sigue asignado.
-          Sincroniza: una entrada FREE se une a la cinta y A se vuelve verde, en espera. Dos sincronizaciones más lo
-          dejan libre. Luego escribe 160 MiB. Sus bloques de 128 KiB quedan después de B, no en el hueco de A, porque
-          el asignador busca hacia delante desde un cursor. Un rango tan largo ocupa una entrada de dos palabras en la
-          cinta. Cargar reconstruye el árbol libre solo a partir de la cinta y obtiene el mismo árbol. Condensar se
-          rechaza mientras el space map es corto; reescribe db, un archivo de 64 MiB cuyos bloques se reescriben al
-          azar, hasta que la prueba diga que sí y luego condensa.
+          Borra A. Su rango se vuelve rojo: está liberado en el grupo de transacciones abierto, pero sigue asignado. Sincroniza: una entrada FREE se une a la cinta y A se vuelve verde, en espera. Dos sincronizaciones más lo dejan libre.
+        </p>
+        <p>
+          Luego escribe 160 MiB. Sus bloques de 128 KiB quedan después de B, no en el hueco de A, porque el asignador busca hacia delante desde un cursor. Un rango tan largo ocupa una entrada de dos palabras en la cinta. Cargar reconstruye el árbol libre solo a partir de la cinta y obtiene el mismo árbol.
+        </p>
+        <p>
+          Condensar se rechaza mientras el space map es corto. Reescribe db una vez: db es un archivo de 64 MiB cuyos bloques se reescriben al azar, y la reescritura se detiene sola cuando la prueba dice que sí. Luego condensa.
         </p>
       </div>
       <MetaslabLab lang={lang} />

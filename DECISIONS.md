@@ -2691,3 +2691,27 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   review suggested: 200 is the target, but a vdev larger than 200 × 16 GiB gets more, so the
   answer keeps "a few hundred". Animating the outline: an animation cannot be read at the
   reader's pace or under reduced motion.
+
+### D27.2 The metaslabs figure after the Design/UX review: contrast, one outline per run, the selected range
+
+- **Context.** Design/UX on PR #14 at 0e331ca: three SHOULD, five NIT
+  ([ALG-197](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-197), document `design-review`).
+- **Allocated fill.** `--fg-faint` instead of `--line-strong`: 4.3:1 against the free fill
+  (`--surface-2`) in both themes, over the 3:1 of WCAG 1.4.11 (it was 1.7:1). In the light theme no
+  fill reaches 3:1 against the free fill and 4.5:1 under `--fg` text, so the file labels on the bar
+  sit on a small `--surface` chip and keep their contrast on any fill.
+- **One outline per run.** Changed ranges of the metaslab closer than 2.5 % of its size (12.8 MiB)
+  merge into one dashed box; a rewrite of db touched hundreds of blocks and drew hundreds of boxes.
+  The words an action wrote are always the end of the tape, so they are grouped in one nested list
+  item outlined once (the whole tape after a condense). Rows of "In memory" and "Files" draw their
+  outline inside the row, so two changed neighbours do not draw double lines. A single change looks
+  as before.
+- **The selected entry on the bar.** A 6 px ink strip just under the bar marks the range of the
+  selected tape entry, at least 10 px wide, so B (4 MiB, 3 px on a phone) shows when its entry is
+  selected at the opening. The key gains "range of the selected tape entry". Rejected: a label
+  above narrow extents with a tick, which would still leave the reader to match the tape to the bar.
+- **Smaller fixes.** The dynamic-fit cursor is clamped inside the bar at 0 and 512 MiB; the verdict's
+  yes/no has no fixed width; file rows are a grid, so Delete stays on the right in FR on a phone;
+  the offset field is named in the reader's language (« décalage », « desplazamiento »), as the
+  sentence under it; the "what to try" text of section 1 is three short paragraphs, and says that
+  rewrite db stops by itself when the test says yes.

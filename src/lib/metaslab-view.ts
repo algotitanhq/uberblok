@@ -102,7 +102,8 @@ export function changes(a: Ms, b: Ms): Changes {
   const files = b.files.filter((f) => !same(f, before.get(f.id))).map((f) => f.id);
   const rewritten = b.length < a.length || (a.tape.length > 0 && b.tape[0] !== undefined && !same(a.tape[0].words.map(String), b.tape[0].words.map(String)));
   const fresh = rewritten ? 0 : b.tape.length > a.tape.length ? a.tape.length : null;
-  return { segs: norm(segs, MS_SIZE / 400), trees, files, fresh };
+  // Changed ranges closer than 2.5 % of the metaslab are one run, outlined once (a rewrite touches hundreds of blocks).
+  return { segs: norm(segs, MS_SIZE / 40), trees, files, fresh };
 }
 
 // ---------- The vdev and the metaslab ----------
@@ -124,8 +125,16 @@ const rects = (rt: Seg[], cls: string, min = 0) =>
     return `<rect class="${cls}" x="${X(a).toFixed(2)}" y="0" width="${w.toFixed(2)}" height="40"/>`;
   }).join("");
 
-/** The zoomed metaslab: free tree, synced allocations, this txg's allocations and frees, deferred frees, the cursor. */
-export function bar(s: Ms, S: MsStrings, chg: Seg[] = []): string {
+/** The range of the metaslab a tape entry describes, or null for a debug word. */
+export function entryRange(s: Ms, sel: number | null): Seg | null {
+  const e = sel === null ? undefined : s.tape[sel];
+  if (!e || e.kind === "debug") return null;
+  const a = MS_START + e.offset * 2 ** SM_SHIFT;
+  return [a, a + e.run * 2 ** SM_SHIFT];
+}
+
+/** The zoomed metaslab: free tree, synced allocations, this txg's allocations and frees, deferred frees, the cursor, and the range of the selected tape entry. */
+export function bar(s: Ms, S: MsStrings, chg: Seg[] = [], sel: Seg | null = null): string {
   const live = s.files.filter((f) => !f.deleting);
   const pc = (b: number) => (X(b) / 10).toFixed(3);
   const labels = live
@@ -138,7 +147,10 @@ export function bar(s: Ms, S: MsStrings, chg: Seg[] = []): string {
   const ticks = [0, 128, 256, 384, 512]
     .map((m) => `<span class="tickl${m === 0 ? " first" : m === 512 ? " last" : ""}" style="left:${((m / 512) * 100).toFixed(3)}%">${m === 0 ? "0" : fill(S.mibShort, { n: m })}</span>`)
     .join("");
-  const cur = s.cursor ? `<span class="cursor" style="left:${pc(s.cursor)}%"></span>` : `<span class="cursor" style="left:0%"></span>`;
+  // Clamped so that the whole triangle stays inside the bar at 0 and at 512 MiB.
+  const cur = `<span class="cursor" style="left:clamp(5px, ${s.cursor ? pc(s.cursor) : "0"}%, calc(100% - 5px))"></span>`;
+  // At least 10 px wide, so that a 4 MiB entry still shows on a phone.
+  const selr = sel ? `<span class="selr" style="left:min(${pc(sel[0])}%, calc(100% - 10px));width:max(10px, ${((X(sel[1]) - X(sel[0])) / 10).toFixed(3)}%)"></span>` : "";
   return `<div class="msbox">${cur}<svg class="ms-svg" viewBox="0 0 1000 40" preserveAspectRatio="none" aria-hidden="true" focusable="false">
 <defs><pattern id="hatch-${S.lang}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" class="hbg"/><line x1="0" y1="0" x2="0" y2="6" class="hl"/></pattern></defs>
 <rect class="used" x="0" y="0" width="1000" height="40"/>
@@ -149,12 +161,12 @@ ${deferred(s).map((d) => rects(d.segs, "deferred", 1.2)).join("")}
 ${live.flatMap((f) => extents(f.blocks)).map(([a, b]) => `<rect class="fext" x="${X(a).toFixed(2)}" y="0" width="${(X(b) - X(a)).toFixed(2)}" height="40"/>`).join("")}
 <rect class="frame" x="0" y="0" width="1000" height="40"/>
 ${chg.map(([a, b]) => { const w = Math.max(X(b) - X(a), 4); const x = Math.min(X(a), 1000 - w); return `<rect class="chg" x="${x.toFixed(2)}" y="1" width="${w.toFixed(2)}" height="38"/>`; }).join("")}
-</svg><div class="flabels" aria-hidden="true">${labels}</div><div class="ticks" aria-hidden="true">${ticks}</div></div>`;
+</svg><div class="flabels" aria-hidden="true">${labels}${selr}</div><div class="ticks" aria-hidden="true">${ticks}</div></div>`;
 }
 
 export function legend(S: MsStrings): string {
   const k = (cls: string, t: string) => `<li><span class="sw ${cls}"></span>${t}</li>`;
-  return `<ul class="ms-legend">${k("free", S.lgFree)}${k("used", S.lgUsed)}${k("allocating", S.lgAllocating)}${k("freeing", S.lgFreeing)}${k("deferred", S.lgDeferred)}<li><span class="sw cur"></span>${S.lgCursor}</li>${k("chg", S.lgChanged)}</ul>`;
+  return `<ul class="ms-legend">${k("free", S.lgFree)}${k("used", S.lgUsed)}${k("allocating", S.lgAllocating)}${k("freeing", S.lgFreeing)}${k("deferred", S.lgDeferred)}<li><span class="sw cur"></span>${S.lgCursor}</li>${k("selr", S.lgSelected)}${k("chg", S.lgChanged)}</ul>`;
 }
 
 export function trees(s: Ms, S: MsStrings, chg: TreeKey[] = []): string {
@@ -207,18 +219,30 @@ export function shownEntries(s: Ms): number[] {
 export function tape(s: Ms, S: MsStrings, live: boolean, sel: number | null, fresh: number | null = null): string {
   if (!s.tape.length) return `<p class="none">${S.tapeEmpty}</p>`;
   const idx = shownEntries(s);
-  const cells = idx.map((i, j) => {
+  const cells: string[] = [];
+  const run: string[] = [];
+  idx.forEach((i, j) => {
     const e = s.tape[i];
-    const cls = `tc ${e.kind}${e.kind === "debug" ? (e.txg ? "" : " pad") : e.type === SM_ALLOC ? " alloc" : " free"}${e.condense ? " cond" : ""}${i === sel ? " sel" : ""}${fresh !== null && i >= fresh ? " chg" : ""}`;
+    const cls = `tc ${e.kind}${e.kind === "debug" ? (e.txg ? "" : " pad") : e.type === SM_ALLOC ? " alloc" : " free"}${e.condense ? " cond" : ""}${i === sel ? " sel" : ""}`;
     const txt =
       e.kind === "debug"
         ? `<span class="t1">${e.txg ? `txg ${e.txg}` : S.padShort}</span>${e.txg ? ` <span class="t2">${typeName(e.type)}</span>` : ""}`
         : `<span class="t1">${typeName(e.type)}</span> <span class="t2">${bytes(S, e.run * 2 ** SM_SHIFT)}</span>`;
     const gap = j > 0 && i !== idx[j - 1] + 1 ? `<li class="earlier">${fill(S.skipped, { n: words(S, s.tape[i].at - s.tape[idx[j - 1]].at - s.tape[idx[j - 1]].words.length) })}</li>` : "";
-    return gap + (live
+    const cell = live
       ? `<li><button type="button" class="${cls}" data-e="${i}" data-w="${e.words.map(hex).join(" ")}" aria-pressed="${i === sel}" aria-label="${entryLabel(S, e)}">${txt}</button></li>`
-      : `<li><span class="${cls}" data-e="${i}" data-w="${e.words.map(hex).join(" ")}">${txt}</span></li>`);
+      : `<li><span class="${cls}" data-e="${i}" data-w="${e.words.map(hex).join(" ")}">${txt}</span></li>`;
+    // The words the last action wrote are always the end of the tape: one outlined run, not one box per word.
+    if (!run.length && fresh !== null && i >= fresh) {
+      // Words hidden in the gap just before are new too when the action wrote from inside it.
+      if (fresh < i) run.push(gap + cell);
+      else {
+        cells.push(gap);
+        run.push(cell);
+      }
+    } else (run.length ? run : cells).push(gap + cell);
   });
+  if (run.length) cells.push(`<li class="chgrun"><ol class="tape-cells">${run.join("")}</ol></li>`);
   return `<ol class="tape-cells">${cells.join("")}</ol>`;
 }
 
@@ -240,7 +264,7 @@ function fields(S: MsStrings, e: Entry, w: bigint, second: boolean): { name: str
   if (e.kind === "one")
     return [
       { name: S.fPrefix, bits: "63", width: 1, value: "0", cls: "pre" },
-      { name: "offset", bits: "62–16", width: 47, value: h(v(16, 47)), cls: "off" },
+      { name: S.fOffset, bits: "62–16", width: 47, value: h(v(16, 47)), cls: "off" },
       { name: "type", bits: "15", width: 1, value: String(v(15, 1)), cls: "typ" },
       { name: S.fRun1, bits: "14–0", width: 15, value: h(v(0, 15)), cls: "run" },
     ];
@@ -253,7 +277,7 @@ function fields(S: MsStrings, e: Entry, w: bigint, second: boolean): { name: str
     ];
   return [
     { name: "type", bits: "63", width: 1, value: String(v(63, 1)), cls: "typ" },
-    { name: "offset", bits: "62–0", width: 63, value: h(v(0, 63)), cls: "off" },
+    { name: S.fOffset, bits: "62–0", width: 63, value: h(v(0, 63)), cls: "off" },
   ];
 }
 

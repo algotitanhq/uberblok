@@ -2243,3 +2243,15 @@ outlines, and the keyboard walk now fails the run on a missing focus ring. All f
 0 mismatches, 48 keyboard stops with visible focus in each language).
 
 **Debts.** None found outside the room.
+
+### Design/UX fixes (ALG-197, second pass)
+
+All eight items of the Design/UX review fixed (D27.2): allocated fill at 4.3:1 against free in both
+themes, labels on a chip; one dashed outline per changed run on the bar, the tape and the rows; the
+"what to try" text in three paragraphs in EN, FR and ES; no gap in "Verdict: no."; the selected
+entry's range marked under the bar; the cursor clamped at 512 MiB; Delete kept on the right in FR
+at 390 px; « décalage » for the FR offset field. `code-reviewer` on the diff: no defect; taken the
+strip under the bar instead of over it, padding on file rows, fresh words hidden in the skipped gap
+counted in the run, two new tests. **Proof.** `npm test` 252 pass, `npm run build` 0 errors,
+`verify-metaslabs.mjs` EN, FR, ES at 390 and 1440 px: 42 captures, 0 console errors, 0 mismatches;
+captures of the bar in the light theme, after a rewrite and of the verdict read by eye.

@@ -92,9 +92,13 @@ const L = {
           and everything the action changed is outlined.
         </p>
         <p>
-          Delete A. Its range turns red: it is freed in the open transaction group but still allocated. Sync, and a
-          FREE entry joins the tape while A turns green, waiting. Two more syncs make it free again. Then write 160 MiB. Its 128 KiB blocks land after B, not in A’s hole, because the allocator searches forward from a cursor. A run that long takes a two-word entry on the tape. Load rebuilds the free tree from the tape alone and finds the same tree.
-          Condense is refused while the map is short; rewrite db, a 64 MiB file whose blocks are rewritten at random, until the test says yes, then condense.
+          Delete A. Its range turns red: it is freed in the open transaction group but still allocated. Sync, and a FREE entry joins the tape while A turns green, waiting. Two more syncs make it free again.
+        </p>
+        <p>
+          Then write 160 MiB. Its 128 KiB blocks land after B, not in A’s hole, because the allocator searches forward from a cursor. A run that long takes a two-word entry on the tape. Load rebuilds the free tree from the tape alone and finds the same tree.
+        </p>
+        <p>
+          Condense is refused while the map is short. Rewrite db once: db is a 64 MiB file whose blocks are rewritten at random, and the rewriting stops by itself when the test says yes. Then condense.
         </p>
       </div>
       <MetaslabLab lang={lang} />

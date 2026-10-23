@@ -2470,6 +2470,43 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   on a 390 px phone, from 7.7). They may run over the front card's top edge, short of the next
   card; a longer one is squeezed with `textLength` rather than made smaller.
 
+## v1.4 transaction groups room (ALG-189)
+
+### D24.1 The TXG room as a question, and a figure where each step outlines what it changed
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)),
+  third room. It had 5 excerpts (148 lines of code) and 43 links to GitHub in each language,
+  34 of them in the prose, plus a "code" link after every event the figure narrated.
+- **Question.** "When does my write reach the disk?" (« Quand mon écriture arrive-t-elle sur le
+  disque ? », « ¿Cuándo llega mi escritura al disco? »). The operator's question; the answer
+  goes from the cost of committing every write to the batch, the five seconds, the commit by
+  the uberblock, and what a power cut loses (and fsync and the ZIL).
+- **Figure.** `TxgPipeline` is improved, not rebuilt; the model (`src/lib/txg.ts`) is unchanged.
+  Each event outlines the one part of the figure it changed: the CPU cell a write joins or
+  leaves, the dirty-data meter, the txg card that closes, drains or is taken, the pass row, the
+  "On disk" line, or the thread row that woke or asked. The outline is static (it fades in only
+  when motion is allowed), so it reads under reduced motion. Each stage has a one-line plain
+  role under its name; a write's dot drops in only when it is new; a busy CPU cell no longer
+  takes the accent border, which is kept for the outline. Next event is the first button. The
+  two starting writes begin 0.3 s apart so that each ends on its own step. The narration and
+  the log are plain and carry no code links (D21.1): the seven Source notes follow the same
+  steps. Without script the text version is shown, as before.
+- **Code.** Seven Source notes, 58 lines, all new short cuts in `ANALYSIS.md` (TXG room, 6 to
+  12), checked against `zfs-2.4.4`. The "three depths" section is gone: its sentence and
+  paragraph repeated the answer, and its detail now lives in the notes.
+- **Rejected.** Narrating with the code names (`tc_count`, `txg_hold_open`): the reader the
+  question speaks to does not know them, and the notes show them. Emitting one release per
+  step inside the model: it changes a tested model to fix what staggering the first two writes
+  fixes.
+- **Phone (design review).** Below 40rem the figure is taller than the screen, so the outline
+  was off screen for most presses. Next event and the narration now sit in a bar that sticks to
+  the bottom of the screen while the figure is in view (`.live` and `.controls` lend no box
+  there, so the bar's sticky range is the whole figure), and after a press the outlined part is
+  scrolled into view above the bar if it is not visible. The other buttons stay where they were;
+  the desktop layout is unchanged. The open txg card keeps its accent tint but takes the neutral
+  border, so an accent frame means only "this changed". Rejected: scrolling alone, which moves
+  Next event away from the thumb.
+
 ## v1.4 tree room (ALG-185)
 
 ### D22.1 The tree room as a question, and a figure that climbs one level per step

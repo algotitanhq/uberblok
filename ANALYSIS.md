@@ -1554,6 +1554,129 @@ Who raises `tx_quiesce_txg_waiting`: the sync thread when it is ready for a txg 
 - "The first such pass is the largest as it encompasses all the modified user data ... Subsequent passes ... consist exclusively of filesystem metadata" — [`module/zfs/txg.c#L86-L90`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L86-L90).
 - `fsync` normally does not wait for a txg: `zfs_fsync` calls `zil_commit` — [`module/zfs/zfs_vnops.c#L117-L120`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zfs_vnops.c#L117-L120) (ZIL room). In unusual cases the ZIL falls back to `txg_wait_synced`: zil.c L2394-L2396, L2493-L2502.
 
+**Short excerpts for the question-first room (v1.4, ALG-189).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 6. `txg_hold_open`, joining the open txg — module/zfs/txg.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L333-L338
+
+```c
+	mutex_enter(&tc->tc_open_lock);
+	txg = tx->tx_open_txg;
+
+	mutex_enter(&tc->tc_lock);
+	tc->tc_count[txg & TXG_MASK]++;
+	mutex_exit(&tc->tc_lock);
+```
+
+L333-L334: the writer takes the `tc_open_lock` of the CPU it runs on, then reads `tx_open_txg`; `txg_quiesce` takes all these locks to close a txg (excerpt 1, L398-L399), so a writer gets either the old txg or the next one, never a txg being closed. L336-L338: it raises the hold count of that CPU for this txg, `tc_count[txg & TXG_MASK]` (`TXG_SIZE` = 4 slots, [txg.h L42-L45](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/txg.h#L42-L45)). The counts are per CPU because a single one "would result in heavy lock contention" ([txg_impl.h L51-L55](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/txg_impl.h#L51-L55)). `dmu_tx_assign` calls it ([dmu_tx.c L1085](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_tx.c#L1085)); `txg_rele_to_sync` lowers the count when the transaction commits and wakes the quiesce thread at 0 ([L372-L375](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L372-L375)).
+
+### 7. `txg_sync_thread`, when to sync — module/zfs/txg.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L542-L553
+
+```c
+		timer = (delta >= timeout ? 0 : timeout - delta);
+		while (!dsl_scan_active(dp->dp_scan) &&
+		    !tx->tx_exiting && timer > 0 &&
+		    tx->tx_synced_txg >= tx->tx_sync_txg_waiting &&
+		    !txg_has_quiesced_to_sync(dp)) {
+			dprintf("waiting; tx_synced=%llu waiting=%llu dp=%p\n",
+			    (u_longlong_t)tx->tx_synced_txg,
+			    (u_longlong_t)tx->tx_sync_txg_waiting, dp);
+			txg_thread_wait(tx, &cpr, &tx->tx_sync_more_cv, timer);
+			delta = ddi_get_lbolt() - start;
+			timer = (delta > timeout ? 0 : timeout - delta);
+		}
+```
+
+Excerpt 4 without the loop's declarations. L542 and L551-L552: `timer` counts from `start`, set when the previous `spa_sync` began ([L601](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L601)). L543-L546: the thread sleeps while no scan is active, the timer has not run out, nobody waits for a txg past the last synced one, and no quiesced txg is waiting. The timeout is `zfs_txg_timeout`, 5 seconds ([L116](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L116)). `tx_sync_txg_waiting` is raised by `txg_wait_synced` ([L714-L717](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L714-L717), what `zpool sync` calls) and by `txg_kick` ([L830-L832](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L830-L832), called by `dsl_pool_dirty_space` past `zfs_dirty_data_sync_percent`, [dsl_pool.c L997-L1002](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_pool.c#L997-L1002)).
+
+### 8. `txg_quiesce`, the next txg opens — module/zfs/txg.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L398-L402
+
+```c
+	for (c = 0; c < max_ncpus; c++)
+		mutex_enter(&tx->tx_cpu[c].tc_open_lock);
+
+	ASSERT(txg == tx->tx_open_txg);
+	tx->tx_open_txg++;
+```
+
+The start of excerpt 1. L398-L399: with every CPU's `tc_open_lock` held, no writer can be inside `txg_hold_open` between its lock and its read of `tx_open_txg`. L402: the open txg number goes up by one. The locks are released right after ([L412-L413](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L412-L413)), so new writers enter the next txg while the old one drains.
+
+### 9. `txg_quiesce`, the drain — module/zfs/txg.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L422-L428
+
+```c
+	for (c = 0; c < max_ncpus; c++) {
+		tx_cpu_t *tc = &tx->tx_cpu[c];
+		mutex_enter(&tc->tc_lock);
+		while (tc->tc_count[g] != 0)
+			cv_wait(&tc->tc_cv[g], &tc->tc_lock);
+		mutex_exit(&tc->tc_lock);
+	}
+```
+
+The end of excerpt 1. For each CPU in turn, the quiesce thread sleeps on `tc_cv[g]` until that CPU's hold count for this txg is 0; `txg_rele_to_sync` broadcasts it when the last hold goes (L374-L375). When the loop ends, no transaction holds the txg: it is quiesced.
+
+### 10. `txg_quiesce_thread`, one txg per state — module/zfs/txg.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L638-L641
+
+```c
+		while (!tx->tx_exiting &&
+		    (tx->tx_open_txg >= tx->tx_quiesce_txg_waiting ||
+		    txg_has_quiesced_to_sync(dp)))
+			txg_thread_wait(tx, &cpr, &tx->tx_quiesce_more_cv, 0);
+```
+
+The wait of excerpt 5. The quiesce thread sleeps while nobody asks for a txg past the open one, or while the txg it quiesced last has not been taken by the sync thread. So at most one txg is quiescing or quiesced. The sync thread asks when it is ready ([L574-L576](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L574-L576)); `txg_wait_open(dp, 0, B_TRUE)` asks too ([L791-L794](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/txg.c#L791-L794)), and at this tag only `dmu_free_long_range_impl` calls it that way ([dmu.c L1096-L1106](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu.c#L1096-L1106)).
+
+### 11. `spa_sync_iterate_to_convergence`, no-op or another pass — module/zfs/spa.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/spa.c#L10749-L10765
+
+```c
+		if (pass == 1 &&
+		    BP_GET_LOGICAL_BIRTH(&spa->spa_uberblock.ub_rootbp) < txg &&
+		    !dmu_objset_is_dirty(mos, txg)) {
+			/*
+			 * Nothing changed on the first pass, therefore this
+			 * TXG is a no-op. Avoid syncing deferred frees, so
+			 * that we can keep this TXG as a no-op.
+			 */
+			ASSERT(txg_list_empty(&dp->dp_dirty_datasets, txg));
+			ASSERT(txg_list_empty(&dp->dp_dirty_dirs, txg));
+			ASSERT(txg_list_empty(&dp->dp_sync_tasks, txg));
+			ASSERT(txg_list_empty(&dp->dp_early_sync_tasks, txg));
+			break;
+		}
+
+		spa_sync_deferred_frees(spa, tx);
+	} while (dmu_objset_is_dirty(mos, txg));
+```
+
+Excerpt 3 without the comment above. L10749-L10761: after pass 1, if the root block pointer was not born in this txg and the MOS is clean, the txg is a no-op and the loop stops. L10764-L10765: otherwise deferred frees are synced and the loop runs another pass as long as the MOS is dirty in this txg.
+
+### 12. `vdev_config_sync`, an unchanged txg writes nothing — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L2071-L2077
+
+```c
+	if (ub->ub_txg < txg) {
+		boolean_t changed = uberblock_update(ub, spa->spa_root_vdev,
+		    txg, spa->spa_mmp.mmp_delay);
+
+		if (!changed && list_is_empty(&spa->spa_config_dirty_list) &&
+		    !spa_multihost(spa))
+			return (0);
+```
+
+`uberblock_update` sets the new uberblock's txg and reports whether its root block pointer was born in this txg ([uberblock.c L74](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/uberblock.c#L74)). If not, no vdev configuration is dirty and multihost protection is off, `vdev_config_sync` returns before the flush and the label writes ([L2085-L2098](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L2085-L2098), tree room excerpt 7): an idle pool goes through a txg every 5 seconds and writes nothing.
+
 ## Room: The vdevs
 
 **Problem.** A pool is mirrors, RAID-Z groups, dRAID, log devices, special devices, spares and replacements in progress, nested arbitrarily, and the I/O path must not grow one special case per combination. ZFS represents all of it as one tree of `vdev_t` nodes, each with a table of operations, so a write to "the pool" is a walk down that tree in which each node decides how to fan out to its children. Separately, the allocator needs to know which top-level vdevs may receive which kind of block (ZIL, metadata, dedup tables, small blocks, ordinary data).

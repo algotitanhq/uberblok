@@ -1,16 +1,37 @@
 // HTML for the ARC room's figure, built from an Arc of src/lib/arc.ts. Plain
 // strings, no DOM: the page renders the opening state at build time (readable
 // without JavaScript) and the script renders every later state with the same
-// functions.
+// functions. The narration and the log are plain and carry no code links: the
+// Source notes of the room show the code (DECISIONS.md D21.1, D25.1).
 import { decimal } from "./l10n";
-import { BLOCK, CAPACITY, ARC_C, ARC_MINTIME, mruTarget, pct, type Arc, type Ev, type St } from "./arc";
+import { BLOCK, CAPACITY, ARC_MINTIME, mruTarget, pct, type Arc, type Ev, type St } from "./arc";
 
-export type ArcStrings = Record<string, string> & { refs: Record<string, string>; lang: string };
+export type ArcStrings = Record<string, string> & { lang: string };
+
+/** What one read changed, outlined in the figure: the block read, the blocks it pushed out, the balance. */
+export interface Marks {
+  hit: string[];
+  out: string[];
+  balance: boolean;
+}
+export const NO_MARKS: Marks = { hit: [], out: [], balance: false };
+
+/** The last event on a block wins: a block read, then pushed out within one Read the rest, is "out". */
+export function marks(ev: Ev[]): Marks {
+  const last = new Map<string, "hit" | "out">();
+  let moved = false;
+  for (const e of ev) {
+    if (e.k === "new" || e.k === "ghost" || e.k === "hit") last.set(e.id, "hit");
+    else if (e.k === "evict" || e.k === "forget") last.set(e.id, "out");
+    else if (e.k === "pass" && e.pd !== e.pdBefore) moved = true;
+  }
+  const of = (k: "hit" | "out") => [...last].filter(([, v]) => v === k).map(([id]) => id);
+  return { hit: of("hit"), out: of("out"), balance: moved };
+}
 
 const fill = (tpl: string, vars: Record<string, string | number>) =>
   tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
 const code = (s: string | number) => `<code>${s}</code>`;
-const see = (S: ArcStrings, r: string) => ` <a class="see" href="${S.refs[r]}">${S.see}</a>`;
 
 /** A number with at most `d` decimals, in the page's language. */
 export function num(S: ArcStrings, x: number, d = 2): string {
@@ -26,6 +47,7 @@ const kib = (S: ArcStrings, bytes: number) => fill(S.kib, { n: num(S, bytes / 10
 export const pdText = (S: ArcStrings, pd: bigint) => fill(S.percent, { n: num(S, pct(pd), 1) });
 
 const NAME: Record<St, string> = { mru: "nMru", mfu: "nMfu", mru_ghost: "nMruGhost", mfu_ghost: "nMfuGhost" };
+const ROLE: Record<St, string> = { mru: "rMru", mfu: "rMfu", mru_ghost: "rMruGhost", mfu_ghost: "rMfuGhost" };
 const ORDER: St[] = ["mru_ghost", "mru", "mfu", "mfu_ghost"];
 
 function chip(S: ArcStrings, id: string, st: St | "gone", live: boolean): string {
@@ -35,17 +57,19 @@ function chip(S: ArcStrings, id: string, st: St | "gone", live: boolean): string
   return `<button type="button" class="${cls}" data-id="${id}" aria-label="${fill(S.aRead, { id, where })}">${id}</button>`;
 }
 
-function listBox(s: Arc, S: ArcStrings, st: St, live: boolean, fresh: Set<string>): string {
+const mark = (m: Marks, id: string) => (m.hit.includes(id) ? ' class="hit"' : m.out.includes(id) ? ' class="out"' : "");
+
+function listBox(s: Arc, S: ArcStrings, st: St, live: boolean, m: Marks): string {
   const ids = s.lists[st];
   const ghost = st.endsWith("ghost");
   const meta = ghost
     ? fill(S.ghostMeta, { n: plural(S, ids.length, "hdr1", "hdrN"), cap: nblocks(S, st === "mru_ghost" ? s.gs.mru : s.gs.mfu), hits: kib(S, st === "mru_ghost" ? s.hits.mru : s.hits.mfu) })
     : fill(S.liveMeta, { n: plural(S, ids.length, "blk1", "blkN") });
   const chips = ids.length
-    ? `<ol class="chips">${ids.map((id) => `<li${fresh.has(id) ? ' class="fresh"' : ""}>${chip(S, id, st, live)}</li>`).join("")}</ol>`
+    ? `<ol class="chips">${ids.map((id) => `<li${mark(m, id)}>${chip(S, id, st, live)}</li>`).join("")}</ol>`
     : `<p class="none">${S.none}</p>`;
   return `<section class="list ${st}" data-st="${st}" aria-label="${S[NAME[st]]}">
-  <header><h3>${S[NAME[st]]}</h3><p class="meta">${meta}</p></header>
+  <header><h3>${S[NAME[st]]}</h3><p class="role">${S[ROLE[st]]}</p><p class="meta">${meta}</p></header>
   ${chips}
   ${ids.length > 1 ? `<p class="ends" aria-hidden="true"><span>${S.head}</span><span>${S.tail}</span></p>` : ""}
 </section>`;
@@ -67,13 +91,12 @@ export function balance(s: Arc, S: ArcStrings): string {
   return fill(S.balance, { pd: pdText(S, s.pd), target: nblocks(S, mruTarget(s.pd)), c: CAPACITY });
 }
 
-export function board(s: Arc, S: ArcStrings, live: boolean, fresh: string[] = []): string {
-  const f = new Set(fresh);
+export function board(s: Arc, S: ArcStrings, live: boolean, m: Marks = NO_MARKS): string {
   const gone = s.forgotten.length
-    ? `<ol class="chips">${s.forgotten.map((id) => `<li>${chip(S, id, "gone", live)}</li>`).join("")}</ol>`
+    ? `<ol class="chips">${s.forgotten.map((id) => `<li${mark(m, id)}>${chip(S, id, "gone", live)}</li>`).join("")}</ol>`
     : `<p class="none">${S.none}</p>`;
-  return `<div class="lists">${ORDER.map((st) => listBox(s, S, st, live, f)).join("")}</div>
-<section class="list gone" aria-label="${S.nGone}"><header><h3>${S.nGone}</h3><p class="meta">${S.goneMeta}</p></header>${gone}</section>`;
+  return `<div class="lists">${ORDER.map((st) => listBox(s, S, st, live, m)).join("")}</div>
+<section class="list gone" aria-label="${S.nGone}"><header><h3>${S.nGone}</h3><p class="role">${S.rGone}</p></header>${gone}</section>`;
 }
 
 export function clock(s: Arc, S: ArcStrings): string {
@@ -101,16 +124,16 @@ export function describe(s: Arc, S: ArcStrings): string {
 <p>${balance(s, S)} ${fill(S.tHits, { mru: kib(S, s.hits.mru), mfu: kib(S, s.hits.mfu) })}</p>`;
 }
 
-/** One line of the log, with a link to its code. */
+/** One line of the log, plain. */
 export function eventLine(S: ArcStrings, e: Ev): string {
   switch (e.k) {
     case "new":
-      return fill(e.forgotten ? S.eNewForgotten : S.eNew, { id: code(e.id) }) + see(S, "anon");
+      return fill(e.forgotten ? S.eNewForgotten : S.eNew, { id: code(e.id) });
     case "ghost":
-      return fill(e.from === "mru_ghost" ? S.eGhostMru : S.eGhostMfu, { id: code(e.id), kib: kib(S, e.bytes) }) + see(S, e.from === "mru_ghost" ? "ghostMru" : "ghostMfu");
+      return fill(e.from === "mru_ghost" ? S.eGhostMru : S.eGhostMfu, { id: code(e.id), kib: kib(S, e.bytes) });
     case "hit":
-      if (e.from === "mfu") return fill(S.eHitMfu, { id: code(e.id) }) + see(S, "mfu");
-      return fill(e.to === "mfu" ? S.eHitPromote : S.eHitStay, { id: code(e.id), dt: e.dt, min: ARC_MINTIME }) + see(S, "mintime");
+      if (e.from === "mfu") return fill(S.eHitMfu, { id: code(e.id) });
+      return fill(e.to === "mfu" ? S.eHitPromote : S.eHitStay, { id: code(e.id), dt: e.dt, min: ARC_MINTIME });
     case "pass": {
       const adj =
         e.adj === "small"
@@ -127,13 +150,39 @@ export function eventLine(S: ArcStrings, e: Ev): string {
                 ta: nblocks(S, e.target),
               });
       const share = fill(e.mru > e.target ? S.eShareOver : S.eShareUnder, { mru: plural(S, e.mru / BLOCK, "blk1", "blkN"), target: blocks(S, e.target) });
-      return `${fill(S.ePass, { over: blocks(S, e.over), c: blocks(S, ARC_C) })} ${adj}${see(S, e.adj === "moved" ? "adj" : "hits")} ${share}${see(S, "order")}`;
+      return `${fill(S.ePass, { c: CAPACITY })} ${adj} ${share}`;
     }
     case "evict":
-      return fill(e.from === "mru" ? S.eEvictMru : S.eEvictMfu, { id: code(e.id) }) + see(S, "hdr");
+      return fill(e.from === "mru" ? S.eEvictMru : S.eEvictMfu, { id: code(e.id) });
     case "forget":
-      return fill(e.from === "mru_ghost" ? S.eForgetMru : S.eForgetMfu, { id: code(e.id), cap: nblocks(S, e.cap) }) + see(S, "ghosts");
+      return fill(e.from === "mru_ghost" ? S.eForgetMru : S.eForgetMfu, { id: code(e.id), cap: nblocks(S, e.cap) });
   }
+}
+
+/**
+ * The narration of one read, in a sentence or three: what happened to the block
+ * read, which block it pushed out and from where, and the balance if it moved.
+ * Plain text (it goes to a live region).
+ */
+export function narrate(S: ArcStrings, ev: Ev[]): string {
+  const out: string[] = [];
+  const read = ev.find((e) => e.k === "new" || e.k === "ghost" || e.k === "hit");
+  if (read?.k === "new") out.push(fill(read.forgotten ? S.nNewForgotten : S.nNew, { id: read.id }));
+  else if (read?.k === "ghost") out.push(fill(read.from === "mru_ghost" ? S.nGhostMru : S.nGhostMfu, { id: read.id }));
+  else if (read?.k === "hit") out.push(fill(read.from === "mfu" ? S.nHitMfu : read.to === "mfu" ? S.nHitPromote : S.nHitStay, { id: read.id, dt: read.dt }));
+  const pass = ev.find((e) => e.k === "pass");
+  if (pass?.k === "pass" && pass.pd !== pass.pdBefore) out.push(fill(S.nShare, { before: pdText(S, pass.pdBefore), after: pdText(S, pass.pd) }));
+  for (const e of ev) {
+    if (e.k === "evict") out.push(fill(e.from === "mru" ? S.nOutMru : S.nOutMfu, { id: e.id }));
+    else if (e.k === "forget") out.push(fill(S.nForget, { id: e.id, ghost: S[NAME[e.from]] }));
+  }
+  return out.join(" ");
+}
+
+/** What Next read will read: the next block of a scan or of the hot set, or a new block. */
+export function queueLine(S: ArcStrings, queue: string[], kind: "scan" | "hot" | null, total: number, nextNew: string): string {
+  if (!queue.length || !kind) return fill(S.qNew, { id: nextNew });
+  return fill(S[kind === "scan" ? "qScan" : "qHot"], { id: queue[0], i: total - queue.length + 1, total });
 }
 
 export const eventClass = (e: Ev) =>

@@ -388,7 +388,8 @@ const gapName = `arc-gap-${lang}`;
       const room = (phone.matches ? Math.min(bar.top, innerHeight) : innerHeight) - 8;
       if (top >= 8 && bottom <= room) return;
       let by = top < 8 ? top - 8 : bottom - room;
-      if (!phone.matches && by > 0) by = Math.min(by, bar.top - 8);
+      // A reader who already scrolled the bar off the top only needs the chip.
+      if (!phone.matches && by > 0 && bar.top > 8) by = Math.min(by, bar.top - 8);
       window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 

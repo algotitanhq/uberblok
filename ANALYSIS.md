@@ -4032,6 +4032,138 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 
 Before this point the condense tree has received the two deferred trees and the allocation trees of the txgs in flight ([L3949-L3957](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3949-L3957)): they are free in the old map's view (deferred frees were written as FREE; this txg's allocations are not written yet). `ms_condensing` is set so no allocation happens meanwhile ([L3974](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3974), checked by `metaslab_block_alloc` L4864, excerpt 1), and the map is truncated to length 0, `smp_alloc` 0 ([L3978-L3980](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3978-L3980); `space_map_truncate` [`module/zfs/space_map.c#L908-L910`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/space_map.c#L908-L910)). L4009-L4010: one ALLOC entry for the whole metaslab. L4011: one FREE entry per segment of `ms_allocatable`. L4012: one FREE entry per segment of the condense tree. Then `metaslab_sync` goes on and appends this txg's ALLOC and FREE entries as usual (L3994-L4003 says so). Replaying the condensed map therefore gives the same free tree, deferred frees included, as replaying the long one. The metaslab must be loaded: condensing writes from the in-core tree.
 
+**Short excerpts for the question-first room (v1.4, ALG-197).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis. Excerpt 15 is new; 16 to 22 are cuts of excerpts 9, 1, 2, 10, 11, 12 and 14. Each is checked against the frozen commit like the others.
+
+### 15. `metaslab_compare`, the order of the metaslabs — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L947-L960
+
+```c
+	/*
+	 * Sort inactive metaslabs first, then primaries, then secondaries. When
+	 * selecting a metaslab to allocate from, an allocator first tries its
+	 * primary, then secondary active metaslab. If it doesn't have active
+	 * metaslabs, or can't allocate from them, it searches for an inactive
+	 * metaslab to activate. If it can't find a suitable one, it will steal
+	 * a primary or secondary metaslab from another allocator.
+	 */
+	if (sort1 < sort2)
+		return (-1);
+	if (sort1 > sort2)
+		return (1);
+
+	int cmp = TREE_CMP(m2->ms_weight, m1->ms_weight);
+```
+
+How a metaslab group keeps its metaslabs sorted, for the room's "Choosing a metaslab" note. L947-L954: the comment states the policy: an allocator first tries its primary active metaslab, then its secondary, and only if it has none or they cannot take the allocation does it look for an inactive metaslab to activate. L955-L958: inactive metaslabs sort before active ones, so that search walks the inactive ones first. L960: within each group, a higher `ms_weight` comes first. The weight is segment-based by default (`zfs_metaslab_segment_weight_enabled`, [L259](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L259)): `metaslab_segment_weight` ([L3389-L3442](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3389-L3442)) encodes the highest bucket of the free-segment histogram that has segments, and how many. `find_valid_metaslab` walks this tree and skips a metaslab for which `metaslab_should_allocate` says its largest free segment is too small ([L4924-L4937](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4924-L4937); [L3454-L3493](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3454-L3493)).
+
+### 16. `metaslab_df_alloc`, the cursor or the size — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L1917-L1924
+
+```c
+	if (metaslab_largest_allocatable(msp) < metaslab_df_alloc_threshold ||
+	    free_pct < metaslab_df_free_pct) {
+		align = size & -size;
+		cursor = &msp->ms_lbas[highbit64(align) - 1];
+		offset = -1;
+	} else {
+		offset = metaslab_block_picker(rt, cursor, size, max_size,
+		    metaslab_df_max_search, found_size);
+```
+
+Excerpt 9 from its test on. L1917-L1921: with no free segment of at least `metaslab_df_alloc_threshold` (128 KiB) or under 4 % free, no forward search (`offset = -1`), and the fallback after this excerpt takes a segment by size ([L1933-L1954](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L1933-L1954)). L1923-L1924: otherwise `metaslab_block_picker` searches forward from the cursor.
+
+### 17. `metaslab_block_alloc`, from the free tree to the open txg — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4877-L4884
+
+```c
+		zfs_range_tree_remove(rt, start, size);
+		zfs_range_tree_clear(msp->ms_trim, start, size);
+
+		if (zfs_range_tree_is_empty(msp->ms_allocating[txg & TXG_MASK]))
+			vdev_dirty(mg->mg_vd, VDD_METASLAB, msp, txg);
+
+		zfs_range_tree_add(msp->ms_allocating[txg & TXG_MASK], start,
+		    size);
+```
+
+Excerpt 1, the two trees. L4877: the extent leaves `ms_allocatable`, the free tree. L4880-L4881: the first allocation of a txg in this metaslab marks it dirty for that txg's sync. L4883-L4884: the extent goes into `ms_allocating` of this txg. Nothing reaches the disk here.
+
+### 18. `metaslab_sync`, the append — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4400-L4403
+
+```c
+		space_map_write(msp->ms_sm, alloctree, SM_ALLOC,
+		    SM_NO_VDEVID, tx);
+		space_map_write(msp->ms_sm, msp->ms_freeing, SM_FREE,
+		    SM_NO_VDEVID, tx);
+```
+
+Excerpt 2, the branch without a log space map. The txg's allocation tree is appended as ALLOC entries, then `ms_freeing` as FREE entries, to the metaslab's own space map; `SM_NO_VDEVID` says the entries carry no vdev id. Nothing already on disk is rewritten.
+
+### 19. `metaslab_sync_done`, the deferred frees, swapped — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4630-L4633
+
+```c
+	zfs_range_tree_vacate(*defer_tree,
+	    msp->ms_loaded ? zfs_range_tree_add : NULL, msp->ms_allocatable);
+	if (defer_allowed) {
+		zfs_range_tree_swap(&msp->ms_freed, defer_tree);
+```
+
+Excerpt 10, the swap alone. L4630-L4631: the tree deferred two txgs ago goes back into `ms_allocatable` (if loaded). L4632-L4633: this txg's frees take its place in `ms_defer[txg % TXG_DEFER_SIZE]`.
+
+### 20. `space_map_load_callback`, the replay — module/zfs/space_map.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/space_map.c#L405-L413
+
+```c
+	if (sme->sme_type == smla->smla_type) {
+		VERIFY3U(zfs_range_tree_space(smla->smla_rt) + sme->sme_run, <=,
+		    smla->smla_sm->sm_size);
+		zfs_range_tree_add(smla->smla_rt, sme->sme_offset,
+		    sme->sme_run);
+	} else {
+		zfs_range_tree_remove(smla->smla_rt, sme->sme_offset,
+		    sme->sme_run);
+	}
+```
+
+Excerpt 11 without its signature. Loading free space, `smla_type` is `SM_FREE`: a FREE entry is added to the tree (L405-L409), an ALLOC entry removed (L410-L413). The tree starts as the whole metaslab, so replaying the map in order gives the free space.
+
+### 21. `metaslab_should_condense`, the two tests — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L3855-L3861
+
+```c
+	uint64_t record_size = MAX(sm->sm_blksz, vdev_blocksize);
+	uint64_t object_size = space_map_length(sm);
+	uint64_t optimal_size = space_map_estimate_optimal_size(sm,
+	    msp->ms_allocatable, SM_NO_VDEVID);
+
+	return (object_size >= (optimal_size * zfs_condense_pct / 100) &&
+	    object_size > zfs_metaslab_condense_block_threshold * record_size);
+```
+
+Excerpt 12 after its early returns. L3855: a record is the larger of the map's block size and a sector. L3856: the map's length on disk. L3857-L3858: the size the free tree would take if written alone (excerpt 13). L3860-L3861: condense when the map is at least `zfs_condense_pct` (200 %) of that and longer than `zfs_metaslab_condense_block_threshold` (4) records.
+
+### 22. `metaslab_condense`, the rewrite — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L4009-L4012
+
+```c
+	zfs_range_tree_add(tmp_tree, msp->ms_start, msp->ms_size);
+	space_map_write(sm, tmp_tree, SM_ALLOC, SM_NO_VDEVID, tx);
+	space_map_write(sm, msp->ms_allocatable, SM_FREE, SM_NO_VDEVID, tx);
+	space_map_write(sm, condense_tree, SM_FREE, SM_NO_VDEVID, tx);
+```
+
+Excerpt 14, the three writes. After the truncation, one ALLOC entry for the whole metaslab (L4009-L4010), one FREE entry per segment of the free tree (L4011), then one FREE entry per segment of the condense tree, the deferred frees and the allocations of the txgs in flight (L4012).
+
 **What the animation shows.**
 - A top-level vdev of `vdev_asize` 8 GiB with `ashift` 12 cut into 16 metaslabs of 512 MiB: `vdev_metaslab_set_size` gives `ms_count = asize >> 29` = 16, which is not under `zfs_vdev_min_ms_count` = 16 nor over 200, so `ms_shift` = 29 ([`module/zfs/vdev.c#L3021-L3026`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev.c#L3021-L3026), the table of [L3006-L3013](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev.c#L3006-L3013)). The visitor's writes all go to metaslab 2, `ms_start` = 1 GiB, drawn zoomed: its free tree `ms_allocatable` (L376), the extents allocated in the open txg (`ms_allocating[txg & TXG_MASK]`, L375), the frees of the open txg (`ms_freeing`, L385), the two deferred trees (`ms_defer[]`, L388) with the txg at which each comes back, and the dynamic-fit cursor `ms_lbas[17]`.
 - Write a file of 4, 32 or 160 MiB: one 128 KiB block at a time through `metaslab_df_alloc` (excerpts 8 and 9), each removed from `ms_allocatable` and added to `ms_allocating` (excerpt 1, L4877-L4884); consecutive blocks merge into one extent. Delete a synced file: its extents go to `ms_freeing` (L5527).

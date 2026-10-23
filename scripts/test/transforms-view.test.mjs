@@ -194,16 +194,22 @@ test("compression: each action outlines what it changed, and only that", () => {
   };
   // All zeros: the block, the output row (no compressor), the disk (nothing), the branch and the outcome.
   const z = { ...x0, zero: true };
-  const cz = V.compressChanges(x0, r0, z, M.compress(z));
+  const cz = V.compressChanges(S, x0, r0, z, M.compress(z));
   assert.deepEqual(cz, { block: true, out: true, disk: true, branch: true, outcome: true });
   assert.deepEqual(outlined(z, cz), { bars: 3, path: 1, result: true });
-  // A slightly bigger output that still rounds to the same sectors: only its row.
+  // A slightly bigger output that still rounds to the same sectors: its row and the sentence that names it.
   const y = { ...x0, out: x0.out + 10 };
-  const cy = V.compressChanges(x0, r0, y, M.compress(y));
-  assert.deepEqual(cy, { block: false, out: true, disk: false, branch: false, outcome: false });
-  assert.deepEqual(outlined(y, cy), { bars: 1, path: 0, result: false });
+  const cy = V.compressChanges(S, x0, r0, y, M.compress(y));
+  assert.deepEqual(cy, { block: false, out: true, disk: false, branch: false, outcome: true });
+  assert.deepEqual(outlined(y, cy), { bars: 1, path: 0, result: true });
+  // Compression off: the limit lines leave the block row, the output row says the compressor does not run.
+  const off = { ...x0, algo: "off" };
+  assert.deepEqual(V.compressChanges(S, x0, r0, off, M.compress(off)), { block: true, out: true, disk: true, branch: true, outcome: true });
+  // Compression off, another sector size: the output row is the same, the block, the disk and the sentence change.
+  const off9 = { ...off, ashift: 9 };
+  assert.deepEqual(V.compressChanges(S, off, M.compress(off), off9, M.compress(off9)), { block: true, out: false, disk: true, branch: false, outcome: true });
   // The same state: nothing outlined.
-  assert.deepEqual(outlined(x0, V.compressChanges(x0, r0, x0, r0)), { bars: 0, path: 0, result: false });
+  assert.deepEqual(outlined(x0, V.compressChanges(S, x0, r0, x0, r0)), { bars: 0, path: 0, result: false });
 });
 
 test("dedup: a miss, a hit, the quota and an over-quota write each outline their own effect", () => {
@@ -221,6 +227,12 @@ test("dedup: a miss, a hit, the quota and an over-quota write each outline their
   const h2 = V.dedupView(S, s2, false, c2);
   assert.equal((h2.match(/<tr class="chg"/g) ?? []).length, 1);
   assert.equal((h2.match(/<li class="chg"/g) ?? []).length, 1);
+  // An outlined row or item is also said to a screen reader.
+  assert.match(h2, /<tr class="chg"><td><code>[^<]*<\/code><span class="visually-hidden"> \(changed\)<\/span>/);
+  // Lifting the quota outlines nothing: the note is gone.
+  assert.equal(V.dedupChanges(s2, s2, true, false).quota, false);
+  // The text version says the table is over its quota.
+  assert.match(V.dedupDescribe(S, s2, true), new RegExp(S.quotaNote.slice(0, 20)));
   // The quota: only its note.
   const c3 = V.dedupChanges(s2, s2, false, true);
   assert.deepEqual(c3, { entry: null, bp: false, disk: null, counters: [], quota: true });

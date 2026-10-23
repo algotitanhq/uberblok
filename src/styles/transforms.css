@@ -108,8 +108,8 @@
 :is(.cl, .dd, .cr) td.num {
   text-align: right;
 }
-:is(.cl, .dd, .cr) tr.cur th,
-:is(.cl, .dd, .cr) tr.cur td {
+.cl tr.cur th,
+.cl tr.cur td {
   color: var(--accent);
   font-weight: 600;
 }
@@ -171,6 +171,10 @@
 :is(.cl, .dd, .cr) :is(li, tr).chg {
   outline-offset: -2px;
 }
+/* In the compression figure the outlined rows and branch have no box of their own: the outline stays clear of their text. */
+.cl :is(.row, .outcome, li).chg {
+  outline-offset: 4px;
+}
 /* Dedup. */
 .dd .counters {
   display: flex;
@@ -183,6 +187,13 @@
 }
 .dd .counters b {
   color: var(--fg);
+}
+/* A counter the last action changed is outlined inside the figure's edge. */
+.dd .counters span {
+  padding: 0 0.3em;
+}
+.dd .counters .chg {
+  outline-offset: 0;
 }
 .dd .dd-grid {
   display: grid;

@@ -19,6 +19,8 @@ export const fill = (tpl: string, vars: Record<string, string | number>) =>
 export const spoken = (html: string) => html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 /** The class that outlines what the last action changed. */
 const chg = (on: boolean | undefined) => (on ? " chg" : "");
+/** The same, said to a screen reader inside the outlined row or item. */
+const srChg = (S: TrStrings, on: boolean | undefined) => (on ? `<span class="visually-hidden"> ${S.srChanged}</span>` : "");
 
 /** A whole number in the page's language. */
 export const num = (S: TrStrings, x: number) =>
@@ -55,13 +57,18 @@ export interface CompressChanges {
 }
 export const NO_COMPRESS_CHANGES: CompressChanges = { block: false, out: false, disk: false, branch: false, outcome: false };
 
-export function compressChanges(a: CompressIn, ra: CompressOut, b: CompressIn, rb: CompressOut): CompressChanges {
+/** Each flag compares what the figure draws before and after, so an outline always means a visible change. */
+export function compressChanges(S: TrStrings, a: CompressIn, ra: CompressOut, b: CompressIn, rb: CompressOut): CompressChanges {
+  const rows = (x: CompressIn, r: CompressOut) => compressBars(S, x, r).split('<div class="row').slice(1);
+  const taken = (x: CompressIn, r: CompressOut) => compressPath(S, x, r).match(/<li class="taken[\s\S]*?<\/li>/)?.[0] ?? "";
+  const outcome = (x: CompressIn, r: CompressOut) => compressResult(S, x, r).match(/<p class="outcome[\s\S]*?<\/p>/)?.[0] ?? "";
+  const [r0, r1] = [rows(a, ra), rows(b, rb)];
   return {
-    block: a.lsize !== b.lsize || a.ashift !== b.ashift || a.zero !== b.zero,
-    out: a.algo !== b.algo || a.zero !== b.zero || (!b.zero && a.out !== b.out) || ra.limit !== rb.limit,
-    disk: ra.sectors !== rb.sectors || ra.asize !== rb.asize || ra.outcome !== rb.outcome,
-    branch: ra.why !== rb.why,
-    outcome: ra.outcome !== rb.outcome || ra.psize !== rb.psize,
+    block: r0[0] !== r1[0],
+    out: r0[1] !== r1[1],
+    disk: r0[2] !== r1[2],
+    branch: taken(a, ra) !== taken(b, rb),
+    outcome: outcome(a, ra) !== outcome(b, rb),
   };
 }
 
@@ -192,7 +199,7 @@ export function dedupChanges(a: DedupState, b: DedupState, quotaA: boolean, quot
     bp: b.bps.length > a.bps.length,
     disk: b.disk.length > a.disk.length ? b.disk[b.disk.length - 1].dva : null,
     counters,
-    quota: quotaA !== quotaB,
+    quota: quotaB && !quotaA,
   };
 }
 
@@ -219,19 +226,19 @@ export function dedupView(S: TrStrings, s: DedupState, quota = false, c: DedupCh
   const last = s.steps[s.steps.length - 1];
   const ddt = s.entries.length
     ? `<div class="ddt-scroll" tabindex="0" role="region" aria-label="${S.ddtCaption}"><table class="ddt"><caption>${S.ddtCaption}</caption><thead><tr><th scope="col">${S.thKey}</th><th scope="col">${S.thContent}</th><th scope="col">${S.thRef}</th><th scope="col">${S.thDva}</th><th scope="col">${S.thBirth}</th></tr></thead><tbody>${s.entries
-      .map((e) => `<tr${c.entry === e.content ? ' class="chg"' : ""}><td><code>${e.cksum}…</code></td><td>${contentChip(e.content)}</td><td class="num">${e.refcnt}</td><td><code>${e.dva}</code></td><td class="num">${e.birth}</td></tr>`)
+      .map((e) => `<tr${c.entry === e.content ? ' class="chg"' : ""}><td><code>${e.cksum}…</code>${srChg(S, c.entry === e.content)}</td><td>${contentChip(e.content)}</td><td class="num">${e.refcnt}</td><td><code>${e.dva}</code></td><td class="num">${e.birth}</td></tr>`)
       .join("")}</tbody></table></div>`
     : `<p class="muted">${S.ddtEmpty}</p>`;
   const bps = s.bps.length
     ? `<ol class="bps">${s.bps
-      .map((b, i) => `<li${c.bp && i === s.bps.length - 1 ? ' class="chg"' : ""}><span class="bpn">bp${b.n}</span>${contentChip(b.content)}<span class="dbit ${b.dedup ? "on" : "off"}">D=${b.dedup ? 1 : 0}</span><span class="arrow" aria-hidden="true">→</span><code>${b.dva}</code><span class="births">${fill(S.births, { l: b.logical, p: b.physical })}</span></li>`)
+      .map((b, i) => `<li${c.bp && i === s.bps.length - 1 ? ' class="chg"' : ""}><span class="bpn">bp${b.n}</span>${contentChip(b.content)}<span class="dbit ${b.dedup ? "on" : "off"}">D=${b.dedup ? 1 : 0}</span><span class="arrow" aria-hidden="true">→</span><code>${b.dva}</code><span class="births">${fill(S.births, { l: b.logical, p: b.physical })}</span>${srChg(S, c.bp && i === s.bps.length - 1)}</li>`)
       .join("")}</ol>`
     : `<p class="muted">${S.bpsEmpty}</p>`;
   const disk = s.disk.length
     ? `<ol class="disk">${s.disk
       .map((d) => {
         const refs = s.bps.filter((b) => b.dva === d.dva).map((b) => `bp${b.n}`);
-        return `<li${c.disk === d.dva ? ' class="chg"' : ""}><code>${d.dva}</code>${contentChip(d.content)}<span class="refs">${fill(S.refsBy, { list: refs.join(", ") })}</span></li>`;
+        return `<li${c.disk === d.dva ? ' class="chg"' : ""}><code>${d.dva}</code>${contentChip(d.content)}<span class="refs">${fill(S.refsBy, { list: refs.join(", ") })}</span>${srChg(S, c.disk === d.dva)}</li>`;
       })
       .join("")}</ol>`
     : `<p class="muted">${S.diskEmpty}</p>`;
@@ -240,14 +247,15 @@ export function dedupView(S: TrStrings, s: DedupState, quota = false, c: DedupCh
     ["lookup", plural(S, s.lookups, "cLookup1", "cLookupN")],
     ["disk", plural(S, s.disk.length, "cDisk1", "cDiskN")],
     ["entry", plural(S, s.entries.length, "cEntry1", "cEntryN")],
-  ] as const).map(([k, x]) => `<span class="${k}${chg(c.counters.includes(k))}">${x}</span>`).join("");
+  ] as const).map(([k, x]) => `<span class="n-${k}${chg(c.counters.includes(k))}">${x}</span>`).join("");
   const over = quota ? `<p class="quota-note${chg(c.quota)}">${S.quotaNote}</p>` : "";
   return `<p class="counters">${counters}</p><div class="dd-grid"><section class="panel"><h3>${S.lastWrite}</h3>${dedupPath(S, last)}</section><section class="panel"><h3>${S.ddtLabel}</h3>${over}${ddt}</section><section class="panel"><h3>${S.bpsLabel}</h3>${bps}</section><section class="panel"><h3>${S.diskLabel}</h3>${disk}</section></div>`;
 }
 
-export function dedupDescribe(S: TrStrings, s: DedupState): string {
-  if (!s.steps.length) return `<p>${S.dNoWrite}</p>`;
-  return `<ol>${s.steps.map((st) => `<li>${dedupLine(S, st)}</li>`).join("")}</ol><p>${dedupView(S, s).match(/<p class="counters">([\s\S]*?)<\/p>/)![1].replace(/<\/span><span[^>]*>/g, ", ").replace(/<[^>]+>/g, "")}.</p>`;
+export function dedupDescribe(S: TrStrings, s: DedupState, quota = false): string {
+  const over = quota ? `<p>${S.quotaNote}</p>` : "";
+  if (!s.steps.length) return `<p>${S.dNoWrite}</p>${over}`;
+  return `<ol>${s.steps.map((st) => `<li>${dedupLine(S, st)}</li>`).join("")}</ol><p>${dedupView(S, s).match(/<p class="counters">([\s\S]*?)<\/p>/)![1].replace(/<\/span><span[^>]*>/g, ", ").replace(/<[^>]+>/g, "")}.</p>${over}`;
 }
 
 // ---------------------------------------------------------------- encryption
@@ -298,7 +306,7 @@ export function cryptFileView(S: TrStrings, f: CryptFile, ui: CryptUi, c: CryptC
     const kind = b.id === "L1" ? "indirect" : b.id === "dn" ? "dnode" : "encrypted";
     const verdict = ui.scrub ? `<span class="sc ${sc.get(b.id) ? "ok" : "bad"}${chg(c.scrub)}">${sc.get(b.id) ? S.scOk : S.scBad}</span>` : "";
     const flipMark = ui.flip && b.id === "d1" ? `<span class="flip">${S.flipped}</span>` : "";
-    return `<li class="${cls}${chg(c.blocks.includes(b.id))}"><div class="bhead"><span class="bname">${blockName(S, b.id)}</span><span class="bkind">${S[`k_${kind}`]}</span>${flipMark}${verdict}</div><div class="bbody">${contentOf(S, b, ui.key, ui.flip)}</div></li>`;
+    return `<li class="${cls}${chg(c.blocks.includes(b.id))}"><div class="bhead"><span class="bname">${blockName(S, b.id)}</span><span class="bkind">${S[`k_${kind}`]}</span>${flipMark}${verdict}</div><div class="bbody">${contentOf(S, b, ui.key, ui.flip)}</div>${srChg(S, c.blocks.includes(b.id))}</li>`;
   };
   const fail = ui.read ? ui.read.findIndex((x) => !x.ok) : -1;
   const err = fail >= 0 ? (ui.read![fail] as { ok: false; err: string }).err : "";

@@ -60,7 +60,7 @@ const trOutlines = (page) => page.evaluate(() => {
   const above = (a, b) => !a.hidden && a.getBoundingClientRect().bottom <= b.getBoundingClientRect().top + 1;
   return {
     compress: { rows: c.querySelectorAll("[data-bars] .row.chg").length, branch: c.querySelectorAll("[data-path] li.chg").length, outcome: c.querySelectorAll("[data-result] .outcome.chg").length },
-    dedup: { rows: [...d.querySelectorAll(".ddt tr.chg")].map((tr) => tr.children[1].textContent), bps: d.querySelectorAll(".bps li.chg").length, disk: d.querySelectorAll(".disk li.chg").length, counters: [...d.querySelectorAll(".counters .chg")].map((x) => x.className.replace(" chg", "")), quota: d.querySelectorAll(".quota-note.chg").length },
+    dedup: { rows: [...d.querySelectorAll(".ddt tr.chg")].map((tr) => tr.children[1].textContent), bps: d.querySelectorAll(".bps li.chg").length, disk: d.querySelectorAll(".disk li.chg").length, counters: [...d.querySelectorAll(".counters .chg")].map((x) => x.className.replace(" chg", "").replace("n-", "")), quota: d.querySelectorAll(".quota-note.chg").length },
     crypt: { blocks: e.querySelectorAll("[data-file] li.chg").length, key: e.querySelectorAll("[data-file] .keystate.chg").length },
     links: [c, d, e].map((f) => f.querySelectorAll("a").length),
     lineUnderButtons: [above(c.querySelector("[data-now]"), c.querySelector(".cl-grid")), above(d.querySelector("[data-now]"), d.querySelector("[data-view]")), above(e.querySelector("[data-now]"), e.querySelector("[data-file]"))],

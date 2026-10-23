@@ -105,7 +105,7 @@ const id = `cl-out-${lang}`;
     function render(announce: boolean, first = false) {
       const r = compress(x);
       // What the action changed is outlined until the next one; while the range is dragged, against where the drag began.
-      const c = first ? NO_COMPRESS_CHANGES : compressChanges(before, compress(before), x, r);
+      const c = first ? NO_COMPRESS_CHANGES : compressChanges(S, before, compress(before), x, r);
       if (announce) before = { ...x };
       q("[data-bars]").innerHTML = compressBars(S, x, r, c);
       q("[data-path]").innerHTML = compressPath(S, x, r, c);

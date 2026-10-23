@@ -120,6 +120,8 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
       if (el.dataset.kind) {
         kind = el.dataset.kind as BpKind;
         renderWords();
+        // The file's outline was the last file action's: a change of kind clears it.
+        renderFile();
         say(kindLine(S, kind), false);
         return;
       }

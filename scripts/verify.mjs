@@ -284,8 +284,8 @@ for (const lang of ["en", "fr"]) {
 
 // Transaction groups room: the figure in its states, reduced motion, keyboard.
 const TL = {
-  en: { write: "Add a write", zsync: "zpool sync", free: "Free a large file", step: "Next event", play: "Play", pause: "Pause", quiesced: "Quiesced, waiting for the sync thread" },
-  fr: { write: "Ajouter une écriture", zsync: "zpool sync", free: "Libérer un gros fichier", step: "Événement suivant", play: "Lecture", pause: "Pause", quiesced: "Clos, attend le thread de synchronisation" },
+  en: { write: "Add a write", zsync: "zpool sync", free: "Free a large file", step: "Next event", play: "Play", pause: "Pause", quiesced: "quiesced, waiting for the sync thread" },
+  fr: { write: "Ajouter une écriture", zsync: "zpool sync", free: "Libérer un gros fichier", step: "Événement suivant", play: "Lecture", pause: "Pause", quiesced: "clos, attend le thread de synchronisation" },
 };
 const txgState = (page) =>
   page.evaluate(() => ({

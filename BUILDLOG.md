@@ -1972,3 +1972,62 @@ measure 13.6 CSS px at 1440 and 9.5 px at 390 (from 7.7), unsqueezed at 1440 in 
 languages. `npm run build` and `npm test` (240 tests) pass.
 
 **Debts.** None new. The other rooms follow in their own issues and rebase onto this one.
+
+## v1.4 transaction groups room (ALG-189): a question, and a figure that outlines each step
+
+**What changed.** The transaction groups room, in EN, FR and ES, asks one question ("When does
+my write reach the disk?"), answers it in three plain paragraphs, keeps its figure with what to
+try, then shows the code in seven Source notes (D21.1, D24.1). In the figure, each event now
+outlines the one part it changed (a CPU cell, the dirty-data meter, a txg card, a pass row, the
+"On disk" line or a thread row); the narration and the log are plain, with no code links; each
+stage says its role in one line; Next event is the first button. The model is unchanged. Seven
+short excerpts are new in `ANALYSIS.md` (TXG room, 6 to 12). No shared code changed; the other
+rooms are unchanged, except the Engine room's computed excerpt count (120 → 127).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 43 | 35 |
+| of them in the prose | 34 | 0 |
+| in excerpts and Source notes | 9 | 35 |
+| "code" links the figure adds as it runs | 1 per event (19 targets) | 0 |
+| Code excerpts | 5 | 7 |
+| Lines of code shown | 148 | 58 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (240 pass),
+`check-permalinks` (ANALYSIS.md 127 excerpts, 932 line references, 0 failures).
+`scripts/verify-txg.mjs` (new, scoped to this room): EN, FR, ES on desktop and a 390 px phone,
+each Next event press outlines exactly one part and announces it, no link in the narration or
+log, no horizontal overflow, no console error; after `zpool sync` txg 41 waits in the middle for
+its writes; a long free during a sync fills all three stages; reduced motion runs no animation;
+with no script the text version is shown; Tab reaches Next event, Enter and Space press it with
+a visible focus ring; at 1280 px a Source note opens in the side panel. 48 captures, 0 problems.
+
+**Reviews.** `technical-writer` on the EN text (25 fixes: `txg_kick` raises the wait to the dirty
+txg, not open + 2; `timer` is a countdown; the ZIL saves what a power cut would lose; the
+uberblock write is several writes; "what to try" matched to the model step by step; fragments
+and a staged reveal), then on FR and ES (39 fixes: opening fragments, referents, "pour qu'un seul
+txg", calques). `code-reviewer` on the diff: the outline was lost on minor events while playing,
+and a txg closed with no writes said "waits for 0 writes": both fixed, plus capture names and
+dead constants.
+
+**Debts.** Inside a Source note the Excerpt's own symbol heading still shows; ALG-183 hides it
+in shared code, and this room gets it on rebase. `scripts/verify.mjs` still checks this room
+in EN and FR only; `verify-txg.mjs` covers ES.
+
+**Design review fixes.** On a phone, Next event and the narration stay in a bar at the bottom
+of the screen while the figure is in view, and each press brings the outlined part into view
+above it (D24.1). `verify-txg.mjs` now checks, at 390 px in EN, FR and ES, that after each of
+the 12 presses both the outline and Next event are on screen: 48 captures, 0 problems. The open
+card lost its accent border; "quiesced, waiting…" is lower case like the other status lines.
+`code-reviewer` on the fix: the bar's class name clashed with the card meters and the phone
+button row lost its flex layout; both fixed, and the scroll margin follows the bar's height.
+
+**QA fixes.** `scripts/verify.mjs` still expected the capitalised status line, so its caption
+check reported false mismatches; both strings are lower case now. At 360 px, step 7 left the
+bottom of the syncing card under the bar: the card was measured while it still glided from the
+quiescing stage (FLIP), at its old place. `show()` now subtracts the glide's current offset,
+scrolls by the difference itself, and aligns a part taller than the room above the bar on its
+top, reading the offset from the card even when the outline is on a part inside it. Measured over 14 presses at 360×740 and 390×844 in EN, FR and ES: the outline is fully
+above the bar every time.

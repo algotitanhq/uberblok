@@ -2031,3 +2031,56 @@ quiescing stage (FLIP), at its old place. `show()` now subtracts the glide's cur
 scrolls by the difference itself, and aligns a part taller than the room above the bar on its
 top, reading the offset from the card even when the outline is on a part inside it. Measured over 14 presses at 360×740 and 390×844 in EN, FR and ES: the outline is fully
 above the bar every time.
+
+## v1.4 ARC room (ALG-193): a question, and a figure that reads one block per press
+
+**What changed.** The ARC room, in EN, FR and ES, asks one question ("Why doesn't a big read
+empty my cache?"), answers it in three plain paragraphs, keeps its figure with what to try, then
+shows the code in eight Source notes (D21.1, D25.1). In `ArcLab`, Next read reads one block per
+press; a scan or the hot set reads its first block at once and queues the others, 1 ms apart as
+before, so every state matches the hand-checked sequence. Each read outlines the block read, the
+blocks it pushed out (dashed) and the balance line when `arc_pd` moved; each list says its role in
+one line; the narration and the log are plain, with no code links. On a phone, Next read and the
+narration stay in a bar at the bottom while the figure is in view. The model is unchanged. Eight
+short excerpts are new in `ANALYSIS.md` (ARC room, 10 to 17). No shared code changed; the other
+rooms are unchanged, except the Engine room's computed excerpt count (127 → 135).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 49 | 31 |
+| of them in the prose | 37 | 0 |
+| in excerpts and Source notes | 12 | 31 |
+| "code" links the figure adds as it runs | 1 per log line (10 targets) | 0 |
+| Code excerpts (citations) | 8 | 8 |
+| Lines of code shown | 199 | 70 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (245 pass, 5 of
+them new in `arc-view.test.mjs`), `check-permalinks` (ANALYSIS.md 135 excerpts, 0 failures; built
+pages 3138 line references, 0 failures), `check-csp` (44 pages). `scripts/verify-arc.mjs` (new,
+scoped to this room): EN, FR, ES on desktop and a 390 px phone; through the scan one press at a
+time, each read outlines exactly the block the model reads and the blocks it pushes out, and the
+four lists equal the model's; the narration names the block and is announced; no link in the
+narration or log; on the phone the block read and Next read are on screen after every press; the
+MRU ghost hit on S2 moves `arc_pd` to 53.1% and outlines the balance; Read the rest empties the
+queue and hands the focus to Next read; at 10 ms a re-read stays in MRU; reduced motion runs no
+animation; with no script the board and the text version are shown and the controls are not; Tab
+reaches Next read before any block, Enter and Space press it with a visible focus; at 1280 px a
+Source note opens in the side panel; no horizontal overflow, no console error. 35 captures, 0
+problems. On the final head, the whole-site suites: `scripts/verify.mjs` (the ARC part
+now presses Read the rest after a scan; 457 captures, 0 console errors, 0 ARC mismatches, every
+keyboard stop with a visible focus) and `scripts/audit.mjs` (42 pages, 0 problems; the ARC room
+in three languages: 43 stops, axe 0, one announcement per press of Next read).
+
+**Reviews.** `technical-writer` on the three languages: "what to try" asked to re-read "a few"
+scan blocks, which can leave MFU with nothing to give up, and did not say how to re-read a block
+at 10 ms; the cache is full after S10, not at S11; the ghost-list targets, not their sizes, set
+the step; calques and register in FR and ES. All fixed. `code-reviewer` on the diff: a block read
+and then pushed out within Read the rest kept the "just read" outline (fixed, last event wins, and
+tested); a block reached with Tab could sit under the phone bar (scroll padding); selecting a
+block in the middle of a scan broke the 1 ms spacing (it now ends the scan); a repeated narration
+might not be announced; Next read is now described by the queue line.
+
+**Debts.** None new. `scripts/verify.mjs` still checks this room in EN and FR only;
+`verify-arc.mjs` covers ES.

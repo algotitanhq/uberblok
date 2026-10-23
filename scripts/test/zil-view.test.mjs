@@ -18,6 +18,8 @@ register(
     ),
 );
 const { eventLine, summary, describe, decision, writes, memory, disk, frameAt, targets } = await import("../../src/lib/zil-view.ts");
+const { parse } = await import("ultrahtml");
+const { querySelectorAll } = await import("ultrahtml/selector");
 const { ZIL_STRINGS } = await import("../../src/lib/zil-strings.ts");
 const { fr } = await import("../../src/lib/fr.ts");
 const Z = await import("../../src/lib/zil.ts");
@@ -273,8 +275,13 @@ test("every step rings a part of the figure that the step's drawing has", () => 
     const before = Z.clone(t);
     runs.push([before, f(), Z.clone(t)]);
   };
+  step(() => Z.fsync(t));
   step(() => Z.write(t, 4096, { dsync: false, direct: false }));
   step(() => Z.fsync(t));
+  for (let i = 0; i < 7; i++) {
+    step(() => Z.write(t, 4096, { dsync: false, direct: false }));
+    step(() => Z.fsync(t));
+  }
   step(() => Z.write(t, 131072, { dsync: false, direct: false }));
   step(() => Z.fsync(t));
   step(() => Z.write(t, 4096, { dsync: true, direct: false }));
@@ -285,17 +292,13 @@ test("every step rings a part of the figure that the step's drawing has", () => 
   step(() => Z.crash(t));
   step(() => Z.importPool(t));
   step(() => Z.mount(t));
-  // Selectors are checked by the attribute they look for, on the HTML the step is drawn with.
+  // Selectors are run on the HTML the step is drawn with, inside the figure's own containers.
+  // ultrahtml has no :last-child; a list with a child has a last child, so it is dropped.
   for (const [before, ev, after] of runs) {
     for (let k = 0; k < ev.length; k++) {
       const f = k < ev.length - 1 ? frameAt(before, after, ev, k) : undefined;
-      const html = writes(after, S, f) + memory(after, S, f) + disk(after, S, f);
-      const found = targets(ev[k]).some((sel) => {
-        const attrs = [...sel.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)];
-        if (!attrs.length) return sel === "[data-memory]" || /class="[^"]*\bw\b[^"]*"/.test(html);
-        const [, name, value] = attrs[attrs.length - 1];
-        return html.includes(value === undefined ? name : `${name}="${value}"`);
-      });
+      const doc = parse(`<div data-writes>${writes(after, S, f)}</div><div data-memory>${memory(after, S, f)}</div><div data-disk>${disk(after, S, f)}</div>`);
+      const found = targets(ev[k]).some((sel) => querySelectorAll(doc, sel.replace(":last-child", "")).length > 0);
       assert.ok(found, `${ev[k].k} at step ${k}: ${targets(ev[k]).join(", ")}`);
     }
   }

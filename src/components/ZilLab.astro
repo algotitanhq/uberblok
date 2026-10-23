@@ -114,7 +114,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
 <script>
   import { strings, reducedMotion, fill } from "../lib/svg";
   import { empty, write, fsync, sync, crash, importPool, mount, clone, SIZES, type Zil, type Ev, type Flags, type SlogMode, type Logbias } from "../lib/zil";
-  import { decision, writes, memory, disk, describe, summary, eventLine, eventClass, frameAt, targets, type ZilStrings, type Frame } from "../lib/zil-view";
+  import { decision, writes, memory, disk, describe, summary, eventLine, eventClass, frameAt, targets, drawnBefore, type ZilStrings, type Frame } from "../lib/zil-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-zl]")) {
     const S = strings<ZilStrings>(root);
@@ -138,8 +138,11 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     };
 
     function controls() {
-      const ph = s.phase;
       const busy = stepping();
+      // A sync or a mount is drawn from the state before it until its last step: the buttons
+      // follow the figure, not the model, so Sync still names the txg being synced.
+      const shownState = busy && drawnBefore(ev) ? before : s;
+      const ph = shownState.phase;
       // Steps that do not apply in this phase are disabled; while an action still has steps to
       // show, every control but the step buttons and Start again is aria-disabled instead, so
       // that the focused button keeps the focus and a press can say why.
@@ -160,7 +163,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       for (const b of root.querySelectorAll<HTMLElement>("[data-bias]")) b.setAttribute("aria-pressed", String(b.dataset.bias === s.logbias));
       for (const b of root.querySelectorAll<HTMLElement>("[data-flag]")) b.setAttribute("aria-pressed", String(flags[b.dataset.flag as keyof Flags]));
       for (const b of root.querySelectorAll<HTMLElement>("[data-size]")) b.setAttribute("aria-pressed", String(Number(b.dataset.size) === size));
-      q("[data-sync]").textContent = fill(S.syncBtn, { txg: s.txg });
+      q("[data-sync]").textContent = fill(S.syncBtn, { txg: shownState.txg });
     }
 
     function draw(f?: Frame) {
@@ -174,6 +177,8 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       q("[data-decision]").innerHTML = decision(s, S, size, flags);
       q("[data-summary]").textContent = summary(s, S);
       q("[data-describe]").innerHTML = describe(s, S);
+      // The panels are drawn again with no ring, so the ring's key goes too.
+      q(".khit").hidden = true;
       controls();
       refocus(focusKey);
     }
@@ -189,6 +194,11 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     }
 
     const plain = (html: string) => html.replace(/<[^>]+>/g, "");
+    /** A message in the narration, announced even when it repeats. */
+    function tell(t: string) {
+      now.textContent = "";
+      requestAnimationFrame(() => (now.textContent = t));
+    }
     function say(t: string) {
       const el = q("[data-status]");
       el.textContent = "";
@@ -282,14 +292,16 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       }
       if (d.step) {
         if (!stepping()) {
-          now.textContent = S.done;
+          tell(ev.length ? S.done : S.idle);
           return;
         }
-        advance(d.step === "skip" ? ev.length : shown + 1, d.step === "skip" ? '[data-act="write"]' : focusKey);
+        // The focus stays in the bar, which is on screen: after Show every step the reader sees
+        // the end of the action, not the top of the figure.
+        advance(d.step === "skip" ? ev.length : shown + 1, focusKey);
         return;
       }
       if (el.getAttribute("aria-disabled") === "true") {
-        if (stepping()) now.textContent = S.busy;
+        if (stepping()) tell(S.busy);
         return;
       }
       if (d.pool) {
@@ -315,6 +327,16 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       else if (d.act === "crash") act(() => crash(s));
       else if (d.act === "import") act(() => importPool(s));
       else if (d.act === "mount") act(() => mount(s));
+    });
+
+    // The bar sticks to the bottom of the screen: a part of the figure reached with Tab is
+    // scrolled above it, never left under it.
+    root.addEventListener("focusin", (e) => {
+      const el = e.target as Element;
+      if (el.closest(".stepbar")) return;
+      const top = q(".stepbar").getBoundingClientRect().top;
+      const r = el.getBoundingClientRect();
+      if (top < innerHeight && r.bottom > top - 8) window.scrollBy({ top: r.bottom - top + 8 });
     });
 
     render(null);

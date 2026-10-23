@@ -2697,3 +2697,50 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   three languages). Rejected: moving the second button row and the gap choice below the board;
   the controls would sit apart from the button they qualify. The nine-step tour paragraph is split
   at its three phases: the scan, the ghost hits, the 10 ms re-read.
+
+## v1.4 ZIL room (ALG-199)
+
+### D27.1 The ZIL room as a question, and a figure that shows each action one step per press
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)),
+  sixth room. It had 9 excerpts (220 lines of code) and 79 links to GitHub in each language, 41
+  of them in the prose and 7 in the figure. A commit was animated on its own after a press, so
+  the reader watched about fifteen lwb transitions go by and read the end state.
+- **Question.** "What does fsync() wait for?" (« Qu’attend fsync() ? », « ¿Qué espera
+  fsync()? »). The operator's question about a database commit; the answer goes from the
+  promise of fsync to the txg being too slow for it, the log written first, the replay after a
+  power cut, and the SLOG.
+- **Figure.** `ZilLab` is improved, not rebuilt; the model (`src/lib/zil.ts`) is unchanged. An
+  action (write, fsync, sync, power cut, import, mount) shows its first step at once; Next step
+  shows the next one, Show every step the rest. `frameAt` (`src/lib/zil-view.ts`) draws the
+  state after each step from the state before the action and its events; a sync and a mount are
+  drawn from the state before them until their last step, and the buttons follow the figure (the
+  Sync button names the txg being synced). Each step rings what it changed (`targets()`): the
+  record, the lwb, the block, the header, the write that returns; the ring is static, so it
+  reads under reduced motion, and a key line explains it. The narration says "Step k of n" and
+  the step in a plain sentence; the log keeps every step of the last action. Both carry no code
+  links (D21.1). Without script the opening state and the text version are shown, as before.
+- **Phone and keyboard.** As in the TXG and ARC rooms (D24.1, D25.1), Next step and the
+  narration sit in a bar that sticks to the bottom of the screen while the figure is in view,
+  and after a step the ringed part is scrolled into view above it. A part of the figure reached
+  with Tab is scrolled above the bar too. After an action the focus goes to Next step; after
+  Show every step and after the last step it stays in the bar, which is on screen, and a press
+  there says the action is over and to choose the next one above. Moving the focus back to the
+  action buttons was rejected: on a phone they are a screen away from the ring.
+- **What to try.** The first `fsync()` on a dataset with no log creates the log, which takes a
+  txg sync, so nothing is logged; the text says so and asks for a second `write()` and `fsync()`
+  before the power cut, so that the mount has a record to replay. The 128 KiB example says it
+  needs a dataset that already has a log, for the same reason.
+- **Code.** Nine Source notes, 74 lines: eight new short cuts in `ANALYSIS.md` (ZIL room, 11 to
+  18), checked against `zfs-2.4.4`, and the existing `lwb_state_t` excerpt (6). The "three
+  depths" section is gone; its detail is in the notes. "Claim" is « s’approprier » in French and
+  « apropiarse » in Spanish (« réclamer » and « reclamar » mean to ask back); "returns" is « rend
+  la main » and « vuelve ».
+- **Tests.** The `targets()` test runs each selector on the HTML of the step with `ultrahtml`
+  (already in the tree through Astro, now a pinned dev dependency), including an `fsync()` with
+  no write and more than five lwbs. `scripts/verify-zil.mjs` checks the room alone in the three
+  languages on desktop and phone.
+- **Rejected.** Keeping the commit animated with a Play button: the reader would watch fifteen
+  transitions rather than read them. Telling `frameAt` the action's kind instead of reading it
+  from its events: only `sync()` starts with a `sync` event and only `mount()` emits `destroy`,
+  and the comment says so.

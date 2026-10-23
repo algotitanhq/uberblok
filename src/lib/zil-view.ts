@@ -64,7 +64,8 @@ export interface Frame {
   before: Zil;
 }
 
-/** Actions drawn from the state before them: a txg sync and a mount. */
+/** Actions drawn from the state before them: a txg sync and a mount. Only sync() starts with a
+ * "sync" event and only mount() emits "destroy" (src/lib/zil.ts). */
 export const drawnBefore = (ev: Ev[]) => ev[0]?.k === "sync" || ev.some((e) => e.k === "destroy");
 
 export function frameAt(before: Zil, after: Zil, ev: Ev[], k: number): Frame {
@@ -368,7 +369,8 @@ export function targets(e: Ev): string[] {
       return [`[data-data="${e.write}"]`];
     case "returns":
     case "nothing":
-      return [".writes > li:last-child"];
+      // The last write, or the "no write yet" line when fsync() is pressed first.
+      return [".writes > li:last-child", "[data-writes] > .none"];
     case "free":
       return [`[data-cell="${e.blk.id}"]`];
     case "crash":

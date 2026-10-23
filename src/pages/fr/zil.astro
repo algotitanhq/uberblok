@@ -59,7 +59,7 @@ const L = {
       <h1>Qu’attend fsync() ?</h1>
       <div class="prose answer">
         <p class="lead">
-          Un programme qui appelle fsync sur un fichier demande une promesse : quand l’appel rend la main, les données
+          Un programme qui appelle fsync sur un fichier demande une garantie : quand l’appel rend la main, les données
           qu’il a écrites survivent à une coupure de courant. Une base de données la demande à chaque validation. ZFS
           écrit ses changements dans le pool par lots, les groupes de transactions ou txg, et ne valide un txg que toutes
           les quelques secondes, après avoir réécrit chaque bloc sur le chemin qui va du changement jusqu’à la racine du
@@ -77,8 +77,8 @@ const L = {
         <p>
           Le journal n’est lu qu’après une panne. Quand le pool est importé de nouveau, ZFS parcourt la chaîne des blocs
           de journal et empêche le pool de les réutiliser. Quand le dataset est monté, il applique de nouveau chaque
-          enregistrement dont le txg n’a jamais atteint le pool : chaque écriture pour laquelle fsync a rendu la main
-          revient. Une écriture ni synchronisée ni journalisée est perdue, ce que son programme a accepté en n’appelant
+          enregistrement dont le txg n’a jamais atteint le pool : on retrouve chaque écriture pour laquelle fsync a
+          rendu la main. Une écriture ni synchronisée ni journalisée est perdue, ce que son programme a accepté en n’appelant
           pas fsync. Un périphérique de journal séparé, appelé SLOG, donne aux blocs de journal un périphérique à eux ; ce
           qu’il apporte dépend de la vitesse de ce périphérique.
         </p>
@@ -99,13 +99,15 @@ const L = {
         <p>
           Appuyez ensuite de nouveau sur <code>write()</code> et sur <code>fsync()</code>. Cette fois, l’enregistrement
           entre dans un bloc de journal, et <code>fsync()</code> rend la main alors que le txg 101 est encore ouvert. Coupez
-          le courant, importez le pool et montez le dataset : l’enregistrement est rejoué. Recommencez en synchronisant
-          le txg avant la coupure : le journal n’a plus rien à rejouer. Une écriture sans <code>fsync()</code> avant la
-          coupure est perdue.
+          le courant, importez le pool et montez le dataset : l’enregistrement est rejoué. Recommencez, refaites les deux
+          paires <code>write()</code> et <code>fsync()</code>, puis synchronisez le txg 101 avant la coupure : le journal
+          n’a plus rien à rejouer. Un <code>write()</code> fait après le dernier <code>fsync()</code> et avant la coupure
+          est perdu.
         </p>
         <p>
           Le panneau du haut dit ce que le prochain <code>write()</code> mettra dans son enregistrement. Essayez 128 Kio
-          sans SLOG, puis avec. Sans SLOG, les données sont écrites en place et l’enregistrement ne fait que pointer vers
+          sans SLOG, puis avec, sur un dataset qui a déjà un journal : après Recommencer ou un rejeu, le
+          <code>fsync()</code> suivant recrée le journal et ne journalise rien. Sans SLOG, les données sont écrites en place et l’enregistrement ne fait que pointer vers
           elles. Avec un SLOG, toutes les données vont dans le journal, réparties sur deux blocs de journal. Avec
           <code>logbias=throughput</code>, les données sont toujours écrites en place.
         </p>
@@ -329,7 +331,7 @@ const L = {
       </div>
 
       <div class="step">
-        <h3>Après une coupure, l’import réclame la chaîne</h3>
+        <h3>Après une coupure, l’import s’approprie la chaîne</h3>
         <p class="prose">
           À l’import, dans le premier txg du pool, <code>zil_claim</code> parcourt la chaîne de chaque dataset. Elle ne
           fait que marquer les blocs et compter les enregistrements ; rien n’est encore rejoué.
@@ -346,10 +348,10 @@ const L = {
               {
                 from: 1239,
                 to: 1241,
-                text: `<a href="${L.parse}"><code>zil_parse</code></a> parcourt la chaîne depuis <code>zh_log</code> et réclame chaque bloc, pour que l’allocateur ne le redonne pas, ainsi que <a href="${L.claimWrite}">les blocs vers lesquels pointent les enregistrements WR_INDIRECT</a>.`,
+                text: `<a href="${L.parse}"><code>zil_parse</code></a> parcourt la chaîne depuis <code>zh_log</code> et s’approprie chaque bloc, pour que l’allocateur ne le redonne pas, ainsi que <a href="${L.claimWrite}">les blocs vers lesquels pointent les enregistrements WR_INDIRECT</a>.`,
               },
-              { from: 1242, text: `Le txg de réclamation : le premier txg du pool, <a href="${L.spaClaim}">le dernier synchronisé plus un</a>.` },
-              { from: 1243, to: 1244, text: "Les plus hauts numéros de bloc et d’enregistrement réclamés." },
+              { from: 1242, text: `Le txg d’appropriation : le premier txg du pool, <a href="${L.spaClaim}">le dernier synchronisé plus un</a>.` },
+              { from: 1243, to: 1244, text: "Les plus hauts numéros de bloc et d’enregistrement vus pendant l’appropriation." },
               {
                 from: 1245,
                 to: 1246,
@@ -379,7 +381,7 @@ const L = {
               {
                 from: 4711,
                 to: 4712,
-                text: `Un enregistrement d’un txg plus ancien que le txg de réclamation est ignoré : ce txg a été synchronisé, son changement est donc dans le pool. Chaque autre enregistrement est appliqué de nouveau, puis <a href="${L.destroy}">le journal est détruit</a>. S’il n’y a rien à rejouer, <code>zil_replay</code> <a href="${L.noReplay}">ne fait que détruire le journal</a> et <a href="${L.keepFirst}">garde son premier bloc</a>, dans lequel la prochaine validation <a href="${L.reuse}">écrit</a> sans attendre de txg.`,
+                text: `Un enregistrement d’un txg plus ancien que le txg d’appropriation est ignoré : ce txg a été synchronisé, son changement est donc dans le pool. Chaque autre enregistrement est appliqué de nouveau, puis <a href="${L.destroy}">le journal est détruit</a>. S’il n’y a rien à rejouer, <code>zil_replay</code> <a href="${L.noReplay}">ne fait que détruire le journal</a> et <a href="${L.keepFirst}">garde son premier bloc</a>, dans lequel la prochaine validation <a href="${L.reuse}">écrit</a> sans attendre de txg.`,
               },
             ]}
           />
@@ -391,7 +393,7 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Ce que la figure laisse de côté</h2>
       <p class="prose muted">
-        La figure exécute les fonctions ci-dessus sur un seul fichier d’un seul dataset, avec un seul écrivain et un seul
+        La figure exécute les fonctions ci-dessus sur un seul fichier d’un seul dataset, avec un seul processus qui écrit et un seul
         txg en cours, synchronisé d’un coup en une passe. Le courant est coupé entre deux actions, jamais au milieu
         de l’une d’elles. Le fichier s’étend déjà sur plusieurs enregistrements, ses blocs font donc 128 Kio ; un fichier
         d’un seul bloc plus petit que <code>recordsize</code> a un bloc plus petit, et la règle du demi-bloc s’en sert.
@@ -401,12 +403,12 @@ const L = {
         figure sont ceux de blocs de 128 Kio. Chaque <code>write()</code> commence au début d’un bloc du fichier. Il n’y a
         pas d’erreur d’entrée-sortie, donc la validation ne se rabat jamais sur l’attente d’une synchronisation de txg ;
         le vidage est une seule étape pour tout le lwb, sans l’arbre de vidage par vdev ; le délai de validation ne
-        se déclenche jamais, parce qu’un seul écrivain ferme son lwb tout de suite. Au-delà de 64 Mio par validation
+        se déclenche jamais, parce qu’un seul processus qui écrit ferme son lwb tout de suite. Au-delà de 64 Mio par validation
         (<code>zil_slog_bulk</code>), les écritures vont sur un SLOG avec une priorité plus basse ; la disposition Slim
         ZIL et le chiffrement ne sont pas dessinés. Rien de cela ne change la façon dont une écriture est journalisée,
-        l’endroit où va un bloc de journal, ni les écritures rejouées. Pour le moment où un txg est synchronisé, voir
-        <a href={roomUrl(lang, "txg")}>Groupes de transactions</a> ; pour la façon dont les classes se partagent l’espace
-        du pool, <a href={roomUrl(lang, "metaslabs")}>Metaslabs et space maps</a>.
+        l’endroit où va un bloc de journal, ni les écritures rejouées. <a href={roomUrl(lang, "txg")}>Groupes de
+        transactions</a> explique quand un txg est synchronisé, et <a href={roomUrl(lang, "metaslabs")}>Metaslabs et
+        space maps</a> comment les classes se partagent l’espace du pool.
       </p>
     </section>
   </article>

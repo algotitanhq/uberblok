@@ -95,13 +95,16 @@ for (const lang of ["en", "fr", "es"]) {
     }
     await shot(`zil-${tag}-4-mounted.png`);
     report.steps[tag] = seq;
-    // Show every step ends an action at once and gives the focus back to write().
+    // Show every step ends an action at once; the focus stays in the bar.
     await fig.locator('[data-act="reset"]').click();
     await fig.locator('[data-act="write"]').click();
     await fig.locator('[data-act="fsync"]').click();
     await fig.locator('[data-step="skip"]').click();
     const sk = await state(page);
-    if (sk.stepping || sk.focus !== "write") problem(`${tag}: Show every step left ${JSON.stringify({ stepping: sk.stepping, focus: sk.focus })}`);
+    if (sk.stepping || sk.focus !== "skip") problem(`${tag}: Show every step left ${JSON.stringify({ stepping: sk.stepping, focus: sk.focus })}`);
+    // A setting changed after an action draws the panels again with no ring, and the ring's key goes.
+    await fig.locator("[data-size]").nth(1).click();
+    if (!(await fig.locator(".khit").isHidden())) problem(`${tag}: the ring's key stays with no ring`);
     if (sk.overflow) problem(`${tag}: horizontal overflow`);
     if (errors.length) problem(`${tag}: console ${errors.join(" / ")}`);
     await ctx.close();

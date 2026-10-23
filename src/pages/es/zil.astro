@@ -59,7 +59,7 @@ const L = {
       <h1>¿Qué espera fsync()?</h1>
       <div class="prose answer">
         <p class="lead">
-          Un programa que llama a fsync sobre un archivo pide una promesa: cuando la llamada retorna, los datos que
+          Un programa que llama a fsync para un archivo exige una garantía: cuando la llamada vuelve, los datos que
           escribió sobreviven a un corte de corriente. Una base de datos la pide en cada confirmación. ZFS escribe sus
           cambios en el pool por lotes, los grupos de transacciones o txg, y solo confirma un txg cada pocos segundos,
           después de reescribir cada bloque del camino que va desde el cambio hasta la raíz del pool. Esperar eso en cada
@@ -69,7 +69,7 @@ const L = {
           Por eso cada dataset lleva también un registro de intención, el ZIL. Cada escritura deja en memoria una pequeña
           entrada sobre sí misma: qué archivo, en qué posición, qué longitud y, a menudo, los datos. Cuando el programa
           llama a fsync, ZFS escribe enseguida las entradas de ese archivo en un bloque de registro en disco, espera a que
-          el disco vacíe su caché y retorna. El txg escribe igualmente el cambio en el pool más tarde, como siempre, y una
+          el disco vacíe su caché y vuelve. El txg escribe igualmente el cambio en el pool más tarde, como siempre, y una
           vez hecho, el bloque de registro ya no hace falta y se libera. En un pool sin dispositivo de registro aparte, una
           escritura grande no se copia en el registro: sus datos se escriben una sola vez, en su sitio en el pool, y la
           entrada solo apunta a ellos.
@@ -77,7 +77,7 @@ const L = {
         <p>
           El registro solo se lee después de un fallo. Cuando el pool se vuelve a importar, ZFS recorre la cadena de
           bloques de registro e impide que el pool los reutilice. Cuando se monta el dataset, vuelve a aplicar cada entrada
-          cuyo txg nunca llegó al pool, así que vuelve cada escritura para la que fsync retornó. Una escritura que no se
+          cuyo txg nunca llegó al pool, así que vuelve cada escritura para la que fsync volvió. Una escritura que no se
           sincronizó ni se registró se pierde, cosa que su programa aceptó al no llamar a fsync. Un dispositivo de registro
           aparte, llamado SLOG, da a los bloques de registro un dispositivo propio; lo que aporta depende de lo rápido que
           sea ese dispositivo.
@@ -91,19 +91,21 @@ const L = {
         <p>
           La figura es un pool nuevo con un solo archivo, de bloques de 128 KiB. El txg 100 está abierto y el dataset aún
           no tiene registro. Pulsa <code>write()</code>, luego <code>fsync()</code>, y luego Paso siguiente hasta que
-          <code>fsync()</code> retorne. Cada pulsación muestra un paso: la línea al pie de la figura dice lo que hizo, y un
+          <code>fsync()</code> vuelva. Cada pulsación muestra un paso: la línea al pie de la figura dice lo que hizo, y un
           anillo marca la parte que cambió. Este primer <code>fsync()</code> crea el registro, lo que exige sincronizar un
-          txg, así que no registra nada: la escritura ya está en el pool cuando la llamada retorna.
+          txg, así que no registra nada: la escritura ya está en el pool cuando la llamada vuelve.
         </p>
         <p>
           Pulsa después otra vez <code>write()</code> y <code>fsync()</code>. Esta vez la entrada va a un bloque de registro,
-          y <code>fsync()</code> retorna con el txg 101 todavía abierto. Corta la corriente, importa el pool y monta el
-          dataset: la entrada se reproduce. Empieza de nuevo y sincroniza el txg antes del corte: al registro ya no le queda
-          nada que reproducir. Una escritura sin <code>fsync()</code> antes del corte se pierde.
+          y <code>fsync()</code> vuelve con el txg 101 todavía abierto. Corta la corriente, importa el pool y monta el
+          dataset: la entrada se reproduce. Empieza de nuevo, repite los dos pares de <code>write()</code> y
+          <code>fsync()</code> y sincroniza el txg 101 antes del corte: al registro ya no le queda nada que reproducir. Un
+          <code>write()</code> hecho después del último <code>fsync()</code> y antes del corte se pierde.
         </p>
         <p>
           El panel de arriba dice lo que el próximo <code>write()</code> pondrá en su entrada. Prueba 128 KiB sin SLOG y
-          luego con uno. Sin SLOG, los datos se escriben en su sitio y la entrada solo apunta a ellos. Con un SLOG, todos
+          luego con uno, cuando el dataset ya tenga registro: tras Empezar de nuevo o tras una reproducción, el
+          siguiente <code>fsync()</code> vuelve a crear el registro y no registra nada. Sin SLOG, los datos se escriben en su sitio y la entrada solo apunta a ellos. Con un SLOG, todos
           los datos van al registro, repartidos en dos bloques de registro. Con <code>logbias=throughput</code>, los datos
           siempre se escriben en su sitio.
         </p>
@@ -237,7 +239,7 @@ const L = {
               {
                 from: 89,
                 to: 90,
-                text: `<a href="${L.writeDone}">Escritura terminada</a>, y luego <a href="${L.flushDone}">volcado terminado</a> cuando las cachés de los discos se han vaciado: las confirmaciones que lo esperaban retornan.`,
+                text: `<a href="${L.writeDone}">Escritura terminada</a>, y luego <a href="${L.flushDone}">volcado terminado</a> cuando las cachés de los discos se han vaciado: las confirmaciones que lo esperaban vuelven.`,
               },
             ]}
           />
@@ -327,7 +329,7 @@ const L = {
       </div>
 
       <div class="step">
-        <h3>Tras un corte, la importación reclama la cadena</h3>
+        <h3>Tras un corte, la importación se apropia de la cadena</h3>
         <p class="prose">
           Al importar, en el primer txg del pool, <code>zil_claim</code> recorre la cadena de cada dataset. Solo marca los
           bloques y cuenta las entradas; todavía no se reproduce nada.
@@ -344,10 +346,10 @@ const L = {
               {
                 from: 1239,
                 to: 1241,
-                text: `<a href="${L.parse}"><code>zil_parse</code></a> recorre la cadena desde <code>zh_log</code> y reclama cada bloque, para que el asignador no lo vuelva a dar, y también <a href="${L.claimWrite}">los bloques a los que apuntan las entradas WR_INDIRECT</a>.`,
+                text: `<a href="${L.parse}"><code>zil_parse</code></a> recorre la cadena desde <code>zh_log</code> y se apropia de cada bloque, para que el asignador no lo vuelva a dar, y también <a href="${L.claimWrite}">los bloques a los que apuntan las entradas WR_INDIRECT</a>.`,
               },
-              { from: 1242, text: `El txg de reclamación: el primer txg del pool, <a href="${L.spaClaim}">el último sincronizado más uno</a>.` },
-              { from: 1243, to: 1244, text: "Los números de bloque y de entrada más altos que se han reclamado." },
+              { from: 1242, text: `El txg de apropiación: el primer txg del pool, <a href="${L.spaClaim}">el último sincronizado más uno</a>.` },
+              { from: 1243, to: 1244, text: "Los números de bloque y de entrada más altos vistos durante la apropiación." },
               {
                 from: 1245,
                 to: 1246,
@@ -377,7 +379,7 @@ const L = {
               {
                 from: 4711,
                 to: 4712,
-                text: `Se omite una entrada de un txg anterior al txg de reclamación: ese txg se sincronizó, así que su cambio está en el pool. Cada una de las demás entradas se aplica de nuevo, y luego <a href="${L.destroy}">el registro se destruye</a>. Si no hay nada que reproducir, <code>zil_replay</code> <a href="${L.noReplay}">solo destruye el registro</a> y <a href="${L.keepFirst}">conserva su primer bloque</a>, en el que la próxima confirmación <a href="${L.reuse}">escribe</a> sin esperar ningún txg.`,
+                text: `Se omite una entrada de un txg anterior al txg de apropiación: ese txg se sincronizó, así que su cambio está en el pool. Cada una de las demás entradas se aplica de nuevo, y luego <a href="${L.destroy}">el registro se destruye</a>. Si no hay nada que reproducir, <code>zil_replay</code> <a href="${L.noReplay}">solo destruye el registro</a> y <a href="${L.keepFirst}">conserva su primer bloque</a>, en el que la próxima confirmación <a href="${L.reuse}">escribe</a> sin esperar ningún txg.`,
               },
             ]}
           />
@@ -389,7 +391,7 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Lo que la figura deja fuera</h2>
       <p class="prose muted">
-        La figura ejecuta las funciones de arriba sobre un solo archivo de un solo dataset, con un solo escritor y un solo
+        La figura ejecuta las funciones de arriba sobre un solo archivo de un solo dataset, con un solo proceso que escribe y un solo
         txg en curso, sincronizado de una vez en una sola pasada. La corriente se corta entre dos acciones, nunca en
         medio de una. El archivo ya ocupa varios registros, así que sus bloques son de 128 KiB; un archivo de un solo
         bloque menor que <code>recordsize</code> tiene un bloque más pequeño, y la regla del medio bloque lo usa. El primer
@@ -398,12 +400,12 @@ const L = {
         cadena real las entradas se dividen en otros puntos, y las cuentas de bytes de la figura son las de bloques de
         128 KiB. Cada <code>write()</code> empieza al principio de un bloque del archivo. No hay errores de E/S, así que la
         confirmación nunca recurre a esperar una sincronización del txg; el volcado es un solo paso para todo el lwb, sin
-        el árbol de volcados por vdev; el plazo de confirmación nunca vence, porque un solo escritor cierra su lwb de
+        el árbol de volcados por vdev; el plazo de confirmación nunca vence, porque un solo proceso que escribe cierra su lwb de
         inmediato. Por encima de 64 MiB por confirmación (<code>zil_slog_bulk</code>), las escrituras van a un SLOG con
         menos prioridad; el formato Slim ZIL y el cifrado no se dibujan. Nada de esto cambia cómo se registra una
-        escritura, adónde va un bloque de registro ni qué escrituras se reproducen. Para cuándo se sincroniza un txg, ver
-        <a href={roomUrl(lang, "txg")}>Grupos de transacciones</a>; para cómo se reparten las clases el espacio del pool,
-        <a href={roomUrl(lang, "metaslabs")}>Metaslabs y space maps</a>.
+        escritura, adónde va un bloque de registro ni qué escrituras se reproducen. <a href={roomUrl(lang, "txg")}>Grupos de
+        transacciones</a> explica cuándo se sincroniza un txg, y <a href={roomUrl(lang, "metaslabs")}>Metaslabs y space
+        maps</a> cómo se reparten las clases el espacio del pool.
       </p>
     </section>
   </article>

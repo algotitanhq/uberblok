@@ -2256,3 +2256,52 @@ in three. `npm test` 245 pass, `verify-arc.mjs` 35 captures, 0 problems.
 
 **Debts.** None new. `scripts/verify.mjs` still checks this room in EN and FR only;
 `verify-arc.mjs` covers ES.
+
+## v1.4 ZIL room (ALG-199): a question, and a figure that shows each action one step per press
+
+**What changed.** The ZIL room, in EN, FR and ES, asks one question ("What does fsync() wait
+for?"), answers it in three plain paragraphs, keeps its figure with what to try, then shows the
+code in nine Source notes (D21.1, D27.1). In `ZilLab`, each action shows one step per press of
+Next step (Show every step finishes it), rings what the step changed, and says the step in a
+plain sentence with no code link; on a phone Next step and the narration stay in a bar at the
+bottom. The model is unchanged. Eight short excerpts are new in `ANALYSIS.md` (ZIL room, 11 to
+18). No shared code changed; the other rooms are unchanged.
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 79 | 37 |
+| of them in the prose | 41 | 0 |
+| in the figure | 7 | 0 |
+| in excerpts and Source notes | 31 | 37 |
+| Code excerpts (citations) | 9 | 9 |
+| Lines of code shown | 220 | 74 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (254 pass),
+`check-permalinks` (ANALYSIS.md 157 excerpts, 0 failures; built pages 1698 line references,
+0 failures), `check-csp` (44 pages). `scripts/verify-zil.mjs` (new, scoped to this room): EN,
+FR, ES on desktop and a 390 px phone; write, fsync, write, fsync, power cut, import, mount, one
+press at a time (16, 11, 1, 1 and 2 steps): every step rings a part of the figure and shows the
+ring's key, the narration is set and polite, no link in the figure, the focus is on Next step
+while the action has steps, and on the phone the ringed part and Next step are on screen; Show
+every step ends the action with the focus in the bar; a setting changed afterwards hides the
+ring's key; reduced motion runs no animation; with no script the panels and the text version
+are shown and the controls are not; Enter and Space work with a visible focus; at 1280 px a
+Source note opens in the side panel; no horizontal overflow, no console error. 41 captures,
+0 problems.
+
+**Reviews.** `technical-writer` on the three languages: "Start again and sync the txg" led to a
+run with no record to replay, and the 128 KiB split needs a log that already exists (both
+now say what to press); « retorna », « réclamer »/« reclamar », « écrivain »/« escritor » and
+« promesse »/« promesa » were calques; two narration lines and the last paragraph ended in
+fragments. All fixed. `code-reviewer` on the diff: after Show every step the focus jumped to
+`write()` off screen (it stays in the bar); a part reached with Tab could sit under the sticky
+bar (scrolled above it); the `targets()` test matched attributes as text (it now runs the
+selectors, and found that `returns` rang nothing when `fsync()` came before any write, fixed);
+the buttons showed the state after a sync while the figure showed the state before (they follow
+the figure); Next step before any action said "last step" (it says how to start); a repeated
+message was not announced again; the ring's key stayed after a setting changed. All fixed.
+
+**Debts.** `scripts/verify.mjs` still checks this room against the model in EN and FR only;
+`verify-zil.mjs` covers ES.

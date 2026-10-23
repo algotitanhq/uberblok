@@ -96,12 +96,14 @@ const L = {
         <p>
           Then press <code>write()</code> and <code>fsync()</code> again. This time the record goes into a log block, and
           <code>fsync()</code> returns while txg 101 is still open. Cut the power, import the pool and mount the dataset,
-          and the record is replayed. Start again and sync the txg before the power cut: the log has nothing left to
-          replay. A write with no <code>fsync()</code> before the cut is lost.
+          and the record is replayed. Start again, repeat both pairs of <code>write()</code> and <code>fsync()</code>, and
+          press Sync txg 101 before the power cut: the log has nothing left to replay. A <code>write()</code> made after
+          the last <code>fsync()</code> and before the cut is lost.
         </p>
         <p>
           The panel at the top says what the next <code>write()</code> will put in its record. Try 128 KiB without a SLOG and
-          then with one. Without a SLOG, the data is written in place and the record only points to it. With one, all the
+          then with one, on a dataset that already has a log: after Start again or a replay, the next
+          <code>fsync()</code> creates the log again and logs nothing. Without a SLOG, the data is written in place and the record only points to it. With one, all the
           data goes into the log, split across two log blocks. With <code>logbias=throughput</code> the data is always
           written in place.
         </p>
@@ -393,9 +395,9 @@ const L = {
         to waiting for a txg sync; the flush is one step for the whole lwb, without the per-vdev flush tree; the commit
         timeout never fires, because one writer closes its lwb at once. Writes of more than 64 MiB per commit
         (<code>zil_slog_bulk</code>) go to a SLOG at a lower priority; the Slim ZIL layout and encryption are not drawn.
-        None of these changes how a write is logged, where a log block goes, or which writes are replayed. When a txg
-        syncs, see <a href={roomUrl(lang, "txg")}>Transaction groups</a>; how the classes share the pool's space,
-        <a href={roomUrl(lang, "metaslabs")}>Metaslabs and space maps</a>.
+        None of these changes how a write is logged, where a log block goes, or which writes are replayed.
+        <a href={roomUrl(lang, "txg")}>Transaction groups</a> explains when a txg syncs, and
+        <a href={roomUrl(lang, "metaslabs")}>Metaslabs and space maps</a> how the classes share the pool's space.
       </p>
     </section>
   </article>

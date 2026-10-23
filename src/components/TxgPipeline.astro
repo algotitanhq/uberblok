@@ -8,7 +8,7 @@
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
 import { fr } from "../lib/fr";
-import { DIRTY_MAX, DIRTY_SYNC, SYNC_PERCENT, TXG_TIMEOUT } from "../lib/txg";
+import { DIRTY_SYNC, TXG_TIMEOUT } from "../lib/txg";
 
 interface Props {
   lang: Lang;
@@ -32,6 +32,7 @@ const S0 = {
     dirtyNote: "past {s}, the sync starts early (in this model)",
     drain: "waits for {n} writes to finish",
     drain1: "waits for {n} write to finish",
+    drain0: "no write under way any more",
     passLabel: "pass {n}",
     passBlocks: "{n} blocks",
     passBlock: "{n} block",
@@ -71,6 +72,7 @@ const S0 = {
     "wake-handoff": "Txg {txg} is already quiesced: the sync thread takes it without sleeping.",
     "want-quiesce": "The sync thread asks the quiesce thread to close the open txg, {txg}.",
     quiesce: "Txg {txg} is closed to new writes, and txg {next} opens at once to take them. The writes already in txg {txg} finish there.",
+    quiesce0: "Txg {txg} is closed to new writes, and txg {next} opens at once to take them. No write is under way in txg {txg}.",
     handoff: "No write is under way in txg {txg} any more: it is quiesced, and handed over to the sync thread.",
     sync: "The sync thread takes txg {txg} and starts writing its {n} changed blocks.",
     sync1: "The sync thread takes txg {txg} and starts writing its {n} changed block.",
@@ -100,6 +102,7 @@ const S0 = {
     dirtyNote: "au-delà de {s}, la synchronisation part plus tôt (dans ce modèle)",
     drain: "attend la fin de {n} écritures",
     drain1: "attend la fin de {n} écriture",
+    drain0: "plus aucune écriture en cours",
     passLabel: "passe {n}",
     passBlocks: "{n} blocs",
     passBlock: "{n} bloc",
@@ -139,6 +142,7 @@ const S0 = {
     "wake-handoff": "Le txg {txg} est déjà clos : le thread de synchronisation le prend sans se rendormir.",
     "want-quiesce": "Le thread de synchronisation demande au thread de clôture de fermer le txg ouvert, le {txg}.",
     quiesce: "Le txg {txg} est fermé aux nouvelles écritures, et le txg {next} s’ouvre aussitôt pour les recevoir. Les écritures déjà dans le txg {txg} s’y terminent.",
+    quiesce0: "Le txg {txg} est fermé aux nouvelles écritures, et le txg {next} s’ouvre aussitôt pour les recevoir. Aucune écriture n’est en cours dans le txg {txg}.",
     handoff: "Plus aucune écriture n’est en cours dans le txg {txg} : il est clos, et remis au thread de synchronisation.",
     sync: "Le thread de synchronisation prend le txg {txg} et commence à écrire ses {n} blocs modifiés.",
     sync1: "Le thread de synchronisation prend le txg {txg} et commence à écrire son bloc modifié.",
@@ -168,6 +172,7 @@ const S0 = {
     dirtyNote: "por encima de {s}, la sincronización empieza antes (en este modelo)",
     drain: "espera a que terminen {n} escrituras",
     drain1: "espera a que termine {n} escritura",
+    drain0: "ya no hay escrituras en curso",
     passLabel: "pasada {n}",
     passBlocks: "{n} bloques",
     passBlock: "{n} bloque",
@@ -207,6 +212,7 @@ const S0 = {
     "wake-handoff": "El txg {txg} ya está cerrado: el hilo de sincronización lo toma sin volver a dormir.",
     "want-quiesce": "El hilo de sincronización pide al hilo de cierre que cierre el txg abierto, el {txg}.",
     quiesce: "El txg {txg} se cierra a las escrituras nuevas, y el txg {next} se abre en el acto para recibirlas. Las escrituras que ya estaban en el txg {txg} terminan allí.",
+    quiesce0: "El txg {txg} se cierra a las escrituras nuevas, y el txg {next} se abre en el acto para recibirlas. No hay ninguna escritura en curso en el txg {txg}.",
     handoff: "Ya no hay escrituras en curso en el txg {txg}: está cerrado, y pasa al hilo de sincronización.",
     sync: "El hilo de sincronización toma el txg {txg} y empieza a escribir sus {n} bloques modificados.",
     sync1: "El hilo de sincronización toma el txg {txg} y empieza a escribir su bloque modificado.",
@@ -222,7 +228,7 @@ const S0 = {
 }[lang];
 const S = Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v]));
 const t = UI[lang];
-const consts = { timeout: TXG_TIMEOUT, pct: SYNC_PERCENT, dmax: DIRTY_MAX, dsync: DIRTY_SYNC };
+const consts = { timeout: TXG_TIMEOUT, dsync: DIRTY_SYNC };
 const textVersion = {
   en: [
     "Every change to the pool joins a numbered transaction group, a txg. At most three txgs are active at once, one in each stage: open, quiescing, syncing.",
@@ -320,6 +326,7 @@ const textVersion = {
     // Writers already drawn: only a new one drops in (D24.1).
     const drawn = new Set<number>();
     let m: Model;
+    let lastHit: Ev | undefined; // the event the outline shows
     let playing = false;
     let last = 0;
     let raf = 0;
@@ -328,7 +335,10 @@ const textVersion = {
     const fmt = (x: number) => (document.documentElement.lang === "en" ? x.toFixed(1) : x.toFixed(1).replace(".", ","));
     // Singular for 1, and for 0 in French.
     const one = (n: number) => n === 1 || (n === 0 && document.documentElement.lang === "fr");
-    const text = (e: Ev) => (e.kind === "sync" ? (e.n === 0 ? t.sync0 : one(Number(e.n)) ? t.sync1 : t.sync) : t[e.kind]);
+    const text = (e: Ev) =>
+      e.kind === "sync" ? (e.n === 0 ? t.sync0 : one(Number(e.n)) ? t.sync1 : t.sync)
+        : e.kind === "quiesce" && holds(m, e.txg) === 0 ? t.quiesce0
+          : t[e.kind];
     const vars = (e: Ev) => ({
       ...t.consts,
       txg: e.txg,
@@ -388,7 +398,7 @@ const textVersion = {
       const qt = m.quiescing || m.quiesced;
       if (qt) {
         put("quiescing", qt, cpuGrid(qt),
-          h("p", { class: "state" }, m.quiescing ? fill(one(holds(m, qt)) ? t.drain1 : t.drain, { n: holds(m, qt) }) : t.quiesced));
+          h("p", { class: "state" }, m.quiescing ? (holds(m, qt) ? fill(holds(m, qt) === 1 ? t.drain1 : t.drain, { n: holds(m, qt) }) : t.drain0) : t.quiesced));
       } else slot("quiescing").replaceChildren(h("p", { class: "none" }, t.empty));
       // Once quiesced, the txg sits in tx_quiesced_txg and tx_quiescing_txg is 0 (txg.c L662-L663)
       q('[data-stage="quiescing"] .var code').textContent = m.quiesced ? "tx_quiesced_txg" : "tx_quiescing_txg";
@@ -408,6 +418,7 @@ const textVersion = {
         put("syncing", s.txg, h("ol", { class: "passes" }, ...rows));
       } else slot("syncing").replaceChildren(h("p", { class: "none" }, t.empty));
       for (const txg of [...cards.keys()]) if (!placed.has(txg)) cards.delete(txg);
+      drawn.clear();
       for (const w of m.writers) drawn.add(w.id);
       // FLIP: a txg card glides from one stage to the next.
       if (!reducedMotion())
@@ -468,6 +479,7 @@ const textVersion = {
       }
     }
     function mark(e: Ev | undefined) {
+      lastHit = e;
       for (const x of root.querySelectorAll(".hit")) x.classList.remove("hit");
       const el = e && target(e);
       if (el) el.classList.add("hit");
@@ -499,7 +511,9 @@ const textVersion = {
       if (evs.length) {
         const e = tell(evs, false);
         render();
-        if (e) mark(e);
+        // Minor events (a write joins or ends) re-render the cards without moving
+        // the outline: it stays on the last stage change.
+        mark(e ?? lastHit);
       } else status();
       raf = requestAnimationFrame(frame);
     }

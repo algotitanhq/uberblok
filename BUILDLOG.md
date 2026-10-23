@@ -1928,3 +1928,46 @@ opened by find-in-page, one panel per page, print: fixed or documented.
 
 **Debts.** The other rooms and the FR/ES copy of this one keep the old format until the pilot
 is approved. The figures' own "see the code" links stay inside the figures.
+
+## v1.4 transaction groups room (ALG-189): a question, and a figure that outlines each step
+
+**What changed.** The transaction groups room, in EN, FR and ES, asks one question ("When does
+my write reach the disk?"), answers it in three plain paragraphs, keeps its figure with what to
+try, then shows the code in seven Source notes (D21.1, D24.1). In the figure, each event now
+outlines the one part it changed (a CPU cell, the dirty-data meter, a txg card, a pass row, the
+"On disk" line or a thread row); the narration and the log are plain, with no code links; each
+stage says its role in one line; Next event is the first button. The model is unchanged. Seven
+short excerpts are new in `ANALYSIS.md` (TXG room, 6 to 12). No shared code changed; the other
+rooms are unchanged, except the Engine room's computed excerpt count (120 → 127).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 43 | 35 |
+| of them in the prose | 34 | 0 |
+| in excerpts and Source notes | 9 | 35 |
+| "code" links the figure adds as it runs | 1 per event (19 targets) | 0 |
+| Code excerpts | 5 | 7 |
+| Lines of code shown | 148 | 58 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (240 pass),
+`check-permalinks` (ANALYSIS.md 127 excerpts, 932 line references, 0 failures).
+`scripts/verify-txg.mjs` (new, scoped to this room): EN, FR, ES on desktop and a 390 px phone,
+each Next event press outlines exactly one part and announces it, no link in the narration or
+log, no horizontal overflow, no console error; after `zpool sync` txg 41 waits in the middle for
+its writes; a long free during a sync fills all three stages; reduced motion runs no animation;
+with no script the text version is shown; Tab reaches Next event, Enter and Space press it with
+a visible focus ring; at 1280 px a Source note opens in the side panel. 48 captures, 0 problems.
+
+**Reviews.** `technical-writer` on the EN text (25 fixes: `txg_kick` raises the wait to the dirty
+txg, not open + 2; `timer` is a countdown; the ZIL saves what a power cut would lose; the
+uberblock write is several writes; "what to try" matched to the model step by step; fragments
+and a staged reveal), then on FR and ES (39 fixes: opening fragments, referents, "pour qu'un seul
+txg", calques). `code-reviewer` on the diff: the outline was lost on minor events while playing,
+and a txg closed with no writes said "waits for 0 writes": both fixed, plus capture names and
+dead constants.
+
+**Debts.** Inside a Source note the Excerpt's own symbol heading still shows; ALG-183 hides it
+in shared code, and this room gets it on rebase. `scripts/verify.mjs` still checks this room
+in EN and FR only; `verify-txg.mjs` covers ES.

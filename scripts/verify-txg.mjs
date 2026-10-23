@@ -73,9 +73,10 @@ for (const lang of ["en", "fr", "es"]) {
       seq.push({ narration: st.narration, hits: st.hits, stages: st.stages });
       if (st.hits.length !== 1) problem(`${tag} step ${i}: ${st.hits.length} outlined parts`);
       if (st.links) problem(`${tag} step ${i}: links in the narration or log`);
-      if (i === 3) await shot(`txg-${tag}-1-quiesce.png`);
-      if (i === 6) await shot(`txg-${tag}-2-pass.png`);
-      if (i === 9) await shot(`txg-${tag}-3-commit.png`);
+      if (i === 5 && !/41/.test(st.narration)) problem(`${tag} step 5: ${st.narration}`);
+      if (i === 4) await shot(`txg-${tag}-1-quiesce.png`);
+      if (i === 7) await shot(`txg-${tag}-2-pass.png`);
+      if (i === 10) await shot(`txg-${tag}-3-commit.png`);
     }
     report.steps[tag] = seq;
     // zpool sync at once: the drain.

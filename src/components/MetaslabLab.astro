@@ -179,6 +179,9 @@ const sizes = [4, 32, 160];
       const ev = load(clone(s));
       if (ev[0].k !== "load" || reducedMotion()) return act(() => load(s));
       busy = true;
+      // The previous action's outlines go at once: Load changes nothing.
+      chg = NO_CHANGES;
+      render();
       const me = ++run;
       const n = s.tape.length;
       const steps = Math.min(n, 36);
@@ -621,14 +624,21 @@ const sizes = [4, 32, 160];
   .tape :global(.tc.replayed) {
     background: var(--accent-soft);
   }
-  .tape :global(.tc.sel.replayed) {
-    color: var(--fg);
+  .tape :global(.tc.sel.replayed),
+  .tape :global(.tc.sel.cond) {
+    background: var(--fg);
+    color: var(--bg);
   }
-  /* What the last action changed: an ink outline, static, so the same under reduced motion. */
+  /* What the last action changed: a dashed ink outline (focus rings are solid), static, so the same under reduced motion. */
   .tape :global(.tc.chg),
   .panel :global(li.chg) {
-    outline: 2px solid var(--fg);
+    outline: 2px dashed var(--fg);
     outline-offset: 2px;
+  }
+  /* The keyboard focus ring stays visible on an outlined cell. */
+  .tape :global(.tc.chg:focus-visible) {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
   }
   .panel :global(.trees li.chg) {
     border-radius: 2px;
@@ -637,11 +647,12 @@ const sizes = [4, 32, 160];
     fill: none;
     stroke: var(--fg);
     stroke-width: 2;
+    stroke-dasharray: 5 3;
     vector-effect: non-scaling-stroke;
   }
   .msl-ms :global(.sw.chg) {
     background: transparent;
-    outline: 2px solid var(--fg);
+    outline: 2px dashed var(--fg);
     outline-offset: -2px;
   }
   .vnote {

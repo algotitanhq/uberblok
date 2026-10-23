@@ -162,7 +162,8 @@ export async function verifyMetaslabs({ browser, open, base, out, report, VIEWPO
         const cs = getComputedStyle(el);
         return {
           label: (el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 50),
-          ok: el.matches(":focus-visible") && cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) > 0,
+          // A focus ring is solid; the outline of what changed is dashed.
+          ok: el.matches(":focus-visible") && cs.outlineStyle === "solid" && parseFloat(cs.outlineWidth) > 0,
           key: el.tagName + "|" + (el.getAttribute("href") || "") + "|" + (el.dataset?.e ?? "") + "|" + (el.dataset?.act ?? "") + "|" + el.textContent,
         };
       });
@@ -200,6 +201,9 @@ export async function verifyMetaslabs({ browser, open, base, out, report, VIEWPO
       await page.screenshot({ path: join(out, "metaslabs-en-desktop-keyboard.png") });
       report.captures.push("metaslabs-en-desktop-keyboard.png");
     }
+    const noFocus = stops.filter((s) => !s.ok).map((s) => s.label);
+    if (noFocus.length || !drive.del || !drive.sync || !drive.entry || drive.left.pressed !== "true")
+      report.metaslabs.mismatches.push({ where: `${lang}-keyboard`, noFocus, drive: { del: drive.del, sync: drive.sync, entry: drive.entry, pressed: drive.left.pressed } });
     report.keyboard[`metaslabs-${lang}`] = { stops: stops.length, withoutVisibleFocus: stops.filter((s) => !s.ok).map((s) => s.label), drive: { ...drive, state: { cells: drive.state.cells.length, last: drive.state.log.at(-1) } } };
     await ctx.close();
   }

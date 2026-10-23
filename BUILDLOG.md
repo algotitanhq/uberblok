@@ -2236,5 +2236,10 @@ of 128 KiB), metaslabs loaded on demand, the deferred frees still counted free b
 `metaslab_load` removes them, uberblock glossed, the weight as a size class, the exception to
 the deferral spelled out, the Spanish "registro" no longer used for both the log and a record,
 calques in FR and ES. Not taken: "about two hundred metaslabs" (D27.1).
+`code-reviewer` on the whole diff: the selected tape entry stays inverted after a condense,
+"changed" is a dashed outline so the solid focus ring stays visible, Load clears the last
+outlines, and the keyboard walk now fails the run on a missing focus ring. All four fixed;
+`verify-metaslabs.mjs` replayed at the head after the fixes (42 captures, 0 console errors,
+0 mismatches, 48 keyboard stops with visible focus in each language).
 
 **Debts.** None found outside the room.

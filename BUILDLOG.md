@@ -2410,7 +2410,8 @@ outlines and no link in any figure; the Source note in the side panel; 69 keyboa
 focus ring in each language and the keyboard drive announced six times; reduced motion (no running
 animation, the outlines still drawn); no script (opening state, nothing outlined); 54 captures (not
 committed), 0 console errors. Captures read by eye: dedup hit, key unloaded, compressed block on a
-phone, the panel in French.
+phone, the panel in French. The whole-site `scripts/verify.mjs` at 34081a1 (every room, after merging
+`main`): 523 captures, 0 console errors, no mismatch in any room.
 
 **Reviews.** `technical-writer` on the three languages (30 edits proposed, most taken): 112 bytes "or
 less", and then the block goes into its pointer; salt and IV glossed; the counter bits said plainly

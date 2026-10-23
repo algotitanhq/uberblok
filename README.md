@@ -21,7 +21,7 @@ The code analysed is OpenZFS `zfs-2.4.4`, commit
 ## Status
 
 Version 1. The visit has fourteen stops:
-the Hall (the uberblock and its ring, in 2D and 3D, and the map of the visit), the History wing
+the Hall (the uberblock and its ring, in 2D and 3D, and the list of all rooms), the History wing
 (a timeline from 2001 to today, every fact linked to its entry in `SOURCES.md`), eleven
 technical rooms and the Engine room (the colophon: the commit, the stack, how the site was
 built). The rooms: *The tree and the uberblock* (a block pointer tree, a write that copies its

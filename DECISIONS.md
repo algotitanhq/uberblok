@@ -2432,6 +2432,50 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   paragraph being read. Opening GitHub in a new tab: the feedback asked for the code beside the
   text.
 
+### D21.3 D21.1 on the Hall, the History wing and the Engine room
+
+- **Context.** [ALG-205](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-205) carries the
+  three pages that are not rooms about one mechanism. D21.1 was written for rooms that cite code;
+  each page was checked against it on its own. On Hacker News a reader wrote of the Hall: « I was
+  doing well until I got lost at Map of the Visit. I forgot I was pretending to be in a museum. »
+- **The Hall: D21.1 applies in full to the uberblock section.** The Hall is the only one of the
+  three that explains a mechanism. Its section asks "How does ZFS find its data after a crash?",
+  answers in three plain paragraphs (txg and uberblock glossed once), says what to try in the
+  ring, then shows the code in three Source notes (`struct uberblock`, the slot choice in
+  `vdev_uberblock_sync`, the choice on import in `vdev_uberblock_load_done`): 15 lines of code,
+  all new `ANALYSIS.md` entries. The page's `h1` stays the wordmark: the Hall is the home page,
+  and its question is the section's `h2`.
+- **The ring as a teaching figure.** A **Next txg** button commits one txg per press and stops
+  the clock, so the reader sees one effect per action: the live line says which slot the txg
+  takes and why (`txg mod slots`) and that the previous uberblock stays in its slot. It works
+  with reduced motion or without WebGL (where the clock never runs) and the pulse animation now runs only under
+  `prefers-reduced-motion: no-preference`. Without script the 2D ring stays as before. The ring
+  was improved, not rebuilt.
+- **Wayfinding in plain words.** The metaphor stays in the names of the rooms, not in the words
+  that guide the reader: "Map of the visit" becomes **All rooms** (Toutes les salles, Todas las
+  salas) as the Hall's section heading, the link under each room's navigation and the footer
+  link (the header already said "Rooms"); the footer group
+  "The visit" becomes **Contents**; "End of the visit." becomes "This is the last room.". The
+  Hall's first screen links to All rooms beside "Why this museum?", and the uberblock section's
+  kicker is "The uberblock" instead of "The object in the Hall". These labels live in
+  `src/lib/ui.ts`, shared by every page: changed here because the feedback was filed on this
+  issue, and only these strings.
+- **The History wing: a question, no Source notes.** `h1` "Where does ZFS come from?", the
+  catalogue title as the kicker, an intro without staged phrasing. The timeline cites sources,
+  not code, so there is no "In the code" section. Its 40 numbered notes stay as they are: each
+  points to a dated, named claim listed in `SOURCES.md`, and wrapping them in collapsible Source
+  notes would hide the dates and names the timeline is made of and add a click per fact.
+- **The Engine room: a question, nothing else of D21.1.** `h1` "How was this museum made?". It
+  has no figure and no mechanism to explain, so there is no plain-answer block, no figure text
+  and no "In the code"; its lead says in one sentence what the page covers.
+- **Links outside Source notes.** Three GitHub links on the Hall stay outside the notes: two in
+  the caption of Fig. 1 (where the plate's lines come from) and one in the Dedication (the
+  `AUTHORS` file). They attribute a figure and a fact, like the History citations; they do not
+  cut the prose that explains the uberblock.
+- **Rejected.** A question as the Hall's `h1`: the home page's title is the site's name, and
+  search results and shares show it. Dropping the museum vocabulary everywhere: the room names
+  are the catalogue, and the feedback was about the words that guide the reader.
+
 ## v1.4 copy-on-write follow-up (ALG-183): FR and ES, teaching figures, panel fixes
 
 ### D21.2 The figures teach by acting; the panel after its design review
@@ -2506,6 +2550,106 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   the desktop layout is unchanged. The open txg card keeps its accent tint but takes the neutral
   border, so an accent frame means only "this changed". Rejected: scrolling alone, which moves
   Next event away from the thumb.
+
+## v1.4 tree room (ALG-185)
+
+### D22.1 The tree room as a question, and a figure that climbs one level per step
+
+- **Context.** The roll-out of D21.1 (ALG-182)
+  starts with the tree and the uberblock room, the most visited after the Hall. It had 12
+  excerpts (255 lines of code) and 58 links to GitHub in each language, 27 of them in the
+  prose. The issue asks for a figure where the reader changes a block and follows the new
+  block pointers up to a new uberblock, one level per step.
+- **Question.** "What if the power fails while ZFS is writing?" (« Et s’il y a une coupure de
+  courant pendant que ZFS écrit ? », « ¿Qué pasa si se va la corriente mientras ZFS escribe? »). The answer does not
+  repeat the copy-on-write room's: it is about the txg as a whole, the one root pointer, the
+  flush before the uberblock, the ring of slots and what the import keeps.
+- **Figure.** `step()` in `src/lib/tree.ts` now writes the open txg's new blocks one height
+  per step, data first and the objset last (`HEIGHTS` = 5: data, L1, L2, the block of dnodes,
+  the objset); beat 0 is done when the objset is written, then the four beats as before. This
+  is the order of the code: a block's write I/O is the child of its parent's
+  (`dbuf_write`, dbuf.c L5411), and `zio_write_compress` holds the parent until every child is
+  ready, with its new address and checksum (zio.c L1932-L1939). In the drawing a new copy has a
+  dashed outline while in memory, a solid one once written, and fills in at the flush; a pointer from a new copy to a child not
+  yet written is dotted and muted, and turns into the accent once the child is written. The 3D
+  view draws the same states (an in-memory copy is a faint box, a waiting pointer a faint line).
+  Only what changed is animated, in 2D and 3D, and nothing under reduced motion. The commit
+  panel marks beat 0 "under way" while the rows are being written. A cut halfway up is a new case
+  (`during: 0`): the old tree wins, as with a cut during the flush. Writing a second block is
+  refused once the first level is written, as the code quiesces the txg before `spa_sync`.
+  The other controls, the text version and the no-script state are unchanged. The figure counts
+  "rows" (data, L1, L2, dnodes, objset), not "levels", which the room keeps for indirect blocks.
+- **Code.** Seven Source notes, 69 lines (`ANALYSIS.md` tree room, excerpts 7 and 12 to 17;
+  six are new short cuts of longer excerpts, checked against `zfs-2.4.4`). The "three depths"
+  section is gone: its one-paragraph summary repeated the answer, and its detail now lives in
+  the notes.
+- **Rejected.** A separate "climb" button beside Next step: two buttons that both advance the
+  sync would make the reader guess which one to press. Drawing the climb as an animation inside
+  one step: the issue asks for one level per step, and an animation cannot be paused or read
+  under reduced motion.
+- **After the design review.** The line that says what the last action did sits under the
+  controls, above the tree, and is there from the start ("D2 has changed in txg 4211…"); it
+  replaces the list of reasons why some buttons were disabled, which read as an instruction.
+  A disabled button gives its reason in the same line, on its press only. The blocks the last
+  step wrote carry a ring until the next action (a class, not an animation, so the same under
+  reduced motion), and the legend lists every state from the start, so a step changes the
+  drawing and never the key. Caption sentences say "the dnode block" and "the objset"; the
+  drawing keeps the short labels.
+
+## v1.4 RAID-Z room (ALG-187)
+
+### D23.1 The RAID-Z room as a question; blocks written one after another, a read one step per press
+
+- **Context.** Second room of the D21.1 roll-out ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 5 excerpts (135 lines of code) and 47 links to GitHub in each language, 25 of
+  them in the prose and 11 in the figure. The issue asks for a figure where the reader writes
+  blocks of different sizes and sees the stripe width follow them, then fails a disk and
+  watches the reconstruction, one step per action.
+- **Question.** "What happens when a disk in my RAID-Z fails?" (« Que se passe-t-il quand un
+  disque de mon RAID-Z lâche ? », « ¿Qué pasa cuando falla un disco de mi RAID-Z? »). The answer
+  keeps D21.1's order, the problem first (the RAID-5 write hole, which shows when a disk dies),
+  then the mechanism (one stripe per block, written to free space), then what happens on a
+  failure (parity rebuilds a missing disk, the parent's checksum finds a disk that lies). The
+  writing review suggested opening with the failure; D21.1's "problem first" wins.
+- **The map** (`RaidzMap`, improved, not rebuilt). The size buttons (4, 8, 32 and 128 KiB) write
+  a new block right after the last one, so the map holds several blocks: the live one in full,
+  numbered by sector, the earlier ones faded and labelled with their letter. Each press shows
+  one new stripe and its width; children the live block does not touch have a faint header.
+  The psize field still edits the live block, `b` is where block A starts, and parity, children
+  or ashift lay every block out again. Older blocks scroll off the top past 24 rows (and past
+  11 blocks, when `b` moves past the dropped one); labels hide only when the live block alone
+  is taller than 26 rows, as before. The counters of `vdev_raidz_map_alloc` move into a closed
+  `<details>`, with `b` added.
+- **The read.** "Read the last block" shows one step per press, from `readPlan()` in
+  `raidz-view.ts`: each step is a line and its marks on the map (columns read or used, columns
+  rebuilt from parity, children assumed wrong, columns written back), with a legend. Attempts
+  of `vdev_raidz_combrec` are one step each (the first 12 and the last 3, the others in one
+  line), and "Skip to the result" shows the rest. The read panel sits beside the map from about
+  1000 px of figure width, so a step's marks stay in view; below that it wraps under the map. A
+  visually hidden live region reads each new step once. The model (`raidz.ts`) is unchanged.
+- **The write hole** (`WriteHole`). Four steps instead of three: the reboot and the disk failure
+  are now separate, and the RAID-Z side gets its own disk failure, where A1 is rebuilt right.
+  With script, Back and Next step through both sides at once and the live region reads the two
+  new captions; without script every step shows, as before.
+- **No code links in the figures.** The readout's "code" links and the read's links are gone;
+  D21.1 keeps GitHub links in Source notes, and the five notes carry them (25 per language).
+- **Code.** Five Source notes, 70 lines (`ANALYSIS.md` RAID-Z room, excerpts 6 to 10: short
+  cuts of excerpts 1, 2, 3 and 5, and the read row, checked against `zfs-2.4.4`). The "three
+  depths" section is gone: its sentence and paragraph repeated the answer, and its detail is
+  in the notes. The raidz1 parity swap and RAID-Z expansion move to "What the figures leave
+  out".
+- **Rejected.** A per-child button on the map to fail a disk: the map is one `role="img"`, and
+  buttons inside it would be hidden from screen readers; the per-child selects stay. Animating
+  the read on a timer, as before: the issue asks for one step per action, and a timer cannot be
+  read at the reader's pace. Placing blocks where a real metaslab would: the allocator is
+  another room; consecutive blocks show the widths without it.
+- **Design review fixes (2026-10-23).** The sentence that explains a write sits right under the
+  size buttons, where the eye already is. Below 45rem the read panel's parts are ordered around
+  the map (damage, map, read buttons, newest step, older steps, key), so one press and its effect
+  fit on a phone screen; the step list shows newest first there (`column-reverse`), while screen
+  readers keep the oldest-first order and the live region announces each new step. The key
+  gains the two damage states, and the first read step says what each damaged child holds of
+  the block, so damaging a parity-only or empty child explains why nothing is rebuilt.
 
 ## v1.4 ARC room (ALG-193)
 

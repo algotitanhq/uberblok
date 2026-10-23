@@ -12,23 +12,22 @@ const r = room("history");
 <Base
   lang={lang}
   roomId="history"
-  title="Aile de l’histoire · Uberblok"
+  title="D’où vient ZFS ? L’histoire de ZFS · Uberblok"
   description="L’histoire de ZFS, de Sun Microsystems à OpenZFS, en une chronologie où chaque fait, chaque date et chaque nom renvoie à sa source."
 >
   <article class="wrap" data-sourced-page="history">
     <header class="room-head">
-      <p class="kicker">Aile {roomNumber(r.id)}</p>
-      <h1>{r.title.fr}</h1>
+      <p class="kicker">Aile {roomNumber(r.id)} · {r.title.fr}</p>
+      <h1>D’où vient ZFS ?</h1>
       <div class="prose">
         <p class="lead">
-          Le code cité dans les salles de ce musée a une histoire : une équipe, une entreprise, une licence, des
-          embranchements et des retrouvailles. Cette aile la raconte en jalons datés, et ne dit rien qu’une source ne
-          dise.
+          Cette page suit le code cité dans les salles, de Sun Microsystems au projet OpenZFS, sous forme de
+          chronologie datée.
         </p>
         <p class="muted">
-          Chaque fait, date, nom et citation ci-dessous porte une note numérotée qui mène à sa source, et chaque source
-          est listée, avec l’affirmation qu’elle étaye, dans <a href={SOURCES_URL}><code>SOURCES.md</code></a>. Faute
-          de source, un fait a été retiré. Les citations restent dans leur langue d’origine ; les traductions sont les
+          Chaque fait, date, nom et citation ci-dessous porte une note numérotée qui mène à sa source. Chaque source
+          est listée, avec l’affirmation qu’elle étaye, dans <a href={SOURCES_URL}><code>SOURCES.md</code></a>. Un fait
+          sans source a été retiré. Les citations restent dans leur langue d’origine ; les traductions sont les
           nôtres.
         </p>
       </div>

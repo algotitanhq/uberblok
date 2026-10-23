@@ -586,9 +586,53 @@ vdev_uberblock_load_done(zio_t *zio)
 
 This callback runs once per uberblock slot read, for every slot of every label of every readable leaf (the loops are in `vdev_uberblock_load_impl`, [`module/zfs/vdev_label.c#L1570-L1588`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1570-L1588)). L1547: a slot counts only if the read succeeded and `uberblock_verify` accepts the magic; the read itself goes through `zio_read_phys` with `ZIO_CHECKSUM_LABEL` ([`module/zfs/vdev_label.c#L197-L200`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L197-L200)), so a torn or garbage slot fails with an I/O error and is skipped. L1549-L1551: track the newest uberblock seen at all. L1552-L1562: track the best one not newer than `spa_load_max_txg` (this is the hook for rewinding to an older txg), and remember which vdev it came from so the matching config can be read from that vdev ([`module/zfs/vdev_label.c#L1647`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1647)).
 
+**Short excerpts for the question-first Hall (v1.4, ALG-205).** The Hall's Source notes show only these lines; the longer excerpts above stay as the analysis.
+
+### 3. `struct uberblock`, the fields the Hall shows — include/sys/uberblock_impl.h
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/uberblock_impl.h#L122-L128
+
+```c
+struct uberblock {
+	uint64_t	ub_magic;	/* UBERBLOCK_MAGIC		*/
+	uint64_t	ub_version;	/* SPA_VERSION			*/
+	uint64_t	ub_txg;		/* txg of last sync		*/
+	uint64_t	ub_guid_sum;	/* sum of all vdev guids	*/
+	uint64_t	ub_timestamp;	/* UTC time of last sync	*/
+	blkptr_t	ub_rootbp;	/* MOS objset_phys_t		*/
+```
+
+L123 `ub_magic` holds `UBERBLOCK_MAGIC`, 0x00bab10c ([L46](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/uberblock_impl.h#L46)). L125 `ub_txg`, the txg of the last sync, decides which uberblock wins on import. L128 `ub_rootbp`, the block pointer to the MOS, is the root every other block of the pool hangs from. The fields after L128 (software version, MMP, checkpoint, RAID-Z expansion) are left to the longer excerpt above.
+
+### 4. `vdev_uberblock_sync`, the slot of a txg — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1782-L1784
+
+```c
+	int m = spa_multihost(vd->vdev_spa) ? MMP_BLOCKS_PER_LABEL : 0;
+	int n = (ub->ub_txg - (RRSS_GET_STATE(ub) == RRSS_SCRATCH_VALID)) %
+	    (VDEV_UBERBLOCK_COUNT(vd) - m);
+```
+
+The slot is the txg modulo the number of slots, `VDEV_UBERBLOCK_COUNT(vd)`, the 128 KiB ring shifted right by the slot size, one sector clamped between 1 KiB and 8 KiB ([`include/sys/vdev_impl.h#L491-L496`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L491-L496)). With `multihost=on`, `m` is `MMP_BLOCKS_PER_LABEL`, 1 ([L488](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L488)), and the ring turns on one slot fewer. The `RRSS_SCRATCH_VALID` term moves an uberblock that carries RAID-Z expansion state back one slot, so it does not overwrite the committed uberblock of the same txg (comment at L1768-L1781). The same slot is then written in each of the four labels (L1792-L1796).
+
+### 5. `vdev_uberblock_load_done`, a valid uberblock and the newest — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1547-L1551
+
+```c
+	if (zio->io_error == 0 && uberblock_verify(ub) == 0) {
+		mutex_enter(&rio->io_lock);
+		if (vdev_uberblock_compare(ub, &cbp->ubl_latest) > 0) {
+			cbp->ubl_latest = *ub;
+		}
+```
+
+Called once per slot read on import. A slot counts only if the read succeeded and `uberblock_verify` finds the magic number, byte-swapping the record first if it was written on a machine of the other byte order (`module/zfs/uberblock.c` L33-L42). A slot whose checksum fails never gets this far: label reads use `ZIO_CHECKSUM_LABEL` (L199), a checksum embedded in the slot itself, so the read returns an error. `vdev_uberblock_compare` ([L1495-L1505](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1495-L1505)) orders uberblocks by `ub_txg`, then `ub_timestamp`, then the MMP sequence number when both carry one (L1506-L1527); the newest valid one is kept in `ubl_latest`.
+
 **What the animation shows.**
 - A disk opens to show its four labels; one label opens to show the ring of slots, each holding a small card with a txg number — `vl_uberblock` [`include/sys/vdev_impl.h#L539`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L539) and `VDEV_UBERBLOCK_COUNT` [`include/sys/vdev_impl.h#L495-L496`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L495-L496).
-- Import: every slot on every label lights up as it is read — loops in `vdev_uberblock_load_impl` L1578-L1585.
+- Import: every slot on every label lights up as it is read — loops in `vdev_uberblock_load_impl` L1577-L1585.
 - Cards with bad magic or a failed read fade out — `vdev_uberblock_load_done` L1547.
 - The card with the highest txg rises to the top; on a txg tie the timestamp decides — `vdev_uberblock_compare` L1498-L1505.
 - From the winning card a single arrow (`ub_rootbp`, L128) leads off-screen into the pool: the doorway to the next room.
@@ -950,6 +994,117 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 ```
 
 L10792: when no vdev configuration changed in this txg, the uberblock goes to at most `SPA_SYNC_MIN_VDEVS` (3, [`include/sys/spa.h#L363`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/spa.h#L363)) top-level vdevs, starting from a random one, skipping logs and vdevs without metaslabs (L10794-L10813); L10815 syncs those. L10816-L10818: otherwise every top-level vdev gets it. On each one, `vdev_uberblock_sync` reaches every leaf below it ([`module/zfs/vdev_label.c#L1741-L1744`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1741-L1744)), so on a pool of one disk that disk receives every uberblock.
+
+**Short excerpts for the question-first room (v1.4, ALG-185).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 12. `struct uberblock`, the root pointer — include/sys/uberblock_impl.h
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/uberblock_impl.h#L122-L128
+
+```c
+struct uberblock {
+	uint64_t	ub_magic;	/* UBERBLOCK_MAGIC		*/
+	uint64_t	ub_version;	/* SPA_VERSION			*/
+	uint64_t	ub_txg;		/* txg of last sync		*/
+	uint64_t	ub_guid_sum;	/* sum of all vdev guids	*/
+	uint64_t	ub_timestamp;	/* UTC time of last sync	*/
+	blkptr_t	ub_rootbp;	/* MOS objset_phys_t		*/
+```
+
+L125: `ub_txg`, the txg this uberblock commits; the import keeps the valid one with the highest. L127: `ub_timestamp`, the tie-breaker for two uberblocks of the same txg (excerpt 10). L128: `ub_rootbp`, the one block pointer, to the MOS `objset_phys_t`; `dsl_pool_sync_mos` sets it once the MOS is written ([`module/zfs/dsl_pool.c#L593`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_pool.c#L593)).
+
+### 13. `dbuf_dirty`, the parent level by level — module/zfs/dbuf.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dbuf.c#L2537-L2552
+
+```c
+	if (db->db_level+1 < dn->dn_nlevels) {
+		dmu_buf_impl_t *parent = db->db_parent;
+		dbuf_dirty_record_t *di;
+		int parent_held = FALSE;
+
+		if (db->db_parent == NULL || db->db_parent == dn->dn_dbuf) {
+			int epbs = dn->dn_indblkshift - SPA_BLKPTRSHIFT;
+			parent = dbuf_hold_level(dn, db->db_level + 1,
+			    db->db_blkid >> epbs, FTAG);
+			ASSERT(parent != NULL);
+			parent_held = TRUE;
+		}
+		if (drop_struct_rwlock)
+			rw_exit(&dn->dn_struct_rwlock);
+		ASSERT3U(db->db_level + 1, ==, parent->db_level);
+		di = dbuf_dirty(parent, tx);
+```
+
+Excerpt 6 without its last two lines (the release of the hold). L2537: a block below the top level of its object has a parent indirect block. L2542-L2545: the parent is at level + 1, block `db_blkid >> epbs`. L2552: dirtying the block dirties the parent, recursively; the top level is held by the dnode, which `dbuf_dirty` marks dirty in its own block of dnodes ([`module/zfs/dbuf.c#L2583`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dbuf.c#L2583)).
+
+### 14. `zio_write_compress`, children first — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L1932-L1939
+
+```c
+	/*
+	 * If our children haven't all reached the ready stage,
+	 * wait for them and then repeat this pipeline stage.
+	 */
+	if (zio_wait_for_children(zio, ZIO_CHILD_LOGICAL_BIT |
+	    ZIO_CHILD_GANG_BIT, ZIO_WAIT_READY)) {
+		return (NULL);
+	}
+```
+
+A block's write I/O is the child of its parent's write I/O: `dbuf_write` takes the parent's pending write as `pio` ([`module/zfs/dbuf.c#L5411`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dbuf.c#L5411), the dnode's I/O for the top level, [L5420](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dbuf.c#L5420)). L1936-L1939: the parent's write stops at this stage until every child is ready, that is has its new address and checksum. The ready callback `dbuf_write_ready` copies the child's new block pointer into the parent's buffer ([`module/zfs/dbuf.c#L5083-L5085`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dbuf.c#L5083-L5085)), so the parent is compressed and checksummed with the new pointers in it. The tree is therefore written bottom up: data, then each level of indirect blocks, then the dnode's block, then the objset. Children reach "ready" before their own I/O to the disk is done; the flush of excerpt 7 is what puts all of them on stable storage before the uberblock.
+
+### 15. `vdev_uberblock_sync`, the slot — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1782-L1784
+
+```c
+	int m = spa_multihost(vd->vdev_spa) ? MMP_BLOCKS_PER_LABEL : 0;
+	int n = (ub->ub_txg - (RRSS_GET_STATE(ub) == RRSS_SCRATCH_VALID)) %
+	    (VDEV_UBERBLOCK_COUNT(vd) - m);
+```
+
+Excerpt 2, the slot alone. `n` is `ub_txg` modulo the number of slots (one fewer per label with multihost). Consecutive txgs take consecutive slots, so the new uberblock never lands on the slot of the one the pool is using. The one exception is an uberblock that updates the current txg during a RAID-Z expansion (`RRSS_SCRATCH_VALID`): it takes `ub_txg` − 1, the slot before, for the same reason (the comment at L1768-L1781). The same `n` is written in the four labels of the disk ([`module/zfs/vdev_label.c#L1792-L1796`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1792-L1796)).
+
+### 16. `vdev_config_sync`, the two cases of a cut — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L2118-L2131
+
+```c
+	/*
+	 * Sync the uberblocks to all vdevs in svd[].
+	 * If the system dies in the middle of this step, there are two cases
+	 * to consider, and the on-disk state is consistent either way:
+	 *
+	 * (1)	If none of the new uberblocks made it to disk, then the
+	 *	previous uberblock will be the newest, and the odd labels
+	 *	(which had not yet been touched) will be valid with respect
+	 *	to that uberblock.
+	 *
+	 * (2)	If one or more new uberblocks made it to disk, then they
+	 *	will be the newest, and the even labels (which had all
+	 *	been successfully committed) will be valid with respect
+	 *	to the new uberblocks.
+```
+
+Excerpt 3, the comment of beat 3 alone: a cut before any new uberblock lands leaves the previous uberblock and the untouched odd labels; a cut after one lands leaves the new uberblock and the even labels written at beat 2. The figure's import replays both.
+
+### 17. `vdev_uberblock_load_done`, keep the newest valid — module/zfs/vdev_label.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_label.c#L1547-L1553
+
+```c
+	if (zio->io_error == 0 && uberblock_verify(ub) == 0) {
+		mutex_enter(&rio->io_lock);
+		if (vdev_uberblock_compare(ub, &cbp->ubl_latest) > 0) {
+			cbp->ubl_latest = *ub;
+		}
+		if (ub->ub_txg <= spa->spa_load_max_txg &&
+		    vdev_uberblock_compare(ub, cbp->ubl_ubbest) > 0) {
+```
+
+Called for every slot of every label the import reads. L1547: a slot counts only if its read succeeded, which checks the label checksum of the slot (a torn write fails it), and if `uberblock_verify` accepts it (magic number). L1549-L1551 track the newest valid uberblock seen at all. L1552-L1553: the one the import uses replaces the best so far when `vdev_uberblock_compare` (excerpt 10) ranks it higher, by txg and then timestamp, and only at or below `spa_load_max_txg`, which a rewind lowers (the excerpt stops at the opening of that branch; the full callback is the Hall's excerpt 2).
 
 **What the animation shows.**
 - The tree: the uberblock card at the top, one arrow (`ub_rootbp`) to the MOS objset, from its meta-dnode to a dnode, down `dn_nlevels` of indirect blocks to data — [`include/sys/uberblock_impl.h#L128`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/uberblock_impl.h#L128), [`include/sys/dnode.h#L216`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/dnode.h#L216), [`include/sys/dnode.h#L257`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/dnode.h#L257).
@@ -2424,6 +2579,123 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 ```
 
 Called for each block a resilver visits (below). L4018-L4019: if the raidz vdev's DTL (the txgs some child missed) does not contain the block's birth txg, nothing to do. L4021-L4022: a block that spans at least as many columns as there are children touches every child: resilver it. L4024-L4035: otherwise, only if one of the `s + nparity` children from `f` on has a dirty DTL. The comment at L4030-L4032 calls the per-child test "a good approximation".
+
+**Short excerpts for the question-first room (v1.4, ALG-187).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 6. `vdev_raidz_map_alloc`, the counts — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L634-L649
+
+```c
+	uint64_t q = s / (dcols - nparity);
+
+	/*
+	 * "Remainder": The number of partial stripe data sectors in this I/O.
+	 * This will add a sector to some, but not all, child vdevs.
+	 */
+	uint64_t r = s - q * (dcols - nparity);
+
+	/* The number of "big columns" - those which contain remainder data. */
+	uint64_t bc = (r == 0 ? 0 : r + nparity);
+
+	/*
+	 * The total number of data and parity sectors associated with
+	 * this I/O.
+	 */
+	uint64_t tot = s + nparity * (q + (r == 0 ? 0 : 1));
+```
+
+Excerpt 1 from its quotient on. L634: `q`, the full rows of data. L640: `r`, the data sectors left over. L643: `bc`, the "big columns" that get one sector more: the `r` columns of remainder data and the `nparity` parity columns, which must be as long as the longest data column. L649: `tot`, data plus parity, the sectors written for this block. Nothing here depends on any other block: the stripe is made for this one.
+
+### 7. `vdev_raidz_psize_to_asize`, the rounding — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2315-L2317
+
+```c
+	asize = ((psize - 1) >> ashift) + 1;
+	asize += nparity * ((asize + cols - nparity - 1) / (cols - nparity));
+	asize = roundup(asize, nparity + 1) << ashift;
+```
+
+Excerpt 2, the arithmetic alone. L2315: data sectors. L2316: `nparity` parity sectors for each started row of `cols - nparity` data sectors. L2317: rounded up to a multiple of `nparity + 1`; the extra sectors are the skip sectors of the map (`rm_nskip`, [L699](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L699)). A one-sector block costs `nparity + 1` sectors whatever the width ([L2302-L2303](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2302-L2303)).
+
+### 8. `vdev_raidz_io_start_read_row`, the columns a read asks for — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2573-L2588
+
+```c
+	for (int c = rr->rr_cols - 1; c >= 0; c--) {
+		raidz_col_t *rc = &rr->rr_col[c];
+		vdev_t *cvd = vd->vdev_child[rc->rc_devidx];
+
+		if (rc->rc_error || rc->rc_size == 0)
+			continue;
+
+		if (forceparity ||
+		    c >= rr->rr_firstdatacol || rr->rr_missingdata > 0 ||
+		    (zio->io_flags & (ZIO_FLAG_SCRUB | ZIO_FLAG_RESILVER))) {
+			zio_nowait(zio_vdev_child_io(zio, NULL, cvd,
+			    rc->rc_offset, rc->rc_abd, rc->rc_size,
+			    zio->io_type, zio->io_priority, 0,
+			    vdev_raidz_child_done, rc));
+		}
+	}
+```
+
+L2577-L2578: a column whose child is gone (`rc_error` set just above, [L2522-L2531](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L2522-L2531)) or that holds no data is not read. L2580-L2582: parity columns (`c < rr_firstdatacol`) are read only when a data column is missing (`rr_missingdata`), for a scrub or a resilver, or when parity is forced. A normal read of a healthy block reads its data columns and nothing else.
+
+### 9. `vdev_raidz_combrec`, the combinations — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3542-L3558
+
+```c
+		ltgts[-1] = -1;
+		for (int i = 0; i < num_failures; i++) {
+			ltgts[i] = i;
+		}
+		ltgts[num_failures] = n;
+
+		for (;;) {
+			int err = raidz_reconstruct(zio, ltgts, num_failures,
+			    nparity);
+			if (err == EINVAL) {
+				/*
+				 * Reconstruction not possible with this #
+				 * failures; try more failures.
+				 */
+				break;
+			} else if (err == 0)
+				return (0);
+```
+
+Inside the loop over `num_failures`, from 1 to `nparity` ([L3523](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3523)). L3542-L3546: the first combination is children 0 to `num_failures - 1`, with sentinels at both ends. L3549: `raidz_reconstruct` treats those children as wrong, rebuilds their data columns from parity and checks the parent's checksum again ([L3399](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3399)). L3551-L3556: `EINVAL`, more columns dead than parity can rebuild ([L3385-L3392](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3385-L3392)): try more failures. L3557-L3558: 0, the checksum verifies; the columns found wrong are then marked `ECKSUM` ([L3403-L3428](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3403-L3428)) and rewritten with the good data ([L3166-L3210](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3166-L3210)). The next combination is computed below ([L3560-L3598](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3560-L3598)), in the order the comment above the function lists ([L3467-L3490](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L3467-L3490)).
+
+### 10. `vdev_raidz_need_resilver`, the test — module/zfs/vdev_raidz.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_raidz.c#L4018-L4035
+
+```c
+	if (!vdev_dtl_contains(vd, DTL_PARTIAL, phys_birth, 1))
+		return (B_FALSE);
+
+	if (s + nparity >= dcols)
+		return (B_TRUE);
+
+	for (uint64_t c = 0; c < s + nparity; c++) {
+		uint64_t devidx = (f + c) % dcols;
+		vdev_t *cvd = vd->vdev_child[devidx];
+
+		/*
+		 * dsl_scan_need_resilver() already checked vd with
+		 * vdev_dtl_contains(). So here just check cvd with
+		 * vdev_dtl_empty(), cheaper and a good approximation.
+		 */
+		if (!vdev_dtl_empty(cvd, DTL_PARTIAL))
+			return (B_TRUE);
+	}
+```
+
+Excerpt 5 without its first lines (the sizes) and its last. L4018-L4019: the block was born outside the txgs some child missed: nothing to do. L4021-L4022: a block as wide as the vdev touches every child. L4024-L4035: otherwise, only if one of its `s + nparity` children from `f` on missed writes.
 
 **Resilver, as far as this room goes.** A healing resilver is a scan of the block tree, not of the disk. `dsl_scan_recurse` reads an indirect block and calls `dsl_scan_visitbp` on each block pointer in it ([module/zfs/dsl_scan.c#L2248-L2255](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L2248-L2255)); `dsl_scan_visitbp` ends by calling the scan function on the block ([module/zfs/dsl_scan.c#L2440](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L2440)), `dsl_scan_scrub_cb`, which skips a block born outside the scan's txg window ([module/zfs/dsl_scan.c#L4844-L4848](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L4844-L4848)) and, for a resilver, asks whether the block needs I/O ([module/zfs/dsl_scan.c#L4878-L4880](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L4878-L4880)): `dsl_scan_need_resilver` → `vdev_dtl_need_resilver` ([module/zfs/dsl_scan.c#L3805](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L3805), [module/zfs/vdev.c#L3184-L3194](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev.c#L3184-L3194)) → excerpt 5. For a healing resilver the window is the txg range of the DTLs: `vdev_resilver_needed(spa->spa_root_vdev, &scn_min_txg, &scn_max_txg)` ([module/zfs/dsl_scan.c#L914-L915](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_scan.c#L914-L915)). So the free space of a disk is never read or written by a resilver, and a block written while a child was healthy is skipped. The room says no more than this about resilver; the scan's queues, sorting and pacing are left to a later room.
 

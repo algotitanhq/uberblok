@@ -215,14 +215,14 @@ export function dispatchLine(S: SrStrings, snd: Send, rcv: Received, k: number):
 // ---------------------------------------------------------------- the strip and the receiver
 
 /** The stream: every record written at frame t, each with its drr_checksum. */
-export function strip(S: SrStrings, snd: Send, rcv: Received, t: number): string {
+export function strip(S: SrStrings, snd: Send, rcv: Received, t: number, mark = true): string {
   const w = written(snd, t);
   const r = received(snd, rcv, t);
   const bad = failed(snd, rcv, t) ? rcv.error!.i : -1;
-  const just = justWritten(snd, rcv, t);
+  const just = mark ? justWritten(snd, rcv, t) : new Set<number>();
   if (!w) return `<p class="muted">${S.stripEmpty}</p>`;
   const cards = snd.records.slice(0, w).map((x, i) => {
-    const ck = x.cksum ? `<span class="ck" title="drr_checksum">${shortCksum(x.cksum)}</span>` : `<span class="ck none">${S.noCk}</span>`;
+    const ck = x.cksum ? `<span class="ck" title="${S.ckTitle}">${shortCksum(x.cksum)}</span>` : `<span class="ck none">${S.noCk}</span>`;
     // The failing header, and the record before it that it was checking: neither is applied.
     const lost = bad >= 0 && i >= r && i < bad;
     const st = (i === bad ? " bad" : lost ? " lost" : i < r ? " done" : "") + (just.has(i) ? " just" : "");
@@ -233,7 +233,7 @@ export function strip(S: SrStrings, snd: Send, rcv: Received, t: number): string
 }
 
 /**
- * The records frame t touched, outlined until the next step (D29.1): those it
+ * The records frame t touched, outlined until the next step (DECISIONS.md D29.1): those it
  * wrote, the one the receiver applied, or the header it refused.
  */
 export function justWritten(snd: Send, rcv: Received, t: number): Set<number> {
@@ -337,7 +337,7 @@ export function history(S: SrStrings, snaps: Snapshot[]): string {
 /** The text version: the choice, every test, every record, the receiver's result. */
 export function describe(S: SrStrings, snd: Send, rcv: Received): string {
   const tests = snd.steps.map((_, i) => `<li>${stepLine(S, snd, i)}</li>`).join("");
-  const recs = snd.records.map((r) => `<li>${recLabel(S, snd, r)}${r.cksum ? `, drr_checksum ${shortCksum(r.cksum)}` : ""}</li>`).join("");
+  const recs = snd.records.map((r) => `<li>${recLabel(S, snd, r)}${r.cksum ? `, ${S.ckTitle} ${shortCksum(r.cksum)}` : ""}</li>`).join("");
   const end = rcv.error
     ? fill(S.vEcksum, { i: rcv.error.i, holds: kept(S, snd) })
     : fill(sameContent(rcv.content, contentOf(snd.to.root)) ? S.vSame : S.vDiffer, { to: snd.to.name, ck: shortCksum(snd.total) });

@@ -24,7 +24,6 @@ const { fr } = await import("../../src/lib/fr.ts");
 
 const strings = (lang) => ({
   ...Object.fromEntries(Object.entries(SEND_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])),
-  refs: new Proxy({}, { get: () => "#" }),
   lang,
 });
 const text = (html) => html.replace(/<[^>]+>/g, "").replace(/[  ]/g, " ");
@@ -98,7 +97,7 @@ test("counts: singular for 1 in English and Spanish, for 0 and 1 in French", () 
   assert.equal(V.plural(strings("es"), 1, "blk1", "blkN"), "1 bloque");
   // FREEOBJECTS names the file that is gone from @s4.
   assert.ok(lines("en").some((l) => /FREEOBJECTS.*: c is deleted\./.test(l)));
-  assert.ok(lines("fr").some((l) => /FREEOBJECTS.* ?: c est supprimé\./.test(l)));
+  assert.ok(lines("fr").some((l) => /FREEOBJECTS.*: c est supprimé\./.test(l)));
   assert.ok(lines("es").some((l) => /FREEOBJECTS.*: c se elimina\./.test(l)));
 });
 

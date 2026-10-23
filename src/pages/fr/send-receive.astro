@@ -57,10 +57,10 @@ const L = {
           Pour garder la copie d’un système de fichiers sur une autre machine, un outil qui travaille fichier par fichier, comme rsync, doit trouver ce qui a changé depuis la dernière copie. Il liste ou lit chaque fichier des deux côtés, à chaque fois, et il ne voit un changement qu’à travers les dates, les tailles ou les contenus qu’il compare. Sur un gros système de fichiers où peu de choses ont changé, presque tout ce travail ne trouve rien.
         </p>
         <p>
-          ZFS ne compare pas les fichiers. Chaque pointeur vers un bloc note le groupe de transactions, ou txg, dans lequel le bloc a été écrit. Un txg est un lot de modifications écrites ensemble sur le disque, et son numéro ne fait que croître. Un instantané pris au txg F ne contient aucun bloc écrit après F : ce qui a changé entre deux instantanés, ce sont donc les blocs du plus récent écrits après le txg du plus ancien. Quand ZFS modifie un bloc, il écrit aussi une nouvelle copie de chaque bloc au-dessus, jusqu’à la racine. Un bloc dont le txg est ancien n’a donc rien de nouveau en dessous de lui. Un envoi incrémental parcourt l’instantané le plus récent depuis le haut et saute chaque bloc plus ancien que F, avec tout ce qu’il y a en dessous, sans le lire.
+          ZFS ne compare pas les fichiers. Chaque pointeur vers un bloc note le groupe de transactions, ou txg, dans lequel le bloc a été écrit. Un txg est un lot de modifications écrites ensemble sur le disque, et son numéro ne fait que croître. Un instantané pris au txg F ne contient que des blocs écrits à F ou avant. Quand ZFS modifie un bloc, il écrit aussi une nouvelle copie de chaque bloc au-dessus, jusqu’à la racine. Un bloc écrit à F ou avant n’a donc rien de nouveau en dessous de lui. Un envoi incrémental parcourt l’instantané le plus récent depuis le haut et saute chacun de ces blocs, avec tout ce qu’il y a en dessous, sans le lire.
         </p>
         <p>
-          Ce que le parcours trouve devient un flux d’enregistrements : un WRITE pour chaque bloc de données, un FREE pour chaque plage vidée, un OBJECT pour chaque fichier. Chaque enregistrement porte une somme de contrôle de tout le flux qui le précède, et le côté réception la vérifie avant d’appliquer l’enregistrement. Un flux abîmé en route s’arrête au premier enregistrement fautif, et la réception est défaite. Un flux incrémental nomme aussi l’instantané dont il part, et le récepteur le refuse s’il ne détient pas cet instantané.
+          Ce que le parcours trouve devient un flux d’enregistrements : un WRITE pour chaque nouveau bloc de données, un FREE pour chaque plage vidée, un OBJECT qui décrit un fichier. Chaque enregistrement porte une somme de contrôle de tout le flux jusqu’à lui, son propre en-tête compris, et le côté réception la vérifie avant d’appliquer l’enregistrement. Un flux abîmé en route s’arrête au premier enregistrement fautif, et la réception est annulée. Un flux incrémental nomme aussi l’instantané dont il part, et le récepteur le refuse s’il ne détient pas cet instantané.
         </p>
       </div>
     </header>
@@ -69,10 +69,10 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Envoyer @s4, depuis l’instantané de votre choix</h2>
       <div class="prose">
         <p>
-          Le système de fichiers <code>tank/fs</code> a quatre instantanés, pris aux txg 10, 20, 30 et 40 (l’histoire au-dessus de l’arbre dit ce que chaque txg a changé). La figure envoie le dernier, <code>@s4</code>. À gauche se trouve son arbre, chaque pointeur de bloc avec le txg de naissance de son bloc. Au milieu, le flux, et à droite, le côté réception.
+          Le système de fichiers <code>tank/fs</code> a quatre instantanés, pris aux txg 10, 20, 30 et 40 (l’historique au-dessus de l’arbre dit ce que chaque txg a changé). La figure envoie le dernier, <code>@s4</code>. À gauche se trouve son arbre, chaque pointeur de bloc avec le txg de naissance de son bloc. Au milieu, le flux, et à droite, le côté réception.
         </p>
         <p>
-          Choisissez d’abord Aucun, pour un flux complet, et appuyez plusieurs fois sur Étape suivante. F vaut 0 : chaque pointeur est visité et chaque bloc part, soit 21 enregistrements et 11 672 octets. Choisissez ensuite <code>@s3</code>, que le récepteur détient déjà, et avancez de nouveau. Un pointeur né au txg 30 ou avant passe en pointillés, les blocs en dessous pâlissent, et ils ne sont jamais lus : 7 enregistrements, 2 184 octets. Chaque étape encadre ce qu’elle a fait : d’abord le pointeur testé et les enregistrements écrits, puis l’enregistrement que le récepteur a vérifié et les blocs que cet enregistrement a changés. Inversez un bit pour abîmer le flux en route : le récepteur s’arrête à l’en-tête suivant.
+          Choisissez d’abord Aucun, pour un flux complet, et appuyez plusieurs fois sur Étape suivante. F vaut 0 : chaque pointeur est visité et chaque bloc part, soit 21 enregistrements et 11 672 octets. Choisissez ensuite <code>@s3</code>, que le récepteur détient déjà, et avancez de nouveau. Un pointeur vers un bloc né au txg 30 ou avant passe en pointillés, les blocs en dessous pâlissent, et ils ne sont jamais lus : 7 enregistrements, 2 184 octets. Chaque étape encadre ce qu’elle a fait : d’abord le pointeur testé et les enregistrements écrits, puis l’enregistrement que le récepteur a vérifié et les blocs que cet enregistrement a changés. Inversez un bit pour abîmer le flux en route : le récepteur s’arrête à l’en-tête suivant.
         </p>
       </div>
       <SendLab lang={lang} />
@@ -132,7 +132,7 @@ const L = {
               },
               {
                 from: 278,
-                text: `Rendre la main ici saute le bloc et tout son sous-arbre : dans la figure, le pointeur passe en pointillés et ce qui est en dessous pâlit. Un trou de naissance 0 prend <a href="${L.zeroHoles}">la branche du dessus</a> et il est visité, car <code>send_holes_without_birth_time</code> vaut <a href="${L.holesDefault}">1 par défaut</a>.`,
+                text: `Ce retour saute le bloc et tout son sous-arbre : dans la figure, le pointeur passe en pointillés et ce qui est en dessous pâlit. Un trou de naissance 0 prend <a href="${L.zeroHoles}">la branche du dessus</a> et il est visité, car <code>send_holes_without_birth_time</code> vaut <a href="${L.holesDefault}">1 par défaut</a>.`,
               },
             ]}
           />
@@ -142,7 +142,7 @@ const L = {
       <div class="step">
         <h3>Des blocs aux enregistrements</h3>
         <p class="prose">
-          <code>send_cb</code> reçoit chaque bloc que le parcours visite. Un bloc de données devient un WRITE, un trou devient un FREE. Dans un bloc de dnodes visité, le dnode de chaque fichier (l’enregistrement qui décrit le fichier) devient un OBJECT, qu’il ait changé ou non, et chaque emplacement vide devient FREEOBJECTS. C’est pourquoi envoyer <code>@s4</code> depuis <code>@s3</code> envoie encore des OBJECT pour a et b : supprimer c a réécrit le bloc de dnodes que les trois fichiers partagent.
+          <code>send_cb</code> reçoit chaque bloc que le parcours visite. Un bloc de données devient un WRITE, un trou devient un FREE. Dans un bloc de dnodes visité, le dnode de chaque fichier (la structure sur disque qui décrit le fichier) devient un OBJECT, qu’il ait changé ou non, et chaque emplacement vide devient FREEOBJECTS. C’est pourquoi envoyer <code>@s4</code> depuis <code>@s3</code> envoie encore des OBJECT pour les fichiers a et b : supprimer le fichier c a réécrit le bloc de dnodes que les trois fichiers partagent.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>send_cb</code>, dmu_send.c</Fragment>
@@ -171,7 +171,7 @@ const L = {
       <div class="step">
         <h3>Une somme de contrôle qui court le long du flux</h3>
         <p class="prose">
-          <code>dump_record</code> écrit l’en-tête de chaque enregistrement. Juste avant, il prolonge une somme fletcher-4 courante sur l’en-tête et range sa valeur dans les 32 derniers octets de l’en-tête. La valeur de chaque enregistrement couvre donc chaque octet du flux qui le précède.
+          <code>dump_record</code> écrit l’en-tête de chaque enregistrement. Juste avant, il prolonge une somme fletcher-4 courante sur l’en-tête et range sa valeur dans les 32 derniers octets de l’en-tête. La valeur de chaque enregistrement couvre donc chaque octet du flux qui le précède, et son propre en-tête jusqu’à cette valeur.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>dump_record</code>, dmu_send.c</Fragment>
@@ -256,7 +256,7 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Ce que la figure laisse de côté</h2>
       <p class="prose muted">
-        La figure est petite : des fichiers de quatre blocs de 512 octets sous un bloc indirect, des blocs de quatre dnodes (un vrai bloc de dnodes de 16 Kio en contient 32), un meta-dnode dessiné avec ses deux blocs de dnodes, pas de tampon bonus. L’envoi s’y déroule d’une traite là où le code relie plusieurs fils (parcours, fusion, lecture, fil principal) par des files qui gardent l’ordre, et le récepteur démarre une fois le flux complet, là où le code reçoit par un tube au fil de l’écriture. Les en-têtes suivent la disposition de <code>dmu_replay_record_t</code>, seuls les champs utilisés par la figure étant remplis, et le récepteur applique chaque enregistrement comme <code>receive_process_record</code> le distribue, selon son type. Les flux expurgés, bruts (chiffrés), compressés et reprenables, les données embarquées, WRITE_BYREF et les blocs spill ne sont pas montrés, pas plus que des débits, qui dépendent des disques et du réseau, pas de ce code.
+        La figure est petite : des fichiers de quatre blocs de 512 octets sous un bloc indirect, des blocs de quatre dnodes (un vrai bloc de dnodes de 16 Kio en contient 32), un meta-dnode dessiné avec ses deux blocs de dnodes, pas de tampon bonus. L’envoi s’y déroule d’une traite là où le code relie plusieurs fils d’exécution (parcours, fusion, lecture, fil principal) par des files d’attente qui gardent l’ordre, et le récepteur démarre une fois le flux complet, là où le code reçoit par un tube au fil de l’écriture. Les en-têtes suivent la disposition de <code>dmu_replay_record_t</code>, seuls les champs utilisés par la figure étant remplis, et le récepteur applique chaque enregistrement comme <code>receive_process_record</code> le distribue, selon son type. Les flux expurgés, bruts (chiffrés), compressés et reprenables, les données embarquées, WRITE_BYREF et les blocs spill ne sont pas montrés, pas plus que des débits, qui dépendent des disques et du réseau, pas de ce code.
       </p>
     </section>
   </article>

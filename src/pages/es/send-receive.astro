@@ -57,10 +57,10 @@ const L = {
           Para mantener una copia de un sistema de archivos en otra máquina, una herramienta que trabaja archivo por archivo, como rsync, tiene que encontrar lo que cambió desde la última copia. Lista o lee cada archivo en los dos lados, cada vez, y solo ve un cambio a través de las fechas, los tamaños o los contenidos que compara. En un sistema de archivos grande donde ha cambiado poco, casi todo ese trabajo no encuentra nada.
         </p>
         <p>
-          ZFS no compara archivos. Cada puntero a un bloque anota el grupo de transacciones, o txg, en el que se escribió el bloque. Un txg es un lote de cambios que se escriben juntos en el disco, y su número solo crece. Una instantánea tomada en el txg F no contiene ningún bloque escrito después de F, así que lo que cambió entre dos instantáneas son los bloques de la más reciente escritos después del txg de la más antigua. Cuando ZFS cambia un bloque, también escribe copias nuevas de cada bloque que está por encima, hasta la raíz. Por eso un bloque con un txg antiguo no tiene nada nuevo por debajo. Un envío incremental recorre la instantánea más reciente desde arriba y se salta cada bloque más antiguo que F, con todo lo que hay por debajo, sin leerlo.
+          ZFS no compara archivos. Cada puntero a un bloque anota el grupo de transacciones, o txg, en el que se escribió el bloque. Un txg es un lote de cambios que se escriben juntos en el disco, y su número solo crece. Una instantánea tomada en el txg F solo contiene bloques escritos en F o antes. Cuando ZFS cambia un bloque, también escribe copias nuevas de cada bloque que está por encima, hasta la raíz. Por eso un bloque escrito en F o antes no tiene nada nuevo por debajo. Un envío incremental recorre la instantánea más reciente desde arriba y se salta cada uno de esos bloques, con todo lo que hay por debajo, sin leerlo.
         </p>
         <p>
-          Lo que encuentra el recorrido se convierte en un flujo de registros: un WRITE por cada bloque de datos, un FREE por cada intervalo que se vació, un OBJECT por cada archivo. Cada registro lleva una suma de comprobación de todo el flujo anterior, y el lado receptor la comprueba antes de aplicar el registro. Un flujo dañado por el camino se detiene en el primer registro erróneo, y la recepción se deshace. Un flujo incremental también nombra la instantánea de la que parte, y el receptor lo rechaza si no tiene esa instantánea.
+          Lo que encuentra el recorrido se convierte en un flujo de registros: un WRITE por cada bloque de datos nuevo, un FREE por cada intervalo que se vació, un OBJECT que describe un archivo. Cada registro lleva una suma de comprobación de todo el flujo hasta él, su propia cabecera incluida, y el lado receptor la comprueba antes de aplicar el registro. Un flujo dañado por el camino se detiene en el primer registro erróneo, y la recepción se deshace. Un flujo incremental también nombra la instantánea de la que parte, y el receptor lo rechaza si no tiene esa instantánea.
         </p>
       </div>
     </header>
@@ -69,10 +69,10 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Enviar @s4, desde la instantánea que elijas</h2>
       <div class="prose">
         <p>
-          El sistema de archivos <code>tank/fs</code> tiene cuatro instantáneas, tomadas en los txg 10, 20, 30 y 40 (la historia sobre el árbol dice qué cambió en cada txg). La figura envía la última, <code>@s4</code>. A la izquierda está su árbol, cada puntero de bloque con el txg en que nació su bloque. En el centro está el flujo, y a la derecha, el lado receptor.
+          El sistema de archivos <code>tank/fs</code> tiene cuatro instantáneas, tomadas en los txg 10, 20, 30 y 40 (el historial sobre el árbol dice qué cambió en cada txg). La figura envía la última, <code>@s4</code>. A la izquierda está su árbol, cada puntero de bloque con el txg en que nació su bloque. En el centro está el flujo, y a la derecha, el lado receptor.
         </p>
         <p>
-          Elige primero Ninguna, para un flujo completo, y pulsa Paso siguiente varias veces. F vale 0, así que se visitan todos los punteros y viajan todos los bloques: 21 registros, 11 672 bytes. Después elige <code>@s3</code>, que el receptor ya tiene, y avanza otra vez. Un puntero nacido en el txg 30 o antes pasa a línea discontinua, los bloques que tiene debajo se atenúan y nunca se leen: 7 registros, 2184 bytes. Cada paso recuadra lo que hizo: primero el puntero que comprobó y los registros que escribió, luego el registro que el receptor comprobó y los bloques que ese registro cambió. Invierte un bit para dañar el flujo por el camino, y el receptor se detiene en la cabecera siguiente.
+          Elige primero Ninguna, para un flujo completo, y pulsa Paso siguiente varias veces. F vale 0, así que se visitan todos los punteros y viajan todos los bloques: 21 registros, 11 672 bytes. Después elige <code>@s3</code>, que el receptor ya tiene, y avanza otra vez. Un puntero a un bloque nacido en el txg 30 o antes pasa a línea discontinua, los bloques que tiene debajo se atenúan y nunca se leen: 7 registros, 2184 bytes. Cada paso recuadra lo que hizo: primero el puntero que comprobó y los registros que escribió, luego el registro que el receptor comprobó y los bloques que ese registro cambió. Invierte un bit para dañar el flujo por el camino, y el receptor se detiene en la cabecera siguiente.
         </p>
       </div>
       <SendLab lang={lang} />
@@ -132,7 +132,7 @@ const L = {
               },
               {
                 from: 278,
-                text: `Volver aquí se salta el bloque y todo su subárbol: en la figura el puntero pasa a línea discontinua y lo que hay debajo se atenúa. Un hueco con nacimiento 0 toma <a href="${L.zeroHoles}">la rama de arriba</a> y se visita, ya que <code>send_holes_without_birth_time</code> vale <a href="${L.holesDefault}">1 por defecto</a>.`,
+                text: `Este retorno se salta el bloque y todo su subárbol: en la figura el puntero pasa a línea discontinua y lo que hay debajo se atenúa. Un hueco con nacimiento 0 toma <a href="${L.zeroHoles}">la rama de arriba</a> y se visita, ya que <code>send_holes_without_birth_time</code> vale <a href="${L.holesDefault}">1 por defecto</a>.`,
               },
             ]}
           />
@@ -142,7 +142,7 @@ const L = {
       <div class="step">
         <h3>De los bloques a los registros</h3>
         <p class="prose">
-          <code>send_cb</code> recibe cada bloque que visita el recorrido. Un bloque de datos se convierte en un WRITE y un hueco, en un FREE. En un bloque de dnodes visitado, el dnode de cada archivo (el registro que describe el archivo) se convierte en un OBJECT, haya cambiado o no, y cada ranura vacía, en FREEOBJECTS. Por eso enviar <code>@s4</code> desde <code>@s3</code> sigue enviando registros OBJECT para a y b: borrar c reescribió el bloque de dnodes que comparten los tres archivos.
+          <code>send_cb</code> recibe cada bloque que visita el recorrido. Un bloque de datos se convierte en un WRITE y un hueco, en un FREE. En un bloque de dnodes visitado, el dnode de cada archivo (la estructura en disco que describe el archivo) se convierte en un OBJECT, haya cambiado o no, y cada ranura vacía, en FREEOBJECTS. Por eso enviar <code>@s4</code> desde <code>@s3</code> sigue enviando registros OBJECT para los archivos a y b: borrar el archivo c reescribió el bloque de dnodes que comparten los tres archivos.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>send_cb</code>, dmu_send.c</Fragment>
@@ -161,7 +161,7 @@ const L = {
               {
                 from: 1143,
                 to: 1146,
-                text: `Un bloque de datos se convierte en un WRITE con sus datos; REDACT es de los envíos redactados. Un dnode se convierte en un OBJECT <a href="${L.dnodeRange}">unas líneas más arriba</a>, y <a href="${L.dnodeLoop}">cada dnode de un bloque de dnodes visitado</a> llega a esta función.`,
+                text: `Un bloque de datos se convierte en un WRITE con sus datos; REDACT es de los envíos expurgados (redacted). Un dnode se convierte en un OBJECT <a href="${L.dnodeRange}">unas líneas más arriba</a>, y <a href="${L.dnodeLoop}">cada dnode de un bloque de dnodes visitado</a> llega a esta función.`,
               },
             ]}
           />
@@ -171,7 +171,7 @@ const L = {
       <div class="step">
         <h3>Una suma de comprobación que recorre el flujo</h3>
         <p class="prose">
-          <code>dump_record</code> escribe la cabecera de cada registro. Justo antes, continúa una suma fletcher-4 sobre la cabecera y guarda su valor en los últimos 32 bytes de la cabecera. Así, el valor de cada registro cubre todos los bytes del flujo anterior.
+          <code>dump_record</code> escribe la cabecera de cada registro. Justo antes, continúa una suma fletcher-4 acumulada sobre la cabecera y guarda su valor en los últimos 32 bytes de la cabecera. Así, el valor de cada registro cubre todos los bytes del flujo anterior y de su propia cabecera hasta ese valor.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>dump_record</code>, dmu_send.c</Fragment>
@@ -215,7 +215,7 @@ const L = {
               {
                 from: 2861,
                 to: 2866,
-                text: `<code>drc_cksum</code> es la suma propia del receptor: <a href="${L.recvBegin}">empieza sobre BEGIN</a> y se acaba de continuar <a href="${L.recvSum}">sobre esta cabecera</a>. Si no coinciden, la recepción se detiene con <code>ECKSUM</code>. Una suma toda a ceros no se comprueba.`,
+                text: `<code>drc_cksum</code> es la suma propia del receptor: <a href="${L.recvBegin}">empieza sobre BEGIN</a> y se acaba de continuar <a href="${L.recvSum}">sobre esta cabecera</a>. Si no coinciden, la recepción se detiene con <code>ECKSUM</code>. Una suma con todos los bits a cero no se comprueba.`,
               },
               {
                 from: 2868,
@@ -256,7 +256,7 @@ const L = {
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Lo que la figura deja fuera</h2>
       <p class="prose muted">
-        La figura es pequeña: archivos de cuatro bloques de 512 bytes bajo un solo bloque indirecto, bloques de dnodes de cuatro dnodes (un bloque de dnodes real de 16 KiB contiene 32), un meta-dnode dibujado con sus dos bloques de dnodes, sin búfer bonus. El envío se ejecuta como una sola secuencia, mientras que el código une varios hilos (recorrido, fusión, lector, el hilo principal) mediante colas que conservan el orden, y el receptor empieza una vez completo el flujo, mientras que el código recibe a través de una tubería a medida que se escribe el flujo. Las cabeceras de los registros siguen la estructura de <code>dmu_replay_record_t</code>, con solo los campos que usa la figura rellenados, y el receptor aplica cada registro según su tipo, como lo reparte <code>receive_process_record</code>. No se muestran los flujos redactados, raw (cifrados), comprimidos y reanudables, los datos integrados, WRITE_BYREF ni los bloques spill; tampoco cifras de rendimiento, que dependen de los discos y de la red, no de este código.
+        La figura es pequeña: archivos de cuatro bloques de 512 bytes bajo un solo bloque indirecto, bloques de dnodes de cuatro dnodes (un bloque de dnodes real de 16 KiB contiene 32), un meta-dnode dibujado con sus dos bloques de dnodes, sin búfer bonus. El envío se ejecuta como una sola secuencia, mientras que el código une varios hilos (recorrido, fusión, lector, el hilo principal) mediante colas que conservan el orden, y el receptor empieza una vez completo el flujo, mientras que el código recibe a través de una tubería a medida que se escribe el flujo. Las cabeceras de los registros siguen la estructura de <code>dmu_replay_record_t</code>, con solo los campos que usa la figura rellenados, y el receptor aplica cada registro según su tipo, como lo reparte <code>receive_process_record</code>. No se muestran los flujos expurgados, raw (cifrados), comprimidos y reanudables, los datos integrados, WRITE_BYREF ni los bloques spill; tampoco cifras de rendimiento, que dependen de los discos y de la red, no de este código.
       </p>
     </section>
   </article>

@@ -60,17 +60,10 @@ const L = {
           work finds nothing.
         </p>
         <p>
-          ZFS does not compare files. Each pointer to a block records the transaction group, or txg, in which the block
-          was written. A txg is a batch of changes committed to disk together, and its number only grows. A snapshot
-          taken in txg F holds no block written after F, so what changed between two snapshots is the blocks of the
-          newer one written after the older one's txg. When ZFS changes a block, it also writes new copies of every block
-          above it, up to the root. A block with an old txg therefore has nothing new below it. An incremental send walks
-          the newer snapshot from the top and skips each block older than F, with everything below it, without reading
-          it.
+          ZFS does not compare files. Each pointer to a block records the transaction group, or txg, in which the block was written. A txg is a batch of changes committed to disk together, and its number only grows. A snapshot taken in txg F holds only blocks written in F or before. When ZFS changes a block, it also writes new copies of every block above it, up to the root. So a block written in F or before has nothing new below it. An incremental send walks the newer snapshot from the top and skips each such block, with everything below it, without reading it.
         </p>
         <p>
-          What the walk finds becomes a stream of records: a WRITE for each block of data, a FREE for each range that
-          was emptied, an OBJECT for each file. Each record carries a checksum of all the stream before it, and the
+          What the walk finds becomes a stream of records: a WRITE for each new block of data, a FREE for each range that was emptied, an OBJECT that describes a file. Each record carries a checksum of all the stream up to it, its own header included, and the
           receiving side checks that checksum before it applies the record. A stream damaged on the way stops at the
           first bad record, and the receive is undone. An incremental stream also names the snapshot it starts from,
           and the receiver refuses it unless it holds that snapshot.
@@ -90,7 +83,7 @@ const L = {
         <p>
           Choose None first, for a full stream, and press Next step a few times. F is 0, so every pointer is visited and
           every block travels: 21 records, 11,672 bytes. Then choose <code>@s3</code>, which the receiver already holds,
-          and step again. A pointer born at or before txg 30 turns dashed, the blocks below it fade, and they are never
+          and step again. A pointer to a block born at or before txg 30 turns dashed, the blocks below it fade, and they are never
           read: 7 records, 2,184 bytes. Each step outlines what it did, first the pointer it tested and the records it
           wrote, then the record the receiver checked and the blocks that record changed. Flip a bit to damage the
           stream on the way, and the receiver stops at the next header.
@@ -170,9 +163,8 @@ const L = {
         <h3>From blocks to records</h3>
         <p class="prose">
           <code>send_cb</code> gets every block the walk visits. A block of data becomes a WRITE and a hole becomes a
-          FREE. In a visited dnode block, each file's dnode (the record that describes the file) becomes an OBJECT,
-          changed or not, and each empty slot becomes FREEOBJECTS. That is why sending <code>@s4</code> from <code>@s3</code> still sends OBJECT records for a and b:
-          deleting c rewrote the dnode block the three files share.
+          FREE. In a visited dnode block, each file's dnode (the structure on disk that describes the file) becomes an OBJECT,
+          changed or not, and each empty slot becomes FREEOBJECTS. That is why sending <code>@s4</code> from <code>@s3</code> still sends OBJECT records for files a and b: deleting file c rewrote the dnode block the three files share.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>send_cb</code>, dmu_send.c</Fragment>
@@ -202,8 +194,7 @@ const L = {
         <h3>A checksum that runs through the stream</h3>
         <p class="prose">
           <code>dump_record</code> writes each record's header. Before it does, it carries a running fletcher-4
-          checksum over the header and stores the value in the header's last 32 bytes. So the value in each record
-          covers every byte of the stream before it.
+          checksum over the header and stores the value in the header's last 32 bytes. So the value in each record covers every byte of the stream before it, and its own header up to that value.
         </p>
         <SourceNote lang={lang}>
           <Fragment slot="label"><code>dump_record</code>, dmu_send.c</Fragment>

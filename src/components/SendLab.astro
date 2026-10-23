@@ -75,9 +75,9 @@ const t0 = lastFrame(snd, rcv);
     </section>
     <section class="panel stream" aria-labelledby={`sr-str-${lang}`}>
       <h3 id={`sr-str-${lang}`}>{S.streamLabel}</h3>
-      <div data-strip set:html={strip(S, snd, rcv, t0)} />
+      <div data-strip set:html={strip(S, snd, rcv, t0, false)} />
       <ul class="legend" aria-hidden="true">
-        <li><span class="kck">{S.keyCk}</span></li>
+        <li><span class="kck">57970fd7</span>{S.keyCk}</li>
         <li><span class="krec done">✓</span>{S.keyDone}</li>
         <li><span class="krec bad"></span>{S.keyBad}</li>
       </ul>
@@ -129,6 +129,8 @@ const t0 = lastFrame(snd, rcv);
     let snd: Send = sends[fi];
     let rcv: Received = receiveIt(snd);
     let t = lastFrame(snd, rcv);
+    // Outlines mean "what the last step did": none until a step is taken.
+    let marked = false;
 
     function compute() {
       snd = sends[fi];
@@ -139,18 +141,25 @@ const t0 = lastFrame(snd, rcv);
       q("[data-now]").innerHTML = text;
     }
 
-    // On a phone the figure is taller than the screen: after a press, bring what
-    // the step outlined into view above the bar, which sticks to the bottom of
-    // the screen with Next step under the thumb (as in the TXG room, D24.1).
-    const phone = matchMedia("(max-width: 40rem)");
+    // The figure is often taller than the screen: after a press of Next step,
+    // bring what the step outlined into view above the bar, which sticks to the
+    // bottom of the screen (as in the TXG and ARC rooms, D24.1, D25.1).
+    /** What frame t outlined: the pointer or dnode it tested, else what the receiver changed, else the records. */
+    function target(): Element | null {
+      const pick = (...sel: string[]) => sel.map((s) => root.querySelector(s)).find(Boolean) ?? null;
+      if (t > 0 && t <= snd.steps.length) return pick("[data-tree] .cur", "[data-strip] .rec.just");
+      return pick("[data-receiver] .verdict", "[data-receiver] .blk.new", "[data-receiver] li.new", "[data-strip] .rec.just");
+    }
     function show() {
-      if (!phone.matches) return;
-      const el = root.querySelector("[data-tree] .cur, [data-receiver] .blk.new, [data-receiver] li.new, [data-receiver] .verdict, [data-strip] .rec.just");
+      const el = target();
       if (!el) return;
       const r = el.getBoundingClientRect();
+      // Stop above the bar, whose height follows the line; a part taller than
+      // the room above the bar is aligned on its top.
       const room = Math.min(q(".sr-stepbar").getBoundingClientRect().top, innerHeight) - 8;
       if (r.top >= 8 && r.bottom <= room) return;
-      window.scrollBy({ top: r.top < 8 ? r.top - 8 : r.bottom - room, behavior: reducedMotion() ? "auto" : "smooth" });
+      const by = r.top < 8 || r.bottom - r.top > room - 8 ? r.top - 8 : r.bottom - room;
+      window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
     }
 
     function controls() {
@@ -169,13 +178,14 @@ const t0 = lastFrame(snd, rcv);
 
     function draw() {
       q("[data-tree]").innerHTML = tree(S, snd, t);
-      q("[data-strip]").innerHTML = strip(S, snd, rcv, t);
+      q("[data-strip]").innerHTML = strip(S, snd, rcv, t, marked);
       q("[data-receiver]").innerHTML = receiver(S, snd, rcv, t);
       q("[data-counters]").innerHTML = counters(S, snd, t);
       controls();
     }
 
     function render() {
+      marked = false;
       draw();
       q("[data-table]").innerHTML = table(S, sends, fi);
       q("[data-summary]").textContent = summary(S, snd);
@@ -195,12 +205,10 @@ const t0 = lastFrame(snd, rcv);
     function stepTo(n: number, quiet = false) {
       const before = root.querySelectorAll("[data-strip] .rec").length;
       t = n;
+      marked = true;
       draw();
       pulse(before);
-      if (!quiet) {
-        say(frameLine(S, snd, rcv, t));
-        show();
-      }
+      if (!quiet) say(frameLine(S, snd, rcv, t));
     }
 
     async function play() {
@@ -250,7 +258,10 @@ const t0 = lastFrame(snd, rcv);
         t = lastFrame(snd, rcv);
         render();
         say(frameLine(S, snd, rcv, t));
-      } else if (d.act === "step") stepTo(t >= lastFrame(snd, rcv) ? 0 : t + 1);
+      } else if (d.act === "step") {
+        stepTo(t >= lastFrame(snd, rcv) ? 0 : t + 1);
+        show();
+      }
       else if (d.act === "end") stepTo(lastFrame(snd, rcv));
       else if (d.act === "play") void play();
     });
@@ -565,8 +576,10 @@ const t0 = lastFrame(snd, rcv);
     background: var(--bad-soft);
   }
   .kck {
+    flex: none;
     font-family: var(--font-mono);
     font-size: 0.72rem;
+    color: var(--fg);
   }
   .krec {
     display: inline-block;
@@ -647,12 +660,20 @@ const t0 = lastFrame(snd, rcv);
     background: var(--bad-soft);
     border-left: 3px solid var(--bad);
   }
-  /* Next step and the line that says what it did, right under the figure. */
+  /* Next step and the line that says what it did, right under the figure. The
+     bar sticks to the bottom of the screen while the figure is in view, so the
+     button stays in reach whatever part of the figure is on screen. */
   .sr-stepbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
     display: flex;
     gap: var(--space-3);
-    align-items: flex-start;
-    margin-top: var(--space-4);
+    align-items: center;
+    margin: var(--space-4) calc(-1 * var(--space-2)) 0;
+    padding: var(--space-2);
+    background: var(--bg);
+    border-top: 1px solid var(--line-strong);
   }
   .sr-stepbar .btn {
     flex: none;
@@ -739,18 +760,6 @@ const t0 = lastFrame(snd, rcv);
     .tree-wrap :global(ul ul) {
       padding-left: var(--space-2);
       margin-left: var(--space-1);
-    }
-    /* Phone: Next step and its line stay at the bottom of the screen while the
-       figure is in view; the bar's sticky range is the whole figure. */
-    .sr-stepbar {
-      position: sticky;
-      bottom: 0;
-      z-index: 2;
-      align-items: center;
-      margin: var(--space-4) calc(-1 * var(--space-2)) 0;
-      padding: var(--space-2);
-      background: var(--bg);
-      border-top: 1px solid var(--line-strong);
     }
     .sr-now {
       min-height: 0;

@@ -2,7 +2,7 @@
 // The Hall's object: one label's 128 KiB uberblock ring. It opens in 3D after
 // the first paint of the 2D ring and commits a txg every few seconds by itself,
 // with a pause button (src/lib/hall-3d.ts, DECISIONS.md D12.5 and D14.2), and a
-// Next txg button that commits one txg per press, with or without motion (D21.2).
+// Next txg button that commits one txg per press, with or without motion (D21.3).
 // Under reduced motion or without WebGL, the 2D ring stays, still.
 // Slot size is 1 << clamp(ashift, 10, 13) (vdev_impl.h L491-L496), so the slot
 // count follows the sector size (DECISIONS.md D0.7). The uberblock of txg N goes
@@ -278,7 +278,7 @@ const choices = [
       clock();
       say(paused ? fill(t.paused, { txg }) : t.playing);
     });
-    // One txg per press (D21.2): the clock stops, so the reader sees each step.
+    // One txg per press (D21.3): the clock stops, so the reader sees each step.
     stepBtn.addEventListener("click", () => {
       if (!paused && moving) {
         paused = true;

@@ -36,7 +36,8 @@ const t = UI[Astro.props.lang];
     gap: var(--space-2);
     min-height: 44px;
     padding: 0 var(--space-4) 0 var(--space-3);
-    border: 1px solid var(--line-strong);
+    /* A step stronger than --line-strong, so the pill reads as a control (about 3:1). */
+    border: 1px solid color-mix(in srgb, var(--fg-faint) 65%, var(--line-strong));
     border-radius: 999px;
     font-size: var(--step--1);
     color: var(--fg-muted);
@@ -50,6 +51,10 @@ const t = UI[Astro.props.lang];
   .source-note[open] summary {
     color: var(--fg);
     border-color: var(--accent);
+  }
+  /* The open note, inline or in the panel, is easy to find again in the text. */
+  .source-note[open] summary {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
   .marker {
     flex: none;
@@ -71,11 +76,18 @@ const t = UI[Astro.props.lang];
   .label :global(code) {
     font-size: 0.95em;
   }
-  .in-panel summary {
-    background: var(--surface-2);
-  }
   .source-body {
     padding-bottom: var(--space-2);
+  }
+  /* Inline, a rule on the left shows where the note ends. */
+  .source-note > .source-body {
+    margin-top: var(--space-2);
+    padding-left: var(--space-3);
+    border-left: 2px solid var(--line);
+  }
+  /* The summary (or the panel's title) already names the symbol. */
+  .source-body :global(.excerpt .symbol) {
+    display: none;
   }
   .source-body > :global(.excerpt:first-child) {
     margin-top: var(--space-4);

@@ -1,11 +1,15 @@
-// HTML for the RAID-Z room's figure, built from a Layout of src/lib/raidz.ts.
+// HTML for the RAID-Z room's figure, built from Layouts of src/lib/raidz.ts.
 // Plain strings, no DOM: the page renders the default layout at build time
 // (readable without JavaScript) and the script renders the visitor's choices
-// with the same functions.
+// with the same functions. No links to the code: they live in the room's
+// Source notes (DECISIONS.md D21.1, D23.1).
 import { decimal } from "./l10n";
-import type { Layout, ReadResult, Attempt } from "./raidz";
+import { needResilver, type Layout, type ReadResult, type Attempt } from "./raidz";
 
-export type RzStrings = Record<string, string> & { refs: Record<string, string> };
+export type RzStrings = Record<string, string>;
+
+/** The name of the i-th block written: A, B, C, ... */
+export const blockName = (i: number) => String.fromCharCode(65 + (i % 26));
 
 const fill = (tpl: string, vars: Record<string, string | number>) =>
   tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
@@ -19,36 +23,32 @@ export function bytes(n: number, lang: string): string {
 }
 
 const code = (s: string) => `<code>${s}</code>`;
-const ref = (href: string, label: string) => `<a href="${href}">${label}</a>`;
 
 /** The counters of vdev_raidz_map_alloc and psize_to_asize, with their values. */
-export function readout(L: Layout, S: RzStrings, lang: string): string {
+export function readout(L: Layout, lang: string): string {
   const dw = L.dcols - L.nparity;
   const sector = 2 ** L.ashift;
   const asec = L.asize / sector;
-  const rows: [string, string, string, string][] = [
-    ["s", `⌈psize / 2<sup>ashift</sup>⌉ = ⌈${L.psize} / ${sector}⌉`, String(L.s), "s"],
-    ["f", `b % dcols = ${L.b} % ${L.dcols}`, String(L.f), "f"],
-    ["o", `b / dcols = ${L.b} / ${L.dcols}`, String(L.o), "o"],
-    ["q", `s / (dcols − nparity) = ${L.s} / ${dw}`, String(L.q), "q"],
-    ["r", `s − q × ${dw} = ${L.s} − ${L.q * dw}`, String(L.r), "r"],
-    ["bc", L.r === 0 ? "r = 0" : `r + nparity = ${L.r} + ${L.nparity}`, String(L.bc), "bc"],
-    ["tot", `s + nparity × (q + ${L.r === 0 ? 0 : 1}) = ${L.s} + ${L.nparity} × ${L.q + (L.r === 0 ? 0 : 1)}`, String(L.tot), "tot"],
-    ["acols", L.q === 0 ? "q = 0 : bc" : "dcols", String(L.acols), "cols"],
-    ["scols", L.q === 0 ? `min(dcols, roundup(bc, ${L.nparity + 1}))` : "dcols", String(L.scols), "cols"],
-    ["rm_nskip", `roundup(tot, ${L.nparity + 1}) − tot = ${L.tot + L.nskip} − ${L.tot}`, String(L.nskip), "nskip"],
+  const rows: [string, string, string][] = [
+    ["b", `io_offset / 2<sup>ashift</sup> = ${L.offset} / ${sector}`, String(L.b)],
+    ["s", `⌈psize / 2<sup>ashift</sup>⌉ = ⌈${L.psize} / ${sector}⌉`, String(L.s)],
+    ["f", `b % dcols = ${L.b} % ${L.dcols}`, String(L.f)],
+    ["o", `b / dcols = ${L.b} / ${L.dcols}`, String(L.o)],
+    ["q", `s / (dcols − nparity) = ${L.s} / ${dw}`, String(L.q)],
+    ["r", `s − q × ${dw} = ${L.s} − ${L.q * dw}`, String(L.r)],
+    ["bc", L.r === 0 ? "r = 0" : `r + nparity = ${L.r} + ${L.nparity}`, String(L.bc)],
+    ["tot", `s + nparity × (q + ${L.r === 0 ? 0 : 1}) = ${L.s} + ${L.nparity} × ${L.q + (L.r === 0 ? 0 : 1)}`, String(L.tot)],
+    ["acols", L.q === 0 ? "q = 0 : bc" : "dcols", String(L.acols)],
+    ["scols", L.q === 0 ? `min(dcols, roundup(bc, ${L.nparity + 1}))` : "dcols", String(L.scols)],
+    ["rm_nskip", `roundup(tot, ${L.nparity + 1}) − tot = ${L.tot + L.nskip} − ${L.tot}`, String(L.nskip)],
     [
       "asize",
       `roundup(${L.s} + ${L.nparity} × ⌈${L.s} / ${dw}⌉, ${L.nparity + 1}) = ${asec} × ${sector}`,
       `${L.asize} (${bytes(L.asize, lang)})`,
-      "asize",
     ],
   ];
   const items = rows
-    .map(
-      ([k, f, v, r]) =>
-        `<div><dt>${code(k)}</dt><dd><span class="f">${f}</span> <span class="eq">=</span> <strong>${v}</strong> ${ref(S.refs[r], S.see)}</dd></div>`,
-    )
+    .map(([k, f, v]) => `<div><dt>${code(k)}</dt><dd><span class="f">${f}</span> <span class="eq">=</span> <strong>${v}</strong></dd></div>`)
     .join("");
   return `<dl class="rz-readout">${items}</dl>`;
 }
@@ -58,14 +58,15 @@ const count = (S: RzStrings, lang: string, n: number, one: string, many: string)
   fill((lang === "fr" ? n < 2 : n === 1) ? S[one] : S[many], { n });
 
 /** One-line summary: sectors of each kind and the cost. */
-export function summary(L: Layout, S: RzStrings, lang: string): string {
+export function summary(L: Layout, S: RzStrings, lang: string, name = "A"): string {
   const parity = L.cols.filter((c) => c.parity).reduce((a, c) => a + c.size, 0);
   const ratio = (L.asize / L.psize).toFixed(2);
   return fill(S.summary, {
+    name,
     psize: bytes(L.psize, lang),
     s: count(S, lang, L.s, "secData1", "secDataN"),
     p: count(S, lang, parity, "secParity1", "secParityN"),
-    k: count(S, lang, L.nskip, "secSkip1", "secSkipN"),
+    k: L.nskip ? count(S, lang, L.nskip, "secSkip1", "secSkipN") : "",
     asize: bytes(L.asize, lang),
     ratio: decimal(lang, ratio),
     used: L.acols,
@@ -73,21 +74,40 @@ export function summary(L: Layout, S: RzStrings, lang: string): string {
   });
 }
 
-/** The map: one column per child, one row per sector from o, a context row above and below. */
-export function grid(L: Layout, S: RzStrings): string {
-  const first = Math.max(0, L.o - 1);
-  let last = 0;
-  for (const c of L.cols) last = Math.max(last, c.off + c.size + (c.skip ? 1 : 0));
-  last += 1; // one row of context below
+/** The rows the map shows at most: older blocks scroll off the top past this. */
+export const MAX_ROWS = 24;
+
+/**
+ * The map: one column per child, one row per sector, a context row above and
+ * below. `L` is the block the controls describe (drawn in full, numbered by
+ * sector); `older` are the blocks written before it on the same vdev, drawn
+ * faded and labelled with their letter, so the reader sees each stripe take
+ * its own width.
+ */
+export function grid(L: Layout, S: RzStrings, older: Layout[] = []): string {
+  const all = [...older, L];
+  const end = (B: Layout) => Math.max(...B.cols.map((c) => c.off + c.size + (c.skip ? 1 : 0)));
+  const last = Math.max(...all.map(end)) + 1; // one row of context below
+  const lo = Math.max(0, Math.min(...all.map((B) => B.o)) - 1);
+  // The live block is always drawn whole; older blocks may be cut at the top.
+  const first = Math.min(Math.max(0, L.o - 1), Math.max(lo, last - MAX_ROWS));
   const nrows = last - first;
-  const dense = nrows > 26;
-  // cell[dev][row] = what is there
-  type Cell = { cls: string; label: string; order: number; c: number };
+  // Labels go only when the live block alone is too tall; older blocks are cut instead.
+  const dense = last - Math.max(0, L.o - 1) > 26;
+  type Cell = { cls: string; label: string; order?: number; c?: number; block?: string };
   const cells: (Cell | null)[][] = Array.from({ length: L.dcols }, () => Array(nrows).fill(null));
-  let order = 0;
   const put = (dev: number, row: number, cell: Cell) => {
     if (row >= first && row < last) cells[dev][row - first] = cell;
   };
+  older.forEach((B, i) => {
+    const name = blockName(i);
+    const tone = `o o${i % 2}`;
+    for (const col of B.cols) {
+      for (let k = 0; k < col.size; k++) put(col.dev, col.off + k, { cls: col.parity ? `${tone} op` : tone, label: name, block: name });
+      if (col.skip) put(col.dev, col.off + col.size, { cls: `${tone} k`, label: "", block: name });
+    }
+  });
+  let order = 0;
   const data = L.cols.filter((c) => !c.parity && c.size > 0);
   for (const col of data)
     for (let i = 0; i < col.size; i++) put(col.dev, col.off + i, { cls: `d d${(col.c - L.nparity) % 2}`, label: String(col.data + i), order: order++, c: col.c });
@@ -99,7 +119,7 @@ export function grid(L: Layout, S: RzStrings): string {
     const col = L.cols.find((c) => c.dev === d && (c.size > 0 || c.skip));
     return col ? (col.name || S.skipShort) : "";
   });
-  const head = Array.from({ length: L.dcols }, (_, d) => `<span class="h" data-dev="${d}">${d}</span>`).join("");
+  const head = Array.from({ length: L.dcols }, (_, d) => `<span class="h${role[d] ? "" : " idle"}" data-dev="${d}">${d}</span>`).join("");
   const roles = role.map((r, d) => `<span class="role" data-dev="${d}">${r}</span>`).join("");
   let body = "";
   for (let i = 0; i < nrows; i++) {
@@ -108,9 +128,9 @@ export function grid(L: Layout, S: RzStrings): string {
     body += `<span class="rn">${showRow ? row : ""}</span>`;
     for (let d = 0; d < L.dcols; d++) {
       const c = cells[d][i];
-      body += c
-        ? `<span class="cell ${c.cls}" data-dev="${d}" data-c="${c.c}" data-n="${c.order}">${dense ? "" : c.label}</span>`
-        : `<span class="cell e" data-dev="${d}"></span>`;
+      if (!c) body += `<span class="cell e" data-dev="${d}"></span>`;
+      else if (c.block) body += `<span class="cell ${c.cls}" data-dev="${d}" data-block="${c.block}">${dense ? "" : c.label}</span>`;
+      else body += `<span class="cell ${c.cls}" data-dev="${d}" data-c="${c.c}" data-n="${c.order}">${dense ? "" : c.label}</span>`;
     }
   }
   return (
@@ -119,8 +139,8 @@ export function grid(L: Layout, S: RzStrings): string {
   );
 }
 
-/** Text version of the map, column by column, in the order of rr_col[]. */
-export function describe(L: Layout, S: RzStrings, lang: string): string {
+/** Text version of the map, column by column, in the order of rr_col[]; older blocks in one line each. */
+export function describe(L: Layout, S: RzStrings, lang: string, older: Layout[] = []): string {
   const items = L.cols.map((col) => {
     const v = { c: col.c, dev: col.dev, off: col.off, n: col.size, from: col.data, to: col.data + col.size - 1, name: col.name };
     let t = col.parity ? fill(S.dParity, { ...v, n: count(S, lang, col.size, "secParity1", "secParityN") }) : col.size > 0 ? fill(col.size === 1 ? S.dData1 : col.size === 2 ? S.dData2 : S.dData, v) : fill(S.dEmpty, v);
@@ -128,43 +148,117 @@ export function describe(L: Layout, S: RzStrings, lang: string): string {
     return `<li>${t}</li>`;
   });
   const swap = L.swapped ? `<p>${S.swapped}</p>` : "";
-  return `<p>${summary(L, S, lang)}</p>${swap}<ol>${items.join("")}</ol>`;
+  const before = older.length
+    ? `<p>${S.dBefore}</p><ul>${older.map((B, i) => `<li>${fill(S.dOlder, { name: blockName(i), psize: bytes(B.psize, lang), w: B.acols, b: B.b, asize: bytes(B.asize, lang) })}</li>`).join("")}</ul>`
+    : "";
+  return `${before}<p>${summary(L, S, lang, blockName(older.length))}</p>${swap}<ol>${items.join("")}</ol>`;
 }
 
 const childList = (devs: number[], S: RzStrings) => devs.map((d) => fill(S.childN, { d })).join(", ");
 
-/** The read, step by step, as list items (HTML). */
-export function readSteps(L: Layout, R: ReadResult, S: RzStrings): { steps: string[]; attempts: string[]; result: string } {
+/**
+ * One step of a read, as the figure shows it: the text, and what it lights
+ * up in the map. `lit`: columns read or used; `rebuilt`: data columns rebuilt
+ * from parity; `sim`: children assumed wrong for this attempt; `fixed`:
+ * columns written back; `tone`: whether the step ends well.
+ */
+export interface ReadStep {
+  html: string;
+  kind: "step" | "attempt" | "result";
+  lit?: number[];
+  rebuilt?: number[];
+  sim?: number[];
+  fixed?: number[];
+  tone?: "ok" | "bad";
+}
+
+/** Attempts shown one per step: the first 12 and the last 3, the others in one line. */
+export function shownAttempts(n: number): number[] {
+  return n <= 16 ? [...Array(n).keys()] : [...Array(12).keys(), n - 3, n - 2, n - 1];
+}
+
+/** What child `d` holds of block `block`, in one sentence: the reader sees why a damaged child matters to this read, or not. */
+export function holds(L: Layout, S: RzStrings, d: number, block: string): string {
+  const mine = L.cols.filter((c) => c.dev === d);
+  const written = mine.filter((c) => c.size > 0);
+  const v = { d, name: block, cols: written.map((c) => c.name).join(", ") };
+  if (written.some((c) => !c.parity)) return fill(S.holdsData, v);
+  if (written.length) return fill(S.holdsParity, v);
+  return fill(mine.some((c) => c.skip) ? S.holdsSkip : S.holdsNone, v);
+}
+
+/** One line under the damage heading: which children hold the block's data, and which its parity. */
+export function roles(L: Layout, S: RzStrings, block: string): string {
+  const devs = (parity: boolean) => {
+    const ds = L.cols.filter((c) => c.parity === parity && c.size > 0).map((c) => c.dev).sort((a, b) => a - b);
+    return fill(ds.length === 1 ? S.oneChild : S.manyChildren, { list: ds.join(", ") });
+  };
+  return fill(S.roles, { name: block, data: devs(false), parity: devs(true) });
+}
+
+/** The read of the live block, one step per press of "Next step". */
+export function readPlan(L: Layout, R: ReadResult, S: RzStrings, health: string[], block = "A"): ReadStep[] {
   const name = (c: number) => L.cols[c].name;
   const dev = (c: number) => L.cols[c].dev;
   const names = (cs: number[]) => cs.map((c) => `${name(c)} (${fill(S.childN, { d: dev(c) })})`).join(", ");
-  const steps: string[] = [];
-  if (R.missing.length) steps.push(`${fill(S.rMissing, { cols: names(R.missing) })} ${ref(S.refs.enxio, S.see)}`);
-  steps.push(
-    `${fill(R.firstRead.some((c) => L.cols[c].parity) ? S.rFirstParity : S.rFirst, { cols: R.firstRead.map(name).join(", ") })} ${ref(S.refs.readRow, S.see)}`,
-  );
-  if (R.known) steps.push(`${fill(R.known.ok ? S.rKnownOk : S.rKnownBad, { cols: R.missing.filter((c) => !L.cols[c].parity).map(name).join(", "), parity: R.known.parity.join(" + ") })} ${ref(S.refs.known, S.see)}`);
-  if (R.firstCksum) steps.push(`${S.rCksumOk} ${ref(S.refs.cksum, S.see)}`);
-  else if (R.tooMany) steps.push(`${fill(S.rTooMany, { n: R.missing.length, np: L.nparity })} ${ref(S.refs.tooMany, S.see)}`);
-  else {
-    steps.push(`${S.rCksumBad} ${ref(S.refs.cksum, S.see)}`);
-    steps.push(`${R.readAll.length ? fill(S.rReadAll, { cols: R.readAll.map(name).join(", ") }) : S.rReadAllNone} ${ref(S.refs.readAll, S.see)}`);
-    steps.push(`${fill(S.rCombrec, { np: L.nparity, n: L.dcols })} ${ref(S.refs.combrec, S.see)}`);
+  const byName = (ns: string[]) => ns.map((n) => L.cols.findIndex((c) => c.name === n)).filter((c) => c >= 0);
+  const dataCols = L.cols.slice(0, L.acols).filter((c) => !c.parity).map((c) => c.c);
+  const out: ReadStep[] = [];
+  const step = (s: Omit<ReadStep, "kind">) => out.push({ kind: "step", ...s });
+  const damaged = health.map((h, d) => (h === "ok" ? -1 : d)).filter((d) => d >= 0);
+  if (damaged.length) step({ html: damaged.map((d) => holds(L, S, d, block)).join(" ") });
+  if (R.missing.length) step({ html: fill(S.rMissing, { cols: names(R.missing) }), tone: "bad" });
+  step({
+    html: fill(R.firstRead.some((c) => L.cols[c].parity) ? S.rFirstParity : S.rFirst, { cols: R.firstRead.map(name).join(", ") }),
+    lit: R.firstRead,
+  });
+  if (R.known) {
+    const rebuilt = R.missing.filter((c) => !L.cols[c].parity);
+    step({
+      html: fill(R.known.ok ? S.rKnownOk : S.rKnownBad, { cols: rebuilt.map(name).join(", "), parity: R.known.parity.join(" + ") }),
+      lit: byName(R.known.parity),
+      rebuilt,
+    });
   }
-  const attempts = R.attempts.map((a) => attemptText(L, a, S));
+  if (R.firstCksum) step({ html: S.rCksumOk, lit: dataCols, tone: "ok" });
+  else if (R.tooMany) step({ html: fill(S.rTooMany, { n: R.missing.length, np: L.nparity }), tone: "bad" });
+  else {
+    step({ html: S.rCksumBad, lit: dataCols, tone: "bad" });
+    step({ html: R.readAll.length ? fill(S.rReadAll, { cols: R.readAll.map(name).join(", ") }) : S.rReadAllNone, lit: R.readAll });
+    step({ html: fill(S.rCombrec, { np: L.nparity, n: L.dcols }) });
+  }
+  let shown = -1;
+  for (const i of shownAttempts(R.attempts.length)) {
+    const a = R.attempts[i];
+    const more = i > shown + 1 ? `${fill(S.attemptsMore, { n: i - shown - 1 })} ` : "";
+    shown = i;
+    out.push({
+      kind: "attempt",
+      html: `${more}${fill(S.aN, { k: i + 1 })} ${attemptText(L, a, S)}`,
+      sim: a.tgts,
+      rebuilt: a.outcome === "einval" ? [] : a.rebuilt,
+      tone: a.outcome === "ok" ? "ok" : undefined,
+    });
+  }
   let result: string;
-  if (!R.ok) result = `${R.tooMany ? S.rFailTooMany : S.rFail} ${ref(S.refs.unrecoverable, S.see)}`;
+  if (!R.ok) result = R.tooMany ? S.rFailTooMany : S.rFail;
   else {
     const parts: string[] = [];
     const win = R.attempts.find((a) => a.outcome === "ok");
     parts.push(win ? fill(S.rFound, { k: R.attempts.length, tgts: childList(win.tgts, S) }) : S.rOk);
-    if (R.repaired.length) parts.push(`${fill(S.rRepaired, { cols: names(R.repaired) })} ${ref(S.refs.repair, S.see)}`);
-    if (R.parityVerified && !R.repaired.some((c) => L.cols[c].parity) && R.firstRead.some((c) => L.cols[c].parity))
-      parts.push(`${S.rParityChecked} ${ref(S.refs.parityVerify, S.see)}`);
-    if (R.undetected.length) parts.push(`${fill(S.rUndetected, { cols: names(R.undetected) })} ${ref(S.refs.scrub, S.see)}`);
+    if (R.repaired.length) parts.push(fill(S.rRepaired, { cols: names(R.repaired) }));
+    if (R.parityVerified && !R.repaired.some((c) => L.cols[c].parity) && R.firstRead.some((c) => L.cols[c].parity)) parts.push(S.rParityChecked);
+    if (R.undetected.length) parts.push(fill(S.rUndetected, { cols: names(R.undetected) }));
     result = parts.join(" ");
   }
-  return { steps, attempts, result };
+  const missing = health.map((h, d) => (h === "missing" ? d : -1)).filter((d) => d >= 0);
+  if (missing.length) {
+    const list = childList(missing, S);
+    const all = L.s + L.nparity >= L.dcols;
+    result += " " + fill(all ? S.resilverAll : needResilver(L, missing) ? S.resilverYes : S.resilverNo, { list });
+  }
+  out.push({ kind: "result", html: result, fixed: R.repaired, tone: R.ok ? "ok" : "bad" });
+  return out;
 }
 
 export function attemptText(L: Layout, a: Attempt, S: RzStrings): string {

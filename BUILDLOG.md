@@ -1931,14 +1931,14 @@ is approved. The figures' own "see the code" links stay inside the figures.
 
 ## v1.4 (ALG-205): the Hall, the History wing and the Engine room
 
-**What changed.** D21.1 applied page by page (D21.2). The Hall's uberblock section asks "How
+**What changed.** D21.1 applied page by page (D21.3). The Hall's uberblock section asks "How
 does ZFS find its data after a crash?", answers in three plain paragraphs, says what to try in
 the ring, then shows the code in three Source notes. The ring gains a **Next txg** button: one
 txg per press, the clock stops, and the live line says which slot the txg takes (`txg mod
 slots`) and that the previous uberblock stays intact; it works under reduced motion and without
 WebGL, where the clock never runs. History and Engine room take a question as their `h1`
 ("Where does ZFS come from?", "How was this museum made?") with the catalogue title as the
-kicker; the History timeline keeps its 40 numbered notes (no Source notes, D21.2). After a
+kicker; the History timeline keeps its 40 numbered notes (no Source notes, D21.3). After a
 Hacker News reader got lost at "Map of the visit", the wayfinding labels are plain: **All
 rooms** (Toutes les salles, Todas las salas) in the Hall, the room navigation and the footer,
 **Contents** for the footer group, "This is the last room." at the end of the visit, and an
@@ -1953,7 +1953,7 @@ All rooms link on the Hall's first screen. EN, FR and ES alike.
 | Engine room | 1 → 1 | 1 → 1 | 0 | 0 | 0 |
 
 The three Hall links left outside the notes are the caption of Fig. 1 (two) and the Dedication's
-`AUTHORS` note; the History links are its sources, not code (D21.2).
+`AUTHORS` note; the History links are its sources, not code (D21.3).
 
 **Proof.** `npm test` 240 pass; `npm run build` (astro check 0 errors, FR typography 14 files
 0 failures); `check-permalinks` (ANALYSIS.md 123 excerpts, built site 2430 references, 0
@@ -1974,3 +1974,225 @@ sentence the Engine room repeated after `RoomNav`, the hard-coded release name a
 `ANALYSIS.md` ranges (comment end L1781, outer label loop L1577, the MMP tiebreak L1506-L1527).
 
 **Debts.** None found outside the issue.
+
+## v1.4 copy-on-write follow-up (ALG-183): FR and ES, teaching figures, panel fixes
+
+**What changed.** The French and Spanish copy-on-write rooms are in the D21.1 format, adapted
+from the English pilot. The text of the three languages went past the `technical-writer`
+subagent against the "punchy" rule and D21.1: in all three, the answer no longer says ZFS
+"never writes over a block in use" (a mirror repair does), the uberblock is "written last"
+rather than "one write", fsync'd writes replayed from the ZIL are named in the answer, txg is
+glossed before the figure, and dnode, nopwrite and deadlist are glossed. The English answer
+lost its run of short sentences, and FR and ES lost their calques. The figures teach step by step (D21.2), and the
+Source panel takes the pilot's design review (D21.2).
+
+**Measures** (built page, `<article>` only; the figures' own links were script-made and are gone):
+
+| | EN `main` | EN branch | FR `main` | FR branch | ES `main` | ES branch |
+|---|---|---|---|---|---|---|
+| GitHub links in the article | 14 | 14 | 32 | 14 | 32 | 14 |
+| of them in the prose | 0 | 0 | 20 | 0 | 20 | 0 |
+| Code excerpts | 4 | 4 | 3 | 4 | 3 | 4 |
+| Lines of code shown | 34 | 34 | 93 | 34 | 93 | 34 |
+
+**Proof.** `npm run build` (typography check included), `npm test` (240 pass),
+`check-permalinks` (ANALYSIS.md 120 excerpts, 917 line references; built site 2355),
+`check-sources` (156 references, 0 problems), `check-csp` (44 pages) and `check-plate`: all pass.
+`scripts/audit.mjs` over the whole visit on the final head: 42 pages, 0 problems.
+`scripts/verify.mjs` before the last figure fix: 457 captures, 0 console errors, keyboard
+drive of both figures in EN and FR. Panel captures in Chromium (not committed, `shots/`) in the
+three languages at 1440 and 1024 px, dark and light, and inline at 390: at 1024 the notes stack
+(one 422 px column), the symbol heading is hidden, no sideways scroll. A scripted check of the
+review's two figure bugs: after a power cut and three more steps the new D2 gets its own
+address and every new edge is drawn; flipping D1 twice leaves it damaged and the read repairs it.
+
+**Reviews.** `technical-writer` (20 edits, all taken but one: "every five seconds" for the
+txg, where "a few seconds" stays, since a txg also closes on dirty data). `code-reviewer` on the
+diff: a reused block key after a power cut, damage undone by a second press, the badge
+outlined with the picked block, a comment: fixed.
+
+**Design review (two SHOULDs, fixed).** The picked block has an ink ring and its own key line,
+so the accent outline means a new copy only: at the start and after a power cut no picked card
+has an accent stroke (measured on the computed style, EN, FR, ES). The stacked cards' labels
+measure 13.6 CSS px at 1440 and 9.5 px at 390 (from 7.7), unsqueezed at 1440 in the three
+languages. `npm run build` and `npm test` (240 tests) pass.
+
+**Debts.** None new. The other rooms follow in their own issues and rebase onto this one.
+
+## v1.4 transaction groups room (ALG-189): a question, and a figure that outlines each step
+
+**What changed.** The transaction groups room, in EN, FR and ES, asks one question ("When does
+my write reach the disk?"), answers it in three plain paragraphs, keeps its figure with what to
+try, then shows the code in seven Source notes (D21.1, D24.1). In the figure, each event now
+outlines the one part it changed (a CPU cell, the dirty-data meter, a txg card, a pass row, the
+"On disk" line or a thread row); the narration and the log are plain, with no code links; each
+stage says its role in one line; Next event is the first button. The model is unchanged. Seven
+short excerpts are new in `ANALYSIS.md` (TXG room, 6 to 12). No shared code changed; the other
+rooms are unchanged, except the Engine room's computed excerpt count (120 → 127).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 43 | 35 |
+| of them in the prose | 34 | 0 |
+| in excerpts and Source notes | 9 | 35 |
+| "code" links the figure adds as it runs | 1 per event (19 targets) | 0 |
+| Code excerpts | 5 | 7 |
+| Lines of code shown | 148 | 58 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (240 pass),
+`check-permalinks` (ANALYSIS.md 127 excerpts, 932 line references, 0 failures).
+`scripts/verify-txg.mjs` (new, scoped to this room): EN, FR, ES on desktop and a 390 px phone,
+each Next event press outlines exactly one part and announces it, no link in the narration or
+log, no horizontal overflow, no console error; after `zpool sync` txg 41 waits in the middle for
+its writes; a long free during a sync fills all three stages; reduced motion runs no animation;
+with no script the text version is shown; Tab reaches Next event, Enter and Space press it with
+a visible focus ring; at 1280 px a Source note opens in the side panel. 48 captures, 0 problems.
+
+**Reviews.** `technical-writer` on the EN text (25 fixes: `txg_kick` raises the wait to the dirty
+txg, not open + 2; `timer` is a countdown; the ZIL saves what a power cut would lose; the
+uberblock write is several writes; "what to try" matched to the model step by step; fragments
+and a staged reveal), then on FR and ES (39 fixes: opening fragments, referents, "pour qu'un seul
+txg", calques). `code-reviewer` on the diff: the outline was lost on minor events while playing,
+and a txg closed with no writes said "waits for 0 writes": both fixed, plus capture names and
+dead constants.
+
+**Debts.** Inside a Source note the Excerpt's own symbol heading still shows; ALG-183 hides it
+in shared code, and this room gets it on rebase. `scripts/verify.mjs` still checks this room
+in EN and FR only; `verify-txg.mjs` covers ES.
+
+**Design review fixes.** On a phone, Next event and the narration stay in a bar at the bottom
+of the screen while the figure is in view, and each press brings the outlined part into view
+above it (D24.1). `verify-txg.mjs` now checks, at 390 px in EN, FR and ES, that after each of
+the 12 presses both the outline and Next event are on screen: 48 captures, 0 problems. The open
+card lost its accent border; "quiesced, waiting…" is lower case like the other status lines.
+`code-reviewer` on the fix: the bar's class name clashed with the card meters and the phone
+button row lost its flex layout; both fixed, and the scroll margin follows the bar's height.
+
+**QA fixes.** `scripts/verify.mjs` still expected the capitalised status line, so its caption
+check reported false mismatches; both strings are lower case now. At 360 px, step 7 left the
+bottom of the syncing card under the bar: the card was measured while it still glided from the
+quiescing stage (FLIP), at its old place. `show()` now subtracts the glide's current offset,
+scrolls by the difference itself, and aligns a part taller than the room above the bar on its
+top, reading the offset from the card even when the outline is on a part inside it. Measured over 14 presses at 360×740 and 390×844 in EN, FR and ES: the outline is fully
+above the bar every time.
+
+## v1.4 tree room (ALG-185): a question, and a figure that climbs one row per step
+
+**What changed.** The tree and the uberblock room, in EN, FR and ES, asks one question ("What
+if the power fails while ZFS is writing?"), answers it in three plain paragraphs, keeps its
+figure with what to try, then shows the code in seven Source notes (D21.1, D22.1). In the
+figure, Next step now writes the new tree one row per step, data first and the objset last,
+before the four beats of the commit: a new copy is an outline while in memory and fills in
+when written, and the pointer to a child not yet written is dotted until the child lands
+(`zio_write_compress` holds a parent until its children are ready). The 3D view draws the
+same states. Six short excerpts are new in `ANALYSIS.md` (tree room, 12 to 17). The other
+rooms are unchanged, except the Engine room's computed excerpt count (120 → 126) and the
+copy-on-write page, whose CSS now comes in two `<style>` blocks (the Source note styles are
+shared with the tree room; same rules).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 58 | 22 |
+| of them in the prose | 27 | 0 |
+| in Source notes (excerpt captions and notes) | 25 | 22 |
+| in the figure ("code" links) | 6 | 0 |
+| Code excerpts | 12 | 7 |
+| Lines of code shown | 255 | 69 |
+
+**Proof.** `npm run build`, `npm test` (241 pass), `check-permalinks` (ANALYSIS.md 126
+excerpts, 923 line references; built site 2343 references), `check-sources` (156 references,
+44 pages), `check-csp` (44 pages, no new hash) and `check-plate`: all pass.
+`scripts/audit.mjs` over the whole visit: 42 pages, 0 problems. `scripts/verify.mjs`: 465
+captures, 0 console errors; the tree replay compares 332 states with the model (every row of
+the climb, the plug before any write, halfway up and at each beat, config on and off, beat 3
+with 0 to 3 uberblock writes landed, four commits in a row), 0 mismatches; reduced motion
+runs no animation; no script shows D2 in memory and the old tree under the uberblock; the
+keyboard walk takes twelve actions, each announced once.
+
+**Reviews.** `technical-writer` on the EN text (16 fixes: when the cut falls, the even labels
+only when the configuration changed, the switch locked once the sync starts, uberblocks on
+three top-level vdevs in an ordinary txg, the flush promise, the slot rule under RAID-Z
+expansion, a fragment and a short dramatic sentence), then on FR and ES (24 fixes: calques,
+wrong referents, a gender clash). `code-reviewer` on the diff: the 3D view did not tell
+written copies from those in memory and re-grew every box on each step, beat 0 was labelled
+"next" while under way, "levels" meant two things: all fixed.
+
+**Debts.** On a phone (390 px) the tree is drawn at about 60 % of its desktop size, so the
+block names are small; the 3D view and the text version carry the same state. The disk table's header no longer wraps
+letter by letter at 390 px (fixed here, in the room's own stylesheet).
+
+**Design review fixes.** The step caption moved from below the panels (about 800 px under the
+tree at 1440 px) to just under the controls; the reasons for disabled buttons now appear only
+on the press of one. Written copies are solid, in-memory copies dashed, the blocks of the last
+step ringed, and the legend is complete from the start (D22.1). Measured in a real browser at
+1440 and 390 px: the caption's top is 77 px above the tree's at 1440 and 93 px at 390, at
+every step; the ring is on exactly the row the step wrote (D2, then L1 #1, L2 #0, the dnode
+block, the objset). `npm test` (241 pass), `npm run build`, `scripts/verify-tree.mjs`: 332
+states, 0 mismatches, 38 captures, 0 console errors.
+
+**QA review fixes.** The figure no longer links to GitHub: the "code" links on the commit
+beats, the disk table's header, the step and import captions are gone, since the Source
+notes below the figure carry the same lines (the pilot room has no link outside its notes
+either). Counted in the built pages, EN, FR and ES alike: 22 GitHub links in the article,
+all 22 inside the Source notes; the 4 others on the page are the site header and footer.
+D22.1 cites ALG-182 by its bare id. `npm test` (241 pass), `npm run build`,
+`scripts/verify-tree.mjs` against the preview.
+
+## v1.4 RAID-Z room (ALG-187): a question, blocks one after another, a read one step per press
+
+**What changed.** The RAID-Z room, in EN, FR and ES, asks one question ("What happens when a
+disk in my RAID-Z fails?"), answers it in three plain paragraphs, keeps its two figures with
+what to try, then shows the code in five Source notes (D21.1, D23.1). In the map, the reader
+writes blocks of 4 to 128 KiB one after another and sees each stripe take its own width; the
+read of the last block goes one step per press, with the columns read, rebuilt, assumed wrong
+and written back marked on the map. The write-hole figure has four steps and a stepper. Five
+short excerpts are new in `ANALYSIS.md` (RAID-Z room, 6 to 10). The other rooms are unchanged,
+except the Engine room's computed excerpt count (120 → 125).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 47 | 25 |
+| of them in the prose | 25 | 0 |
+| in the figures | 11 | 0 |
+| in excerpts and Source notes | 11 | 25 |
+| Code excerpts | 5 | 5 |
+| Lines of code shown | 135 | 70 |
+
+**Proof.** `npm run build` (typography check included), `npm test` (240 pass),
+`check-permalinks` (ANALYSIS.md 125 excerpts, 927 line references; built site 2286),
+`check-sources` (156 references, 44 pages) and `check-csp` (44 pages, no new hash): all pass.
+Captures in Chromium at 1440 and 390 px (not committed, `shots/`): several blocks on the map,
+a missing child, a child returning bad data stepped through `combrec` to the repair, the
+write-hole stepper; 0 console errors.
+
+**Reviews.** `technical-writer` on the three languages (30 edits): four claims made precise
+(the RAID-Z code never modifies an old stripe when a block changes, though a repair does
+rewrite a column; after a disk dies only blocks with data on it read parity; the smallest
+block takes one disk plus one per parity level; a half-written stripe's space was never
+recorded as used), two staged sentences, glosses for stripe, scrub and resilver, French
+agreement in the figure strings, calques in FR and ES. Not taken: opening the answer with the
+failure (D21.1 puts the problem first). `code-reviewer` on the diff: focus lost when Back
+disables itself, labels hidden as soon as older blocks made the map tall, the write-hole live
+region read only the step number, Clear kept a start sector moved by scrolling, new steps
+below the fold: all fixed.
+
+**Design review fixes (2026-10-23).** Four SHOULDs from the design review, all in the map
+figure: the sentence explaining a write now sits under the size buttons; below 45rem the read
+panel is ordered around the map (damage, map, read buttons, newest step first, then the key),
+so one press and its effect on the map fit on a 390 px screen; the key gains "missing child"
+and "child returning bad data"; the read's first step says what each damaged child holds of
+the block, so damaging a parity-only child or a child with nothing of it explains why nothing
+is rebuilt. A line under the damage heading names the data and parity children. New unit
+tests: `scripts/test/raidz-view.test.mjs` (4 tests, including a full-width block and the
+raidz1 swap). `code-reviewer` on the fixes: no defect; its two suggestions taken (tests, the
+reversed step list noted in D23.1).
+
+**Verification.** `npm test` 244 pass; `npm run build` 44 pages, typography check 0 failures;
+`scripts/verify.mjs` on the whole visit at `b3ef3b5`: 457 captures, 0 console errors, every
+mismatch list empty.

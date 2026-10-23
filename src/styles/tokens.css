@@ -31,6 +31,8 @@
   --code-number: #e6c07b;
   --code-function: #8fc1e3;
   --code-mark: rgb(232 158 92 / 0.12);
+  /* the Source panel's edge (D21.1) */
+  --panel-shadow: -16px 0 40px rgb(0 0 0 / 0.22);
 }
 
 :root[data-theme="light"] {
@@ -58,6 +60,7 @@
   --code-number: #8a5a00;
   --code-function: #1d5e8c;
   --code-mark: rgb(162 70 30 / 0.1);
+  --panel-shadow: -6px 0 18px rgb(31 27 22 / 0.07);
 }
 
 :root {

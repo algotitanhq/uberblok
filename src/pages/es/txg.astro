@@ -2,74 +2,78 @@
 import Base from "../../layouts/Base.astro";
 import TxgPipeline from "../../components/TxgPipeline.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomUrl, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D24.1): the question, a plain
+// answer, the figure, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "es";
 const r = room("txg");
+const T = "module/zfs/txg.c";
 const L = {
-  granularity: gh("module/zfs/txg.c", 44, 46),
-  three: gh("module/zfs/txg.c", 47, 52),
-  concurrent: gh("include/sys/txg.h", 41),
+  quiesceAll: gh(T, 398, 399),
   size: gh("include/sys/txg.h", 42, 45),
-  timeout: gh("module/zfs/txg.c", 116),
-  flush: gh("module/zfs/vdev_label.c", 2085, 2098),
-  labels: gh("module/zfs/vdev_label.c", 2109, 2154),
+  perCpu: gh("include/sys/txg_impl.h", 51, 55),
   assign: gh("module/zfs/dmu_tx.c", 1085),
-  hold: gh("module/zfs/txg.c", 333, 338),
-  commit: gh("module/zfs/dmu_tx.c", 1460),
-  rele: gh("module/zfs/txg.c", 372, 375),
-  count: gh("include/sys/txg_impl.h", 75),
-  state: gh("include/sys/txg_impl.h", 94, 103),
-  startSync: gh("module/zfs/txg.c", 601),
-  askQuiesce: gh("module/zfs/txg.c", 568, 577),
-  waitSynced: gh("module/zfs/txg.c", 714, 717),
-  defer: gh("include/sys/txg.h", 49),
+  rele: gh(T, 372, 375),
+  startSync: gh(T, 601),
+  timeout: gh(T, 116),
+  scanActive: gh("module/zfs/dsl_scan.c", 3723, 3732),
+  waitSynced: gh(T, 714, 717),
   ioctl: gh("module/zfs/zfs_ioctl.c", 7306),
-  kick: gh("module/zfs/txg.c", 830, 832),
+  kick: gh(T, 830, 832),
   dirtySpace: gh("module/zfs/dsl_pool.c", 997, 1002),
-  dirtySync: gh("module/zfs/dsl_pool.c", 983, 987),
   syncPct: gh("module/zfs/dsl_pool.c", 120),
   dirtyMax: gh("module/zfs/dsl_pool.c", 99, 105),
-  waitOpen: gh("module/zfs/txg.c", 791, 794),
+  unlock: gh(T, 412, 413),
+  holdOpen: gh(T, 333, 334),
+  askQuiesce: gh(T, 574, 576),
+  handoff: gh(T, 662, 666),
+  waitOpen: gh(T, 791, 794),
   longFree: gh("module/zfs/dmu.c", 1096, 1106),
-  converge: gh("module/zfs/txg.c", 92, 99),
+  passes: gh(T, 86, 90),
+  converge: gh(T, 92, 99),
   rewrite: gh("module/zfs/zio.c", 128),
-  deferred: gh("module/zfs/zio.c", 122),
-  rewriteConfig: gh("module/zfs/spa.c", 10958),
-  minVdevs: gh("module/zfs/spa.c", 10792, 10815),
-  noChange: gh("module/zfs/vdev_label.c", 2071, 2077),
   ubChanged: gh("module/zfs/uberblock.c", 74),
-  fsync: gh("module/zfs/zfs_vnops.c", 117, 120),
-  perCpu: gh("include/sys/txg_impl.h", 51, 55),
-  threads: gh("module/zfs/txg.c", 210, 219),
-  scanActive: gh("module/zfs/dsl_scan.c", 3723, 3732),
-  passes: gh("module/zfs/txg.c", 86, 90),
+  flush: gh("module/zfs/vdev_label.c", 2085, 2098),
+  labels: gh("module/zfs/vdev_label.c", 2109, 2154),
+  rewriteConfig: gh("module/zfs/spa.c", 10958),
 };
 ---
 
 <Base
   lang={lang}
   roomId="txg"
-  title="Grupos de transacciones · Uberblok"
-  description="Cómo agrupa ZFS cada cambio en grupos de transacciones numerados, abiertos, en cierre y en sincronización, y confirma cada uno con una sola escritura de uberblock: interactivo, con el código de OpenZFS."
+  title="¿Cuándo llega mi escritura al disco? Grupos de transacciones · Uberblok"
+  description="ZFS reúne cada cambio en un grupo de transacciones numerado, lo escribe cada pocos segundos y lo confirma escribiendo un uberblock. Interactivo, con el código de OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Sala {roomNumber(r.id)}</p>
-      <h1>{r.title.es}</h1>
-      <div class="prose problem">
+      <p class="kicker">Sala {roomNumber(r.id)} · {r.title.es}</p>
+      <h1>¿Cuándo llega mi escritura al disco?</h1>
+      <div class="prose answer">
         <p class="lead">
-          La copia en escritura mantiene los discos coherentes en todo momento, pero solo si el paso del árbol antiguo al
-          nuevo es una sola escritura. Las escrituras no dejan de llegar, desde muchos hilos a la vez. Si cada una terminara
-          con su propia confirmación, el pool volcaría la caché de cada disco y reescribiría sus etiquetas y su uberblock por
-          cada escritura. Y una confirmación tiene que abarcar un estado en el que ningún cambio esté a medias.
+          Una escritura suele llegar al disco unos segundos después de que el programa que la hizo haya pasado a otra cosa. ZFS nunca
+          sobrescribe un bloque que el pool todavía usa. Cada cambio se escribe en un bloque nuevo, el bloque que apunta
+          a él también se reescribe, y así hasta el uberblock, el registro raíz desde el que ZFS encuentra todo lo
+          demás del pool. Hacer todo eso en cada escritura, vaciando cada vez la caché de cada disco, sería muy lento.
         </p>
         <p>
-          ZFS responde con lotes. Cada cambio entra en un <em>grupo de transacciones</em> numerado, un txg, y ZFS
-          <a href={L.granularity}><q lang="en">asserts consistency at the granularity of these transaction groups</q></a>: la
-          coherencia se garantiza grupo a grupo.
+          Por eso ZFS junta los cambios en memoria en un lote numerado llamado grupo de transacciones, o txg. Cada
+          cambio entra en el txg que está abierto en ese momento. Cada cinco segundos, o antes si hay muchos datos modificados pendientes o alguien pide una sincronización, ZFS cierra el txg abierto y abre el siguiente en el acto, así
+          que los programas siguen escribiendo. Espera a que terminen los cambios que aún estaban en curso en el txg
+          cerrado, escribe el txg entero en los discos y termina escribiendo un uberblock nuevo. Escribir el uberblock
+          confirma el txg, y desde ese momento el pool arranca de ese txg.
+        </p>
+        <p>
+          Tras un corte de corriente, el pool vuelve al último txg confirmado, en un estado coherente. Los cambios de
+          los txg aún sin confirmar se pierden, normalmente los de unos pocos segundos, salvo que también se hayan escrito en el ZIL.
+          Un programa que no puede perder sus cambios, como una base de datos, pide con fsync que estén en disco. ZFS los
+          escribe entonces en su registro de intenciones, el ZIL, un registro en disco que vuelve a aplicar en la siguiente importación del pool, sin esperar al txg.
         </p>
       </div>
     </header>
@@ -78,244 +82,264 @@ const L = {
       <h2 id="pipeline"><span class="n">1</span> Tres txg, uno por etapa</h2>
       <div class="prose">
         <p>
-          Un txg está <a href={L.three}>abierto, en cierre o en sincronización</a>, y nunca hay más de un txg en cada estado:
-          <a href={L.concurrent}><code>TXG_CONCURRENT_STATES</code> vale 3</a>. Las escrituras entran en el txg abierto. Para
-          confirmarlo, un hilo lo cierra y abre el siguiente de inmediato, así que quien escribe nunca espera a un disco.
-          Después espera a que terminen las escrituras aún en curso en el txg cerrado. Un segundo hilo escribe el txg cerrado
-          en los discos y termina con el uberblock. Añade escrituras, inicia la animación o avanza evento a evento.
+          Cada tarjeta es un txg. Hay dos escrituras en curso en el txg 41, dibujadas como puntos en las CPU donde se
+          ejecutan. Pulsa Evento siguiente para avanzar paso a paso. La parte recuadrada de la figura muestra lo que ha cambiado en ese paso. Si no tocas nada, las escrituras terminan, y en t = 5 s se agota el plazo de cinco segundos
+          y el hilo de sincronización pide el txg abierto. El txg 41 pasa al centro mientras el txg 42 se abre detrás
+          para recibir las escrituras nuevas. Como las escrituras del txg 41 ya han terminado, pasa directamente a la derecha,
+          donde se escribe en tres pasadas. La línea En el disco cambia cuando se escribe su uberblock.
+        </p>
+        <p>
+          Pulsa Reiniciar y enseguida <code>zpool sync</code>. El hilo de sincronización no espera los cinco segundos,
+          y el txg 41 se queda en el centro hasta que termina su segunda escritura, a los 1,2 s. <code>zpool sync</code>
+          espera al txg 43, así que los txg 42 y 43, vacíos, se sincronizan después y no escriben uberblock. Las
+          escrituras que añadas entran en el txg que esté abierto. Libera un archivo grande mientras se escribe un txg:
+          ZFS pide cerrar en el acto el txg abierto, para evitar que un txg se llene solo de liberaciones. Las tres etapas
+          quedan entonces ocupadas, el máximo que permite el código. Iniciar encadena los eventos, en tiempo simulado ralentizado.
         </p>
       </div>
       <TxgPipeline lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">La idea, a tres profundidades</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">En el código</h2>
+      <p class="prose">
+        Dos hilos del núcleo por pool hacen avanzar los txg, en <code>txg.c</code>. Abre una nota Fuente para ver las
+        líneas, tomadas de la versión zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>En una frase</h3>
-        <p class="lead prose">
-          ZFS reúne cada cambio en un grupo de transacciones numerado, lo cierra cuando ya no queda dentro ninguna escritura
-          en curso, y lo escribe entero, de modo que una sola escritura de uberblock confirma miles de cambios en un momento
-          en que ninguno está a medias.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>En un párrafo</h3>
+      <div class="step">
+        <h3>Entrar en el txg abierto</h3>
         <p class="prose">
-          Cada cambio en el pool es una transacción que entra en el txg abierto. <a href={L.threads}>Dos hilos del núcleo por
-          pool</a> hacen avanzar los txg. El hilo de sincronización se despierta cuando han pasado
-          <a href={L.timeout}><code>zfs_txg_timeout</code></a> (5 segundos) desde el comienzo de la última sincronización, o
-          antes si alguien necesita una sincronización: <code>zpool sync</code>, o un txg que contiene demasiados datos
-          modificados. Pide al hilo de cierre el txg abierto. El hilo de cierre abre el txg siguiente, espera a que ninguna
-          transacción retenga el antiguo, y se lo entrega. El hilo de sincronización lo escribe entonces en pasadas hasta que
-          no queda nada por escribir, y lo confirma con el uberblock. Mientras tanto, el txg siguiente ya está recibiendo
-          escrituras. Un txg en el que nada ha cambiado no escribe nada, ni siquiera un uberblock. Un programa que necesita
-          sus datos en el disco de inmediato, con <code>fsync</code>, normalmente no espera a un txg: <a href={L.fsync}>pasa
-          por el ZIL</a> (sala 10).
+          Una escritura empieza por entrar en un txg con <code>txg_hold_open</code>. Lee el número del txg abierto e
+          incrementa un contador de escrituras de ese txg. Hay un contador por CPU, para que las escrituras en CPU
+          distintas no compitan por un mismo cerrojo. Cuando la transacción ha hecho su cambio en memoria, el contador
+          vuelve a bajar.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>txg_hold_open</code>, txg.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={T}
+            from={333}
+            to={338}
+            symbol="txg_hold_open"
+            notes={[
+              {
+                from: 333,
+                to: 334,
+                text: `El cerrojo de esta CPU, y luego el número del txg abierto. <code>dmu_tx_try_assign</code>, dentro de <code>dmu_tx_assign</code>, <a href="${L.assign}">llama a esta función</a> en cada transacción. Para cerrar un txg, el hilo de cierre <a href="${L.quiesceAll}">toma el cerrojo de cada CPU</a>.`,
+              },
+              {
+                from: 337,
+                text: `El contador de esta CPU para el txg, en <a href="${L.size}">un array de 4</a> indexado por los dos bits bajos del txg. Un contador por CPU, porque uno solo <a href="${L.perCpu}">“would result in heavy lock contention”</a>. <code>txg_rele_to_sync</code> <a href="${L.rele}">lo decrementa</a> cuando la transacción termina.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>En detalle</h3>
-        <div class="prose">
-          <p>
-            <strong>Entrar en el txg abierto.</strong> <code>dmu_tx_assign</code> <a href={L.assign}>llama a
-            <code>txg_hold_open</code></a>, que lee <code>tx_open_txg</code> e
-            <a href={L.hold}>incrementa un contador de la CPU en la que se ejecuta</a>, <code>tc_count[txg &amp; TXG_MASK]</code>.
-            <a href={L.size}>El estado de cada txg se guarda en arrays de <code>TXG_SIZE</code> = 4</a>, indexados por los dos
-            bits menos significativos del número de txg, así que cuatro txg consecutivos nunca comparten una posición. Cuando la
-            transacción termina, <code>dmu_tx_commit</code> <a href={L.commit}>llama a <code>txg_rele_to_sync</code></a>, que
-            <a href={L.rele}>decrementa el contador</a> y despierta al hilo de cierre cuando llega a 0. Los contadores son por
-            CPU <a href={L.perCpu}>porque uno solo <q lang="en">would result in heavy lock contention</q></a> (provocaría
-            una fuerte contención en un cerrojo); la figura dibuja <a href={L.count}>estos contadores</a> para 4 CPU y, encima,
-            <a href={L.state}>los números de txg de cada estado</a>.
-          </p>
-          <p><strong>Cuándo termina un txg.</strong> Lo decide el hilo de sincronización, en su bucle de espera.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/txg.c"
-          from={532}
-          to={553}
-          symbol="txg_sync_thread"
-          notes={[
-            {
-              from: 533,
-              text: `El plazo es de <code>zfs_txg_timeout</code> segundos, <a href="${L.timeout}">5 por defecto</a>, en ticks de reloj.`,
-            },
-            {
-              from: 542,
-              text: `<code>timer</code> cuenta desde <code>start</code>, fijado cuando <a href="${L.startSync}">empezó el <code>spa_sync</code> anterior</a>: los 5 segundos corren desde el comienzo de la última sincronización, no desde su final.`,
-            },
-            {
-              from: 543,
-              to: 546,
-              text: `El hilo duerme mientras se cumple todo esto: no hay ningún recorrido activo (<a href="${L.scanActive}">un scrub, un resilver (la resincronización de un disco) o una destrucción o liberación en segundo plano</a>), el temporizador no se ha agotado, nadie espera un txg posterior al último sincronizado, y no espera ningún txg cerrado. Después <a href="${L.askQuiesce}">pide al hilo de cierre el txg abierto</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Dos tipos de llamantes aumentan <code>tx_sync_txg_waiting</code>. <code>zpool sync</code> termina en
-            <a href={L.ioctl}><code>txg_wait_synced(dp, 0)</code></a>, que <a href={L.waitSynced}>espera al txg abierto más
-            <code>TXG_DEFER_SIZE</code></a>, <a href={L.defer}>2</a>: en la figura, sincroniza tres txg seguidos. Y cada
-            cambio suma su tamaño a los datos modificados de su txg; al superar
-            <a href={L.syncPct}><code>zfs_dirty_data_sync_percent</code>, el 20 %</a>, de
-            <a href={L.dirtyMax}><code>zfs_dirty_data_max</code></a> (por defecto el 10 % de la memoria, con un tope),
-            <a href={L.dirtySpace}><code>dsl_pool_dirty_space</code></a> <a href={L.dirtySync}>lo detecta</a> y llama a
-            <a href={L.kick}><code>txg_kick</code></a>, así que un pool con mucha actividad sincroniza mucho antes de 5 segundos.
-          </p>
-          <p><strong>Cerrarlo.</strong> El hilo de cierre ejecuta <code>txg_quiesce</code>.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/txg.c"
-          from={395}
-          to={428}
-          symbol="txg_quiesce"
-          notes={[
-            {
-              from: 398,
-              to: 399,
-              text: "Tomar el <code>tc_open_lock</code> de cada CPU impide que entren escrituras nuevas en este txg: <code>txg_hold_open</code> toma el cerrojo de su CPU antes de leer <code>tx_open_txg</code>.",
-            },
-            {
-              from: 402,
-              text: "El número del txg abierto aumenta en uno: a partir de aquí, las escrituras nuevas entran en el txg siguiente.",
-            },
-            {
-              from: 412,
-              to: 413,
-              text: "Los cerrojos se liberan de inmediato. El txg siguiente está abierto antes de que el antiguo se vacíe, así que las escrituras no esperan.",
-            },
-            {
-              from: 422,
-              to: 428,
-              text: "Para cada CPU por turno, esperar a que su contador para este txg sea 0. Las escrituras que entraron antes del cambio terminan aquí. Cuando acaba el bucle, ya nada puede cambiar el txg.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Un txg por estado.</strong> El bucle del hilo de cierre es donde se mantiene la regla.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/txg.c"
-          from={628}
-          to={667}
-          symbol="txg_quiesce_thread"
-          notes={[
-            {
-              from: 631,
-              to: 641,
-              text: "Duerme hasta que alguien pide un txg posterior al abierto, y mientras el hilo de sincronización no haya tomado el último txg que cerró. Como mucho un txg está en cierre o cerrado.",
-            },
-            {
-              from: 646,
-              to: 654,
-              text: "Toma el txg abierto, lo anota en <code>tx_quiescing_txg</code> y ejecuta <code>txg_quiesce</code> con el cerrojo de sincronización del pool liberado.",
-            },
-            {
-              from: 662,
-              to: 666,
-              text: "La entrega: el txg pasa a <code>tx_quiesced_txg</code> y se despierta al hilo de sincronización. Si este aún está escribiendo el txg anterior, el nuevo espera ahí, cerrado.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            ¿Quién lo pide? Normalmente el propio hilo de sincronización, cuando está listo para más trabajo. Así, mientras
-            un txg se sincroniza, el siguiente suele seguir abierto y recibiendo escrituras. Un llamante lo pide antes de tiempo:
-            <a href={L.waitOpen}><code>txg_wait_open(dp, 0, B_TRUE)</code></a>, al que en esta versión
-            <a href={L.longFree}><code>dmu_free_long_range</code> llama</a>
-            <q lang="en">to avoid filling up a TXG with just frees</q>, para evitar que un txg se llene solo de liberaciones.
-            Entonces el txg siguiente se cierra durante la sincronización, y los tres estados están ocupados a la vez: en la
-            figura, «Liberar un archivo grande» mientras un txg se sincroniza.
-          </p>
-          <p><strong>La entrega al hilo de sincronización.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/txg.c"
-          from={583}
-          to={610}
-          symbol="txg_sync_thread"
-          notes={[
-            {
-              from: 588,
-              to: 593,
-              text: "El hilo de sincronización toma el txg cerrado, lo anota como <code>tx_syncing_txg</code> y despierta al hilo de cierre, que ahora puede cerrar otro txg si se ha pedido uno.",
-            },
-            {
-              from: 601,
-              to: 603,
-              text: "<code>spa_sync</code> hace toda la E/S del txg. <code>start</code> es el momento desde el que cuenta el plazo de la espera siguiente.",
-            },
-            {
-              from: 607,
-              to: 610,
-              text: "El txg está sincronizado: <code>tx_synced_txg</code>, y se despierta a todos los que esperan en <code>txg_wait_synced</code>.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>Escribir hasta que nada cambie.</strong> Escribir un bloque asigna espacio, lo que modifica un space map,
-            que es un metadato del MOS, que a su vez hay que escribir. Así que <code>spa_sync</code> ejecuta pasadas. <a href={L.passes}>La
-            primera escribe todos los datos de usuario modificados; las siguientes solo escriben metadatos</a>, lo que la
-            pasada anterior modificó. <a href={L.converge}>Para que converja</a>, a partir de la <a href={L.rewrite}>pasada 2</a>
-            un bloque nacido en este txg se reescribe en su sitio en lugar de reasignarse (la sala de la copia en escritura
-            muestra dónde), y a partir de la <a href={L.deferred}>pasada 2</a> las liberaciones se aplazan a un txg posterior
-            (sin la funcionalidad log spacemap).
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/spa.c"
-          from={10743}
-          to={10766}
-          symbol="spa_sync_iterate_to_convergence"
-          notes={[
-            {
-              from: 10749,
-              to: 10764,
-              text: "Si la pasada 1 no encuentra nada que escribir, el puntero de bloque raíz no nació en este txg y el MOS está limpio: el txg no tiene efecto, y el bucle se detiene.",
-            },
-            {
-              from: 10765,
-              text: "Si no, otra pasada mientras el MOS esté modificado en este txg. El bucle termina cuando una pasada no cambia nada.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Después <a href={L.rewriteConfig}><code>spa_sync_rewrite_vdev_config</code></a> llama a
-            <code>vdev_config_sync</code>, que <a href={L.flush}>vuelca la caché de escritura de cada disco escrito en este
-            txg</a> y después <a href={L.labels}>escribe las etiquetas pares, el uberblock y las etiquetas impares</a>. Las
-            etiquetas solo se reescriben en los vdevs cuya configuración ha cambiado en este txg. El uberblock va a todos los
-            vdevs de primer nivel si la configuración ha cambiado; si no, a <a href={L.minVdevs}>tres vdevs de primer nivel
-            como máximo</a>, tomados en orden a partir de uno elegido al azar, y entonces es lo único nuevo en sus etiquetas.
-            La escritura del uberblock es la confirmación, y su coste (un volcado por disco, escrituras de etiquetas) se paga
-            una vez por txg, no una vez por escritura. Si nada ha cambiado en el txg, el uberblock <a href={L.ubChanged}>no
-            informa de ningún cambio</a> y <a href={L.noChange}>no se escribe nada</a> (salvo que la protección multihost esté
-            activada): un pool inactivo pasa por un txg cada 5 segundos sin escribir en sus discos. El
-            <a href={roomUrl(lang, "hall")}>Vestíbulo</a> muestra dónde cae el uberblock en el anillo.
-          </p>
-        </div>
+      <div class="step">
+        <h3>Cuándo se despierta el hilo de sincronización</h3>
+        <p class="prose">
+          El hilo de sincronización duerme en un bucle. Se despierta cuando han pasado cinco segundos desde que empezó la
+          última sincronización, cuando alguien pide que se sincronice un txg (<code>zpool sync</code>, o un txg que
+          supera el umbral de datos modificados), o cuando un txg cerrado lo espera. Un scrub, un resilver o una
+          liberación de fondo en curso le impiden dormir.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>txg_sync_thread</code>, txg.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={T}
+            from={542}
+            to={553}
+            symbol="txg_sync_thread"
+            notes={[
+              {
+                from: 542,
+                text: `<code>timer</code> es el tiempo que queda hasta cinco segundos después de <code>start</code>, que se fija cuando <a href="${L.startSync}">empezó el último <code>spa_sync</code></a>. El plazo es <code>zfs_txg_timeout</code>, <a href="${L.timeout}">5 segundos</a>.`,
+              },
+              {
+                from: 543,
+                to: 546,
+                text: `Duerme mientras se cumpla todo esto: no hay ningún recorrido activo (<a href="${L.scanActive}">scrub, resilver o liberación de fondo</a>), el plazo no se ha agotado, nadie espera un txg posterior al último sincronizado y ningún txg cerrado espera.`,
+              },
+              {
+                from: 545,
+                text: `<code>zpool sync</code> <a href="${L.ioctl}">llama a <code>txg_wait_synced(dp, 0)</code></a>, que <a href="${L.waitSynced}">sube <code>tx_sync_txg_waiting</code></a> al txg abierto más 2. <a href="${L.kick}"><code>txg_kick</code></a> lo sube al número de un txg cuyos datos modificados superan el <a href="${L.syncPct}">20 %</a> de <a href="${L.dirtyMax}"><code>zfs_dirty_data_max</code></a>; <a href="${L.dirtySpace}"><code>dsl_pool_dirty_space</code> lo llama</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Cerrar un txg sin parar las escrituras</h3>
+        <p class="prose">
+          El hilo de cierre cierra el txg abierto en <code>txg_quiesce</code>. Retiene el cerrojo de cada CPU un
+          instante, lo justo para subir en uno el número del txg abierto. Desde ese momento, las escrituras nuevas entran
+          en el txg siguiente.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>txg_quiesce</code>, el cambio, txg.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={T}
+            from={398}
+            to={402}
+            symbol="txg_quiesce"
+            notes={[
+              {
+                from: 398,
+                to: 399,
+                text: `El <code>tc_open_lock</code> de cada CPU, el cerrojo que <a href="${L.holdOpen}"><code>txg_hold_open</code> toma</a> antes de leer el txg abierto y mantiene hasta <code>txg_rele_to_quiesce</code>. Ninguna escritura puede estar a medio entrar en el txg abierto.`,
+              },
+              {
+                from: 402,
+                text: `El txg siguiente está abierto. Los cerrojos se <a href="${L.unlock}">liberan justo después</a>, así que las escrituras no esperan a que se vacíe el txg anterior.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Esperar a las escrituras en curso</h3>
+        <p class="prose">
+          Las escrituras que entraron en el txg anterior antes del cambio aún tienen que terminar. El hilo de cierre
+          espera a que el contador de cada CPU para ese txg vuelva a cero. Entonces ya nada puede modificar el txg, y se
+          entrega al hilo de sincronización.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>txg_quiesce</code>, la espera, txg.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={T}
+            from={422}
+            to={428}
+            symbol="txg_quiesce"
+            notes={[
+              {
+                from: 425,
+                to: 426,
+                text: `Duerme mientras esta CPU siga reteniendo el txg. <code>txg_rele_to_sync</code> <a href="${L.rele}">lo despierta</a> cuando el contador llega a 0.`,
+              },
+              {
+                from: 428,
+                text: `Tras la última CPU, el txg está cerrado. El hilo de cierre <a href="${L.handoff}">lo entrega al hilo de sincronización</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Un txg por etapa</h3>
+        <p class="prose">
+          El hilo de cierre solo cierra un txg cuando alguien lo pide, y solo cuando el hilo de sincronización ya ha
+          tomado el último txg que cerró. Por eso nunca hay más de un txg en cierre. Normalmente lo pide el hilo de
+          sincronización cuando está listo para más trabajo, así que el txg siguiente sigue abierto mientras otro se
+          escribe.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>txg_quiesce_thread</code>, txg.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={T}
+            from={638}
+            to={641}
+            symbol="txg_quiesce_thread"
+            notes={[
+              {
+                from: 639,
+                text: `Nadie ha pedido un txg posterior al abierto. El hilo de sincronización <a href="${L.askQuiesce}">lo pide cuando necesita un txg</a>. El otro llamante es <a href="${L.waitOpen}"><code>txg_wait_open</code></a>, al que en esta versión <a href="${L.longFree}">llama <code>dmu_free_long_range_impl</code></a>, cuando las liberaciones del txg abierto llegan a un umbral, “to avoid filling up a TXG with just frees”.`,
+              },
+              {
+                from: 640,
+                text: "El último txg cerrado sigue esperando al hilo de sincronización.",
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Escribir hasta que nada cambie</h3>
+        <p class="prose">
+          <code>spa_sync</code> escribe el txg en pasadas. La primera escribe los datos modificados y los metadatos que
+          hay por encima. Escribir ocupa espacio, y los space maps que lo registran también son metadatos, así que la
+          pasada siguiente los escribe, y así sucesivamente. El bucle termina cuando una pasada ya no deja nada nuevo por
+          escribir.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>spa_sync_iterate_to_convergence</code>, spa.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/spa.c"
+            from={10749}
+            to={10765}
+            symbol="spa_sync_iterate_to_convergence"
+            notes={[
+              {
+                from: 10749,
+                to: 10761,
+                text: "Tras la pasada 1, si el puntero de bloque raíz no nació en este txg y el MOS, los metadatos propios del pool, está limpio, nada ha cambiado: el txg no tiene efecto.",
+              },
+              {
+                from: 10765,
+                text: `Otra pasada mientras el MOS esté modificado en este txg. <a href="${L.passes}">Solo la primera pasada escribe datos de usuario</a>. Las siguientes <a href="${L.converge}">se mantienen pequeñas para que el bucle termine</a>: desde <a href="${L.rewrite}">la pasada 2</a>, un bloque ya escrito en este txg se reescribe donde está.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>La confirmación, o nada</h3>
+        <p class="prose">
+          Terminadas las pasadas, <code>vdev_config_sync</code> vacía las cachés de los discos y escribe el uberblock
+          nuevo. La sala del <a href={roomUrl(lang, "tree")}>árbol y el uberblock</a> explica esa escritura en detalle. Un txg en el
+          que nada ha cambiado se detiene aquí, antes del vaciado: un pool inactivo pasa por un txg cada cinco segundos
+          sin escribir en sus discos.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>vdev_config_sync</code>, vdev_label.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/vdev_label.c"
+            from={2071}
+            to={2077}
+            symbol="vdev_config_sync"
+            notes={[
+              {
+                from: 2072,
+                to: 2073,
+                text: `El uberblock nuevo toma el número de este txg. <code>changed</code> es verdadero <a href="${L.ubChanged}">si el puntero de bloque raíz nació en este txg</a>.`,
+              },
+              {
+                from: 2075,
+                to: 2077,
+                text: `Nada ha cambiado, ninguna configuración de vdev está modificada y la protección multihost está desactivada: sale antes del <a href="${L.flush}">vaciado</a> y de <a href="${L.labels}">las escrituras de etiquetas y uberblock</a>. <code>spa_sync</code> <a href="${L.rewriteConfig}">la llama a través de <code>spa_sync_rewrite_vdev_config</code></a> tras las pasadas.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Lo que la figura deja fuera</h2>
       <p class="prose muted">
         La figura ejecuta las condiciones de espera de los dos hilos tal como las escribe el código, sobre las mismas
-        variables. Dibuja 4 CPU; cada escritura es un bloque, y el umbral de datos modificados se reduce a 4 bloques (el
-        20 % de un <code>zfs_dirty_data_max</code> de 20 bloques). El tiempo está ralentizado, y la duración de una escritura o
-        de una pasada es inventada. Deja fuera la regulación de escrituras (escrituras retrasadas o bloqueadas a medida que
-        crecen los datos modificados), la espera en <code>tc_open_lock</code> mientras se cierra un txg, los scrubs y
-        resilvers, las synctasks, el ZIL y la suspensión del pool. El tamaño de las pasadas es ilustrativo: aquí, un txg con
-        datos siempre necesita tres pasadas.
+        variables. Dibuja 4 CPU. Cada escritura es un bloque, y el umbral que adelanta una sincronización se reduce a 4
+        bloques (el 20 % de un <code>zfs_dirty_data_max</code> de 20 bloques). El tiempo va más lento, y la duración de
+        una escritura o de una pasada es inventada. La figura deja fuera la regulación de escrituras (escrituras retrasadas a
+        medida que crecen los datos modificados), la breve espera de una escritura mientras se cierra un txg, los
+        scrubs y resilvers, las tareas de administración que se ejecutan dentro de una sincronización, el ZIL y la
+        suspensión del pool. Una liberación real de un archivo grande solo pide un txg nuevo cuando sus liberaciones llegan a un
+        umbral, y el uberblock se escribe en varias etiquetas de varios discos. El tamaño de las pasadas es ilustrativo:
+        aquí un txg con datos siempre tiene tres pasadas.
       </p>
     </section>
   </article>
@@ -330,7 +354,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -339,10 +363,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -350,8 +374,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

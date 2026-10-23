@@ -10,7 +10,6 @@
 // DECISIONS.md D12.2 to D12.4.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { createPool, writeLeaf, NDATA } from "../lib/tree";
 import { treeSvg, diskSvg, diskHtml, beatsHtml, importHtml, describe, type TrStrings } from "../lib/tree-view";
@@ -21,21 +20,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const VL = "module/zfs/vdev_label.c";
-const refs = {
-  offset: gh(VL, 158, 170),
-  dirty: gh("module/zfs/dbuf.c", 2537, 2554),
-  write: gh("module/zfs/zio.c", 2102, 2104),
-  flush: gh(VL, 2085, 2098),
-  even: gh(VL, 2100, 2116),
-  ubsync: gh(VL, 1782, 1796),
-  odd: gh(VL, 2144, 2161),
-  load: gh(VL, 1570, 1588),
-  compare: gh(VL, 1495, 1505),
-  readConfig: gh(VL, 832, 863),
-  cases: gh(VL, 2118, 2131),
-};
-const S = { ...Object.fromEntries(Object.entries(TREE_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const S = { ...Object.fromEntries(Object.entries(TREE_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as TrStrings;
 const t = UI[lang];
 const p0 = writeLeaf(createPool(), 2).pool;
 const helpId = `tr-help-${lang}`;
@@ -62,7 +47,7 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
       <span class="glabel">{S.landedLabel}</span>
       {[0, 1, 2, 3].map((n) => <button class="btn" type="button" data-landed={n} aria-pressed={n === 0 ? "true" : "false"}>{n}</button>)}
     </div>
-    <p class="muted tr-why" data-why></p>
+    <p class="tr-now" data-now aria-hidden="true">{S.sayStart}</p>
   </div>
   <div class="tr-stage">
     <div data-tree set:html={treeSvg(S, p0)} />
@@ -85,7 +70,6 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
       <div class="tr-scroll" data-disk-table tabindex="0" role="region" aria-label={t.scrollTable} set:html={diskHtml(S, p0)} />
     </section>
   </div>
-  <p class="tr-now" data-now aria-hidden="true" hidden></p>
   <p class="visually-hidden" data-live aria-live="polite"></p>
   <noscript><p class="muted">{t.noScript}</p></noscript>
   <details class="text-version">
@@ -98,7 +82,7 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
   import { strings, reducedMotion } from "../lib/svg";
   import { createPool, writeLeaf, step, pullPlug, importPool, canWrite, canStep, canImport, canSetConfig, newestOnDisk, type Pool, type ImportResult } from "../lib/tree";
   import {
-    treeSvg, diskSvg, diskHtml, beatsHtml, importHtml, describe, spoken, writeLine, stepLine, plugLine, importLine, whyLine, plural, fill,
+    treeSvg, diskSvg, diskHtml, beatsHtml, importHtml, describe, drawn, spoken, writeLine, stepLine, plugLine, importLine, whyLine, plural, fill,
     type TrStrings,
   } from "../lib/tree-view";
   import { no3dReason, once } from "../lib/lazy3d";
@@ -124,19 +108,22 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
     /**
      * The visible line, and one announcement per action: the live region is
      * emptied, then filled on the next frame, so that the same text twice is
-     * announced twice; it reads the line without its code links.
+     * announced twice; it reads the line without its tags.
      */
     function say(html: string) {
-      const el = q("[data-now]");
-      el.hidden = false;
-      el.innerHTML = html;
+      q("[data-now]").innerHTML = html;
       const live = q("[data-live]");
       live.textContent = "";
       requestAnimationFrame(() => (live.textContent = spoken(html)));
     }
 
     function render(animate: boolean, swung = false) {
-      q("[data-tree]").innerHTML = treeSvg(S, pool);
+      // What each block and pointer looked like before: only what changed is animated.
+      const before = new Map<string, string>();
+      for (const el of root.querySelectorAll<SVGElement>("[data-tree] [data-block], [data-tree] [data-edge]")) before.set(el.dataset.block ?? `e:${el.dataset.edge}`, (el.getAttribute("class") ?? "").replace(" just", ""));
+      // The blocks this action wrote (in memory before, on the disk now) get a ring until the next action.
+      const just = new Set(drawn(pool).filter((d) => d.state === "unflushed" && before.get(d.blk.id)?.includes("s-mem")).map((d) => d.blk.id));
+      q("[data-tree]").innerHTML = treeSvg(S, pool, just);
       q("[data-disk]").innerHTML = diskSvg(S, pool);
       q("[data-beats]").innerHTML = beatsHtml(S, pool);
       q("[data-disk-table]").innerHTML = diskHtml(S, pool);
@@ -152,20 +139,12 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
       const c = canSetConfig(pool);
       cfg.setAttribute("aria-disabled", String(!!c));
       for (const b of root.querySelectorAll<HTMLElement>("[data-landed]")) b.setAttribute("aria-pressed", String(Number(b.dataset.landed) === landed));
-      // Why the disabled buttons are disabled, each reason once.
-      const whys = new Set<string>();
-      if (w) whys.add(whyLine(S, pool, w));
-      const s = canStep(pool);
-      if (s && s !== w) whys.add(whyLine(S, pool, s));
-      if (canImport(pool)) whys.add(whyLine(S, pool, "notCut"));
-      // "Syncing" already says why the configuration is set, and "cut" why nothing works.
-      if (c && c !== "cut" && !(c === "cfgLocked" && w === "syncing")) whys.add(whyLine(S, pool, c));
-      q("[data-why]").textContent = [...whys].join(" ");
       const motion = !reducedMotion();
       if (scene) scene.draw(pool, (animate || swung) && motion);
       if (motion && !is3d) {
         if (animate) {
-          const fresh = root.querySelectorAll<SVGGraphicsElement>("[data-tree] .b.s-mem, [data-tree] .b.s-unflushed, [data-tree] .e-mem");
+          const fresh = [...root.querySelectorAll<SVGGraphicsElement>("[data-tree] .b.s-mem, [data-tree] .b.s-unflushed, [data-tree] .e-mem, [data-tree] .e-unflushed, [data-tree] .e-wait")]
+            .filter((el) => before.get(el.dataset.block ?? `e:${el.dataset.edge}`) !== el.getAttribute("class"));
           for (const el of fresh) el.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 320, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
         }
         if (swung) q("[data-tree] .root")?.animate([{ opacity: 0.1 }, { opacity: 1 }], { duration: 480, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
@@ -248,7 +227,7 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
       } else if (el.dataset.act === "restart") {
         start();
         render(false);
-        say(S.sayRestart);
+        say(`${S.sayRestart} ${S.sayStart}`);
       } else if (el.hasAttribute("data-view3d")) {
         if (no3d) return say(S[no3d]);
         void set3d(!is3d, true);
@@ -258,6 +237,8 @@ const leaves = Array.from({ length: NDATA }, (_, i) => i);
     start();
     render(false);
     for (const b of root.querySelectorAll<HTMLElement>(".tr-bar")) b.hidden = false;
+    // The opening line, readable in browse mode too; the controls exist only with script.
+    q("[data-live]").textContent = S.sayStart;
     // 2D first, always: 3D only on a press of the button (DECISIONS.md D14.1).
     // Without WebGL or under reduced motion, the button stays, disabled, with its reason.
     q("[data-view3d]").hidden = false;

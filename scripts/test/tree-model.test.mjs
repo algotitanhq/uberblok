@@ -65,13 +65,44 @@ test("a leaf write copies the leaf and every ancestor; the old tree is intact", 
   assert.equal(Object.values(r3.pool.blocks).filter((b) => b.birth === 4211).length, 7);
 });
 
+/** spa_sync writes the open txg's blocks, one height per step: beat 0 done. */
+const writeAll = (p) => {
+  while (p.open.beat === null) p = M.step(p);
+  return p;
+};
 const atBeat = (beat, dirty = true) => {
   let p = M.createPool();
   p = { ...p, configDirty: dirty };
-  p = M.writeLeaf(p, 2).pool;
-  for (let i = 0; i < beat + 1; i++) p = M.step(p); // beat 0 = blocks written
+  p = writeAll(M.writeLeaf(p, 2).pool); // beat 0 = blocks written
+  for (let i = 0; i < beat; i++) p = M.step(p);
   return p;
 };
+
+test("spa_sync writes the new tree bottom up, one height per step", () => {
+  let p = M.writeLeaf(M.createPool(), 2).pool;
+  assert.equal(M.HEIGHTS, 5);
+  assert.deepEqual(M.pathOf(2).map(M.height), [0, 1, 2, 3, 4]);
+  const order = [];
+  for (let h = 0; h < M.HEIGHTS; h++) {
+    assert.equal(p.open.beat, null);
+    p = M.step(p);
+    assert.equal(p.open.wrote, h + 1);
+    order.push(M.pathOf(2).filter((k) => M.height(k) === h));
+  }
+  assert.deepEqual(order, [["D2"], ["L1-1"], ["L2-0"], ["DN"], ["OS"]]);
+  assert.equal(p.open.beat, 0, "beat 0 is done when the objset is written");
+  assert.equal(M.newestOnDisk(p).txg, 4210, "no uberblock points to the new tree yet");
+  // A cut halfway up: the blocks written so far are lost, the old tree wins.
+  let q = M.writeLeaf(M.createPool(), 2).pool;
+  for (let i = 0; i < 3; i++) q = M.step(q);
+  assert.equal(M.canWrite(q), "syncing");
+  assert.equal(M.canSetConfig(q), "cfgLocked");
+  const cut = M.pullPlug(q);
+  assert.equal(cut.cut.during, 0);
+  const r = M.importPool(cut);
+  assert.deepEqual([r.result.winner.txg, r.result.tree], [4210, "old"]);
+  assert.equal(r.pool.blocks["D2@4211"], undefined);
+});
 const afterCut = (beatsDone, landed = 0, dirty = true) => M.importPool(M.pullPlug(atBeat(beatsDone, dirty), landed)).result;
 
 test("the four beats: even labels, uberblocks in slot txg % 128 of all four labels, odd labels", () => {
@@ -90,9 +121,9 @@ test("the four beats: even labels, uberblocks in slot txg % 128 of all four labe
   assert.deepEqual(p.labels.map((l) => l.config), [4211, 4211, 4211, 4211]);
   assert.equal(M.canStep(p), "nothingToSync");
   // The next txg goes to the next slot.
-  p = M.step(M.writeLeaf(p, 0).pool);
+  p = writeAll(M.writeLeaf(p, 0).pool);
   assert.equal(p.open.txg, 4212);
-  for (let i = 0; i < 4; i++) p = M.step(p);
+  for (let i = 0; i < 3; i++) p = M.step(p);
   assert.equal(p.labels[0].ring[116].txg, 4212);
 });
 
@@ -142,9 +173,9 @@ test("after the import: the old tree wins and the next txg reuses the same slot"
   assert.equal(pool.version.OS, "OS@4210");
   assert.equal(pool.blocks["D2@4211"], undefined, "the new blocks are reachable from nothing");
   assert.equal(pool.labels[0].ring[115].torn, true, "the torn slot stays garbage until rewritten");
-  let p = M.writeLeaf(pool, 2).pool;
+  let p = writeAll(M.writeLeaf(pool, 2).pool);
   assert.equal(p.open.txg, 4211);
-  for (let i = 0; i < 4; i++) p = M.step(p);
+  for (let i = 0; i < 3; i++) p = M.step(p);
   assert.equal(p.labels[0].ring[115].torn, undefined);
   assert.equal(p.labels[0].ring[115].txg, 4211);
   // The new tree wins: the pool goes on from 4211.
@@ -175,13 +206,13 @@ test("an import marks every vdev dirty: the next txg rewrites the four labels, t
   // Cut during beat 2 (L2 torn), import, then a txg with the switch off before the cut.
   let p = { ...M.createPool(), configDirty: false };
   p = M.writeLeaf(p, 2).pool;
-  p = { ...p, configDirty: true };
-  for (let i = 0; i < 2; i++) p = M.step(p);
+  p = writeAll({ ...p, configDirty: true });
+  p = M.step(p);
   const { pool } = M.importPool(M.pullPlug(p));
   assert.equal(pool.configDirty, true);
   assert.equal(M.canSetConfig(pool), "cfgForced");
-  let q = M.writeLeaf(pool, 1).pool;
-  for (let i = 0; i < 5; i++) q = M.step(q);
+  let q = writeAll(M.writeLeaf(pool, 1).pool);
+  for (let i = 0; i < 4; i++) q = M.step(q);
   assert.deepEqual(q.labels.map((l) => [l.config, l.configTorn]), [[4211, false], [4211, false], [4211, false], [4211, false]]);
   assert.equal(M.canSetConfig(q), null, "free again after that commit");
   assert.equal(M.canSetConfig(M.step(M.writeLeaf(q, 0).pool)), "cfgLocked");

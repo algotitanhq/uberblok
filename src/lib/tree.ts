@@ -104,6 +104,20 @@ export const PLACES: Place[] = (() => {
 })();
 export const place = (k: string) => PLACES.find((p) => p.key === k)!;
 
+/**
+ * How high a place stands above the data: 0 for a data block, its level for an
+ * indirect block, then the block of dnodes, then the objset. spa_sync writes
+ * the new tree bottom up, one height after the other: a block's write waits
+ * until its children have their new addresses and checksums (zio_write_compress,
+ * zio.c L1932-L1939).
+ */
+export function height(k: string): number {
+  const p = place(k);
+  return p.kind === "objset" ? NLEVELS + 1 : p.kind === "dnodes" ? NLEVELS : p.level;
+}
+/** The heights spa_sync writes: data, L1, L2, the block of dnodes, the objset. */
+export const HEIGHTS = NLEVELS + 2;
+
 /** The keys rewritten by a write of data block blkid: itself, its indirect blocks, the block of dnodes, the objset. */
 export function pathOf(blkid: number): string[] {
   return [key(0, blkid), ...ancestors(blkid, NLEVELS, EPBS).map((a) => key(a.level, a.blkid)), "DN", "OS"];
@@ -145,13 +159,19 @@ export interface Txg {
   version: Version;
   /** Data blocks written in this txg, in order. */
   leaves: number[];
-  /** null: still open to writes; 0: blocks written, not flushed; 1 to 4: beats done. */
+  /** How many heights of the new tree spa_sync has written, bottom up (0 to HEIGHTS). */
+  wrote: number;
+  /** null: blocks not all written; 0: blocks written, not flushed; 1 to 4: beats done. */
   beat: Beat | null;
 }
 
 export interface Cut {
-  /** The beat in progress when the power went (1 to 4), "open" before spa_sync wrote anything, "idle" with no txg syncing. */
-  during: 1 | 2 | 3 | 4 | "open" | "idle";
+  /**
+   * The beat in progress when the power went: 0 while spa_sync was writing the
+   * blocks, 1 to 4 for the beats, "open" before spa_sync wrote anything, "idle"
+   * with no txg syncing.
+   */
+  during: 0 | 1 | 2 | 3 | 4 | "open" | "idle";
   /** During beat 3: how many uberblock writes landed before the torn one. */
   landed: number;
   txg: number | null;
@@ -213,9 +233,12 @@ const clonePool = (p: Pool): Pool => ({
 /** Why an action is refused, or null. */
 export type Why = "cut" | "syncing" | "nothingToSync" | "notCut" | "noLeaf" | "cfgLocked" | "cfgForced";
 
+/** spa_sync has started on the open txg and not finished: its blocks are being written or committed. */
+export const syncing = (p: Pool) => !!p.open && p.open.wrote > 0 && p.open.beat !== 4;
+
 export function canWrite(p: Pool): Why | null {
   if (p.cut) return "cut";
-  if (p.open && p.open.beat !== null && p.open.beat < 4) return "syncing";
+  if (syncing(p)) return "syncing";
   return null;
 }
 export function canStep(p: Pool): Why | null {
@@ -227,7 +250,7 @@ export const canImport = (p: Pool): Why | null => (p.cut ? null : "notCut");
 /** The config switch: set before spa_sync starts on the txg, and forced on after an import. */
 export function canSetConfig(p: Pool): Why | null {
   if (p.cut) return "cut";
-  if (p.open && p.open.beat !== null && p.open.beat < 4) return "cfgLocked";
+  if (syncing(p)) return "cfgLocked";
   if (p.configForced) return "cfgForced";
   return null;
 }
@@ -250,7 +273,7 @@ export function writeLeaf(pool: Pool, blkid: number): { pool: Pool; rewritten: s
   if (canWrite(pool)) throw new Error(`write refused: ${canWrite(pool)}`);
   const p = clonePool(pool);
   settle(p);
-  if (!p.open) p.open = { txg: p.synced + 1, version: { ...p.version }, leaves: [], beat: null };
+  if (!p.open) p.open = { txg: p.synced + 1, version: { ...p.version }, leaves: [], wrote: 0, beat: null };
   const t = p.open;
   const rewritten: string[] = [];
   for (const k of pathOf(blkid)) {
@@ -270,14 +293,20 @@ export function writeLeaf(pool: Pool, blkid: number): { pool: Pool; rewritten: s
 }
 
 /**
- * The next step of the sync: spa_sync writes the txg's blocks (beat 0), then
- * vdev_config_sync's four beats (vdev_label.c L2085-L2161).
+ * The next step of the sync: spa_sync writes the txg's new blocks one height
+ * per step, data first and the objset last (beat 0 is done when the objset is
+ * written), then vdev_config_sync's four beats (vdev_label.c L2085-L2161).
  */
 export function step(pool: Pool): Pool {
   if (canStep(pool)) throw new Error(`step refused: ${canStep(pool)}`);
   const p = clonePool(pool);
   const t = p.open!;
-  const next = (t.beat === null ? 0 : t.beat + 1) as Beat;
+  if (t.beat === null) {
+    t.wrote += 1;
+    if (t.wrote === HEIGHTS) t.beat = 0;
+    return p;
+  }
+  const next = (t.beat + 1) as Beat;
   t.beat = next;
   if (next === 2 && p.configDirty) for (const l of [0, 2]) writeConfig(p, l, t.txg);
   if (next === 3) for (let l = 0; l < VDEV_LABELS; l++) writeUb(p, l, t);
@@ -311,7 +340,7 @@ export function pullPlug(pool: Pool, landed = 0): Pool {
     return p;
   }
   if (t.beat === null) {
-    p.cut = { during: "open", landed: 0, txg: t.txg };
+    p.cut = { during: t.wrote === 0 ? "open" : 0, landed: 0, txg: t.txg };
     return p;
   }
   const during = (t.beat + 1) as 1 | 2 | 3 | 4;

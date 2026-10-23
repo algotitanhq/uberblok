@@ -2196,3 +2196,45 @@ reversed step list noted in D23.1).
 **Verification.** `npm test` 244 pass; `npm run build` 44 pages, typography check 0 failures;
 `scripts/verify.mjs` on the whole visit at `b3ef3b5`: 457 captures, 0 console errors, every
 mismatch list empty.
+
+## v1.4 metaslabs room (ALG-197): a question, a figure that outlines what each action changed
+
+**What changed.** The metaslabs room, in EN, FR and ES, asks one question ("How does ZFS know
+which space is free?"), answers it in three plain paragraphs, keeps its figure with what to try,
+then shows the code in eight Source notes (D21.1, D27.1). In the figure, each action (write,
+delete, sync, rewrite, load, condense) outlines what it changed: the range on the metaslab, the
+in-memory tree, the file, the new words on the tape. The line under the buttons says it in plain
+words, without code links. A line under the vdev strip names the active metaslab and how ZFS
+picks one. Eight short excerpts are new in `ANALYSIS.md` (metaslab room, 15 to 22). The other
+rooms are unchanged, except the Engine room's computed excerpt count (141 → 149).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 66 | 38 |
+| of them in the prose | 40 | 0 |
+| in the figure (opening state; the old log added one per line) | 2 | 0 |
+| in excerpts and Source notes | 24 | 38 |
+| Code excerpts (citations) | 10 | 8 |
+| Source notes | 0 | 8 |
+| Lines of code shown | 276 | 58 |
+
+**Proof.** `npm test` (250 pass, 5 new for the outline and the no-link rule), `npm run build`
+(astro check 0 errors, FR typography 0 failures), `check-permalinks` (ANALYSIS.md 149 excerpts,
+957 line references; built site 1869 references), `check-sources` (156 references, 44 pages),
+`check-csp` (44 pages): all pass. `scripts/verify-metaslabs.mjs` against the preview, EN, FR and
+ES at 390 and 1440 px: QA's sequences replayed against the model with every tape word equal, the
+outline after a delete on exactly A's range, `ms_freeing` and file A, no link in the figure, the
+Source note in the side panel, keyboard walk with visible focus on every stop, reduced motion
+(no running animation), no script (opening state and text version); 42 captures (not committed,
+`shots/`), 0 console errors.
+
+**Reviews.** `technical-writer` on the three languages (30 edits proposed, most taken): the
+dynamic-fit fallback stated fully (nothing after the cursor, under 4 % free, or no free segment
+of 128 KiB), metaslabs loaded on demand, the deferred frees still counted free before
+`metaslab_load` removes them, uberblock glossed, the weight as a size class, the exception to
+the deferral spelled out, the Spanish "registro" no longer used for both the log and a record,
+calques in FR and ES. Not taken: "about two hundred metaslabs" (D27.1).
+
+**Debts.** None found outside the room.

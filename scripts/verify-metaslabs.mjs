@@ -5,7 +5,7 @@
 // refused then accepted) replayed in the page in EN, FR and ES, phone and
 // desktop; every word drawn on the tape is compared with the model's
 // (src/lib/metaslab.ts), the log is read back, and the outline of what an
-// action changed is checked after a delete (D25.1). Then reduced motion, no
+// action changed is checked after a delete (D27.1). Then reduced motion, no
 // JavaScript, and a keyboard-only walk.
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";

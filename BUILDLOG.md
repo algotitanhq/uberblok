@@ -2196,3 +2196,54 @@ reversed step list noted in D23.1).
 **Verification.** `npm test` 244 pass; `npm run build` 44 pages, typography check 0 failures;
 `scripts/verify.mjs` on the whole visit at `b3ef3b5`: 457 captures, 0 console errors, every
 mismatch list empty.
+
+## v1.4 send / receive room (ALG-201): a question, and one outlined effect per press
+
+**What changed.** The send / receive room, in EN, FR and ES, asks one question ("How does ZFS
+send only what changed?"), answers it in three plain paragraphs, keeps its figure with what to
+try, then shows the code in six Source notes (D21.1, D29.1). In `SendLab`, Next step sits under
+the three panels with its line, in a bar that sticks to the bottom of the screen while the figure
+is in view; each press outlines what it did (the pointer tested, the records written, the record
+applied and the blocks it changed). The narration is plain, with no code links or function
+names. The model is unchanged. Six short excerpts are new in `ANALYSIS.md` (send / receive room,
+13 to 18). No shared code changed; the other rooms are unchanged, except the Engine room's
+computed excerpt count, which grows by six.
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 48 | 28 |
+| of them in the prose | 24 | 0 |
+| in excerpts and Source notes | 24 | 28 |
+| "code" links the figure adds as it runs | 1 per narrated line (10 targets) | 0 |
+| Code excerpts (citations) | 8 | 6 |
+| Lines of code shown | 186 | 44 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (246 pass, one new
+in `send-view.test.mjs`: every frame of every stream, in three languages, outlines the records
+`justWritten()` names and its line carries no link or code name), `check-permalinks` on
+`ANALYSIS.md` (147 excerpts, 0 failures). `scripts/verify-send.mjs` (new, scoped to this room):
+EN, FR, ES at 1280×900 and on a 390 px phone; a full stream four presses, then from `@s3` every
+frame to the end: 138 presses, each outlining what the model says; the line plain; after every
+press Next step and the outlined part on screen; reduced motion runs no animation; with no
+script the step bar is hidden and nothing is outlined; Tab reaches Next step, Enter steps and
+keeps the focus. 26 captures, 0 problems, 0 console errors. On the final head, the whole-site suites:
+`scripts/verify.mjs` (465 captures, 0 console errors, every mismatch list empty; the send room's
+replays, flipped bit, no-script state with the step bar hidden and nothing outlined, and the
+keyboard drive with 42 stops, all with a visible focus) and `scripts/audit.mjs` (42 pages, 0
+problems; the send room in three languages: 42 stops, axe 0, one announcement per press).
+
+**Reviews.** `technical-writer` on the three languages: each record's checksum also covers its
+own header; "older than F" said the wrong boundary (born in F or before); the second paragraph
+was long; "an OBJECT for each file" overstated; "record" glossed the dnode on a page where it
+means a stream record; the pending line; false friends in ES ("redactados", "fecha de
+nacimiento"); "défaite" in FR. All fixed, NITs included. `code-reviewer` on the diff: `show()`
+took the first match in page order, so the receiver's blocks were never scrolled to (now chosen
+by frame, and only on Next step); no top alignment for a tall part; the outline was drawn before
+any step and without script (now off until the first press); `drr_checksum` left in the FR and ES
+text version and tooltip; `verify.mjs` did not check the step bar without script (it does now).
+All fixed.
+
+**Debts.** `Dispatch.fn` in `send.ts` is no longer shown by the figure; the model and its test
+keep it, since the model is unchanged by this issue.

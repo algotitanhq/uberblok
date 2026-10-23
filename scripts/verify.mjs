@@ -967,15 +967,21 @@ const ZSEQ = [
   { id: "throughput", set: ['[data-pool="slog"]', '[data-bias="throughput"]', '[data-flag="dsync"]'], steps: ["write", "write", "sync", "crash", "import", "mount"], expect: ["viaSync", "wreturns", "claim0"] },
   { id: "no-fsync", set: [], steps: ["write", "crash", "import", "mount"], expect: ["lost"] },
 ];
+// On a phone the sticky step bar can cover a button near the bottom of the screen;
+// a reader scrolls it up, so the check does too.
+const zclick = async (loc) => {
+  await loc.evaluate((e) => e.scrollIntoView({ block: "center" }));
+  await loc.click();
+};
 for (const lang of ["en", "fr"]) {
   for (const vp of ["iphone", "desktop"]) {
     const { ctx, page } = await open(VIEWPORTS[vp], ZR[lang]);
     const fig = page.locator("[data-zl]");
     for (const sq of ZSEQ) {
-      await fig.locator('[data-act="reset"]').click();
+      await zclick(fig.locator('[data-act="reset"]'));
       const m = zilModel.empty();
       for (const sel of sq.set) {
-        await fig.locator(sel).click();
+        await zclick(fig.locator(sel));
         if (sel.includes("pool")) m.pool = { slog: sel.match(/"(\w+)"/)[1] };
         if (sel.includes("bias")) m.logbias = "throughput";
       }
@@ -983,8 +989,8 @@ for (const lang of ["en", "fr"]) {
       const flags = { dsync: sq.set.some((x) => x.includes("dsync")), direct: false };
       const logs = [];
       for (const step of sq.steps) {
-        await fig.locator(`[data-act="${step}"]`).click();
-        if ((await fig.locator('[data-step="skip"]').getAttribute("aria-disabled")) === "false") await fig.locator('[data-step="skip"]').click();
+        await zclick(fig.locator(`[data-act="${step}"]`));
+        if ((await fig.locator('[data-step="skip"]').getAttribute("aria-disabled")) === "false") await zclick(fig.locator('[data-step="skip"]'));
         ({ write: () => zilModel.write(m, size, flags), fsync: () => zilModel.fsync(m), sync: () => zilModel.sync(m), crash: () => zilModel.crash(m), import: () => zilModel.importPool(m), mount: () => zilModel.mount(m) })[step]();
         const got = await zilState(page);
         const want = zilWant(m);
@@ -1016,11 +1022,11 @@ for (const lang of ["en", "fr"]) {
       for (const size of zilModel.SIZES)
         for (const dsync of [false, true])
           for (const direct of [false, true]) {
-            await fig.locator(`[data-pool="${slog}"]`).click();
-            await fig.locator(`[data-bias="${bias}"]`).click();
-            await fig.locator(`[data-size="${size}"]`).click();
+            await zclick(fig.locator(`[data-pool="${slog}"]`));
+            await zclick(fig.locator(`[data-bias="${bias}"]`));
+            await zclick(fig.locator(`[data-size="${size}"]`));
             for (const [k, v] of [["dsync", dsync], ["direct", direct]])
-              if ((await fig.locator(`[data-flag="${k}"]`).getAttribute("aria-pressed")) !== String(v)) await fig.locator(`[data-flag="${k}"]`).click();
+              if ((await fig.locator(`[data-flag="${k}"]`).getAttribute("aria-pressed")) !== String(v)) await zclick(fig.locator(`[data-flag="${k}"]`));
             const shown = await fig.locator("[data-decision] .verdict .wr").textContent();
             const m = zilModel.empty();
             m.pool = { slog };
@@ -1036,11 +1042,18 @@ for (const lang of ["en", "fr"]) {
 {
   const { ctx, page } = await open({ ...VIEWPORTS.iphone, reducedMotion: "reduce" }, ZR.en);
   const fig = page.locator("[data-zl]");
-  await fig.locator('[data-pool="slog"]').click();
-  await fig.locator('[data-size="131072"]').click();
-  await fig.locator('[data-act="write"]').click();
+  // Each action runs one step per press (D30.1): Show every step finishes it. The first
+  // fsync() creates the log; the second one returns from the log.
+  const act = async (a) => {
+    await zclick(fig.locator(`[data-act="${a}"]`));
+    if ((await fig.locator('[data-step="skip"]').getAttribute("aria-disabled")) === "false") await zclick(fig.locator('[data-step="skip"]'));
+  };
+  await zclick(fig.locator('[data-pool="slog"]'));
+  await zclick(fig.locator('[data-size="131072"]'));
+  for (const a of PRIME) await act(a);
+  await act("write");
   const t0 = Date.now();
-  await fig.locator('[data-act="fsync"]').click();
+  await act("fsync");
   await page.waitForFunction(() => /fsync\(\) returns/.test(document.querySelector("[data-zl] [data-log]").textContent));
   report.reducedMotion.zil = { fsyncMs: Date.now() - t0, running: await page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length) };
   await page.screenshot({ path: join(out, "zil-en-iphone-reduced-motion.png"), fullPage: true });

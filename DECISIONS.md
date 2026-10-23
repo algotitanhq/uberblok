@@ -2650,3 +2650,45 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   readers keep the oldest-first order and the live region announces each new step. The key
   gains the two damage states, and the first read step says what each damaged child holds of
   the block, so damaging a parity-only or empty child explains why nothing is rebuilt.
+
+## v1.4 vdevs room (ALG-191)
+
+### D26.1 The vdevs room as a question; the figure says where each block landed
+
+- **Context.** Fourth room of the D21.1 roll-out ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 14 excerpts (411 lines of code), the most of any room, and 93 links to GitHub
+  in each language: 48 in the prose, 7 in the figure's first state (more after each action),
+  38 in the excerpts and their notes. The issue asks for a figure where the reader builds a
+  pool layout and sees where each kind of block goes.
+- **Question.** "Where does ZFS put a block in my pool?" (« Où ZFS range-t-il un bloc dans mon
+  pool ? », « ¿Dónde pone ZFS un bloque en mi pool? »). The answer goes from the layouts an
+  operator builds (data vdevs, log, special, dedup, a disk being replaced) to the two choices
+  ZFS makes for each block: a class by the kind of block, then a path down the tree, where
+  each node passes the I/O on with its own functions and a replacement is a temporary mirror.
+- **Figure.** `VdevLab` is improved, not rebuilt; the model (`src/lib/vdevs.ts`) is unchanged.
+  The line that says what the last action did moves from under the panels to right under the
+  controls, and shows from the start (the default pool's last block). The last block's panel
+  and the classes table sit beside the tree from 60rem, so a press and its effect share the
+  screen; the selected node's table and the spares go below. After a write, the top-level
+  vdevs that got a copy take a ring and their block count the accent fill (other counts are
+  outlined), and the class row of the block is marked in the table, until the next action.
+  These are classes, not animations, so they read the same under reduced motion. A key under
+  the tree lists every look from the start. The narration says "copies" where it said DVAs
+  and names no function (the class steps say "The special class: it is full", not
+  `metaslab_alloc` and `ENOSPC`); the walk down the tree keeps the `io_start` of each node,
+  which is the room's point. The list of reasons why buttons are disabled goes: a disabled
+  button says its reason on its press, as in the tree room (D22.1). No code links in the
+  figure (D21.1). Without script, the first state and the text version show as before.
+- **Code.** Nine Source notes, 99 lines (`ANALYSIS.md` vdevs room, excerpts 18 to 26, all
+  short cuts of excerpts 2, 4, 5, 8, 9, 10 to 13 and 16, checked against `zfs-2.4.4`): the
+  ops table, the mirror's `io_start`, `spa_preferred_class`, the class fallback, the next
+  copy on the next vdev, the replacing table, `vdev_add_parent`, the end of the resilver and
+  the dRAID column placement. The "three depths" section is gone, as in the other rooms. Left
+  out of the notes: `struct vdev`, `vdev_metaslab_group_create` and the embedded log classes,
+  `spa_vdev_attach`, the dRAID permutation generator (each is linked from a note, or stays in
+  `ANALYSIS.md`).
+- **Rejected.** Dropping the function names from the walk down the tree: "each node passes it
+  on with its own function" is what the room teaches, and the names are the evidence. A
+  sticky bar for phones as in the TXG room (D24.1): here the line under the controls already
+  says the effect in words; left to the design review. Rebuilding the figure around one pool
+  layout builder: the issue asks to improve the existing figure.

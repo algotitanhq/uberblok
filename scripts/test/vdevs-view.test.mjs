@@ -157,7 +157,7 @@ test("the last block's vdevs and class are marked, and the figure carries no cod
   assert.doesNotMatch(V.treeSvg(S, r.pool, null, "sdd"), /\bhit\b|landed last/);
   // The key lists every look from the start.
   assert.equal((V.legendHtml(S).match(/<li>/g) ?? []).length, 6);
-  // With no refs (the component passes none, D25.1), no line carries a link.
+  // With no refs (the component passes none, D26.1), no line carries a link.
   const html = V.lastHtml(S, r.pool, { block: r.block, trace: r.trace, type: "write" }) + V.auxHtml(S, r.pool) + V.opsHtml(S, r.pool, "sdd");
   assert.doesNotMatch(html, /<a /);
 });

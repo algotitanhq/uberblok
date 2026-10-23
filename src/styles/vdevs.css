@@ -60,7 +60,7 @@
   }
 }
 /* The last block and the classes beside the tree, so a press and its effect
-   share the screen on a desktop (D25.1). */
+   share the screen on a desktop (D26.1). */
 .vd .vd-side {
   display: grid;
   gap: var(--space-4);

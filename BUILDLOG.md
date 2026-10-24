@@ -2329,6 +2329,14 @@ in three. `npm test` 245 pass, `verify-arc.mjs` 35 captures, 0 problems.
 **Debts.** None new. `scripts/verify.mjs` still checks this room in EN and FR only;
 `verify-arc.mjs` covers ES.
 
+**Design review pass (D28.2).** All seven items of the Design/UX review fixed in one pass: the
+owner panel's prediction is one sentence again (B1); the plain answer opens with the answer, about
+70 words a paragraph, in the three languages (S1); Overwrite, Delete and Cancel for the selected
+block sit in a row under the board, sticky on a phone, focused after a keyboard selection (S2);
+the pending tags do not wrap, the empty log says so, "what to try" starts with "Select B in fs",
+and selected looks different from focused and is in the legend (N1–N4). Merged `main` (ALG-201).
+Evidence: 267 tests pass; audit 42 pages, 0 problems; full verify 488 captures, 0 errors.
+
 ## v1.4 metaslabs room (ALG-197): a question, a figure that outlines what each action changed
 
 **What changed.** The metaslabs room, in EN, FR and ES, asks one question ("How does ZFS know

@@ -4,11 +4,12 @@
 // then a small encrypted file (dnode block, indirect block, three data
 // blocks) read and scrubbed with its key loaded or not, with a bit that can
 // be flipped on disk. src/lib/transforms.ts decides every outcome,
-// src/lib/transforms-view.ts draws it. Refs: ANALYSIS.md, room "Compression,
+// src/lib/transforms-view.ts draws it. Each action on the file outlines what
+// it changed, and the line under the file's buttons says it in plain words,
+// with no code links (D31.1). Refs: ANALYSIS.md, room "Compression,
 // dedup, encryption", excerpts 3, 11 to 15; simplifications: DECISIONS.md D10.2.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { cryptFile } from "../lib/transforms";
 import { wordsGrid, kindLine, cryptFileView, type TrStrings } from "../lib/transforms-view";
@@ -19,19 +20,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const SPA = "include/sys/spa.h";
-const Z = "module/zfs/zio.c";
-const refs = {
-  k_plain: gh(SPA, 123, 186),
-  k_encrypted: gh(SPA, 188, 225),
-  k_authenticated: gh(Z, 5146, 5153),
-  k_indirect: gh(Z, 5123, 5131),
-  truncated: gh("module/zfs/zio_checksum.c", 508, 526),
-  eacces: gh("module/zfs/dsl_crypt.c", 2818, 2823),
-  scrub: gh("module/zfs/dsl_scan.c", 4841),
-  clear: gh("module/os/linux/zfs/zio_crypt.c", 115, 120),
-};
-const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as TrStrings;
 const t = UI[lang];
 const KINDS = [
   ["plain", S.kindPlain],
@@ -59,22 +48,22 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
       <h3>{S.fileLabel}</h3>
       <div class="tr-bar" hidden>
         <div class="buttons">
-          <button class="btn" type="button" data-key aria-pressed="true">{S.keyBtn}</button>
+          <button class="btn" type="button" data-key>{S.keyUnload}</button>
           <button class="btn btn--primary" type="button" data-act="scrub">{S.scrubBtn}</button>
           <button class="btn" type="button" data-act="read">{S.readBtn}</button>
           <button class="btn btn--danger" type="button" data-flip aria-pressed="false">{S.flipBtn}</button>
         </div>
       </div>
+      <p class="tr-now" data-now aria-hidden="true" hidden></p>
       <div data-file set:html={cryptFileView(S, f0, { key: true, flip: false, scrub: null, read: null })} />
     </div>
   </div>
-  <p class="tr-now" data-now aria-hidden="true" hidden></p>
   <p class="visually-hidden" data-live aria-live="polite"></p>
   <noscript><p class="muted">{S.eNoScript}</p></noscript>
   <details class="text-version">
     <summary>{t.textVersion}</summary>
     <div data-describe>
-      {KINDS.map(([k]) => <p set:html={kindLine(S, k).replace(/ ?<a class="see"[^>]*>[^<]*<\/a>/g, "")} />)}
+      {KINDS.map(([k]) => <p set:html={kindLine(S, k)} />)}
       <p>{S.keyOffLine}</p>
     </div>
   </details>
@@ -83,7 +72,7 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
 <script>
   import { strings, reducedMotion } from "../lib/svg";
   import { cryptFile, flipped, scrub, type BpKind, type CryptFile } from "../lib/transforms";
-  import { wordsGrid, kindLine, cryptFileView, cryptLine, readAll, type CryptUi, spoken, type TrStrings } from "../lib/transforms-view";
+  import { wordsGrid, kindLine, cryptFileView, cryptLine, cryptChanges, readAll, NO_CRYPT_CHANGES, type CryptChanges, type CryptUi, spoken, type TrStrings } from "../lib/transforms-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-crypt]")) {
     const S = strings<TrStrings>(root);
@@ -96,12 +85,15 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
     /**
      * The visible line, and one announcement per action: the live region is
      * emptied, then filled on the next frame, so that the same text twice is
-     * announced twice; it reads the line without its code links.
+     * announced twice; it reads the line without its tags. A change of kind
+     * is only announced: the sentence above the words already shows it.
      */
-    function say(html: string) {
-      const el = q("[data-now]");
-      el.hidden = false;
-      el.innerHTML = html;
+    function say(html: string, visible = true) {
+      if (visible) {
+        const el = q("[data-now]");
+        el.hidden = false;
+        el.innerHTML = html;
+      }
       const live = q("[data-live]");
       live.textContent = "";
       requestAnimationFrame(() => (live.textContent = spoken(html)));
@@ -114,11 +106,13 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
       if (!reducedMotion()) for (const tr of root.querySelectorAll<HTMLElement>("[data-words] tr.diff")) tr.animate([{ backgroundColor: "var(--accent-soft)", opacity: 0.3 }, { opacity: 1 }], { duration: 480, easing: "ease-out" });
     }
 
-    function renderFile() {
-      q("[data-file]").innerHTML = cryptFileView(S, file(), ui);
-      q("[data-key]").setAttribute("aria-pressed", String(ui.key));
+    // What the last action on the file changed: outlined until the next action.
+    function renderFile(c: CryptChanges = NO_CRYPT_CHANGES) {
+      q("[data-file]").innerHTML = cryptFileView(S, file(), ui, c);
+      // The button names what it does next, so it never contradicts the key's state above the file.
+      q("[data-key]").textContent = ui.key ? S.keyUnload : S.keyLoad;
       q("[data-flip]").setAttribute("aria-pressed", String(ui.flip));
-      if (!reducedMotion()) for (const el of root.querySelectorAll<HTMLElement>("[data-file] .sc, [data-file] .readout")) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: "ease-out" });
+      if (!reducedMotion()) for (const el of root.querySelectorAll<HTMLElement>("[data-file] .sc, [data-file] .rd, [data-file] .readout")) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: "ease-out" });
     }
 
     root.addEventListener("click", (e) => {
@@ -127,7 +121,9 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
       if (el.dataset.kind) {
         kind = el.dataset.kind as BpKind;
         renderWords();
-        say(kindLine(S, kind));
+        // The file's outline was the last file action's: a change of kind clears it.
+        renderFile();
+        say(kindLine(S, kind), false);
         return;
       }
       let act = "";
@@ -149,7 +145,7 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
         ui.scrub = null;
         ui.read = null;
       }
-      renderFile();
+      renderFile(cryptChanges(act));
       say(cryptLine(S, act, ui));
     });
 
@@ -165,6 +161,10 @@ const f0 = cryptFile([S.fileText0, S.fileText1, S.fileText2], "core", S.bonusTex
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--space-4);
     align-items: start;
+  }
+  /* "Unload the key" and "Load the key" take the same room, so the buttons beside them do not move. */
+  [data-key] {
+    min-width: 11.5em;
   }
   .kline {
     font-size: var(--step--1);

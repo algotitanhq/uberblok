@@ -4,434 +4,434 @@ import CompressLab from "../../components/CompressLab.astro";
 import DedupLab from "../../components/DedupLab.astro";
 import CryptLab from "../../components/CryptLab.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomUrl, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D31.1): the question, a plain
+// answer, the figures, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "fr";
 const r = room("compression-dedup-encryption");
 const Z = "module/zfs/zio.c";
 const DDT = "module/zfs/ddt.c";
-const DDTH = "include/sys/ddt.h";
 const SPA = "include/sys/spa.h";
 const CRYPT = "module/os/linux/zfs/zio_crypt.c";
 const L = {
+  execute: gh(Z, 2452, 2454),
   compressData: gh("module/zfs/zio_compress.c", 148, 149),
   bpe: gh(SPA, 356, 357),
-  roundup: gh(Z, 1783, 1789),
   minAlloc: gh("module/zfs/vdev.c", 428, 437),
   gcd: gh("module/zfs/vdev.c", 1523, 1536),
+  dedupEmpty: gh("module/zfs/dmu.c", 2465, 2472),
+  embed: gh(Z, 2005, 2017),
+  embeddedLayout: gh(SPA, 265, 323),
+  roundup: gh(Z, 1783, 1789),
   asize: gh("module/zfs/vdev.c", 368, 370),
   holeBirth: gh(Z, 2107, 2115),
-  setProps: gh(Z, 2116, 2132),
-  dedupEmpty: gh("module/zfs/dmu.c", 2465, 2472),
-  embeddedLayout: gh(SPA, 265, 323),
-  syncPass: gh(Z, 1957, 1974),
-  key: gh(DDTH, 95, 105),
-  value: gh(DDTH, 150, 169),
+  overQuota: gh(DDT, 1136, 1163),
+  ddtLookup: gh(DDT, 1374, 1387),
+  quotaComment: gh(DDT, 113, 127),
   fill: gh(DDT, 724, 726),
   addref: gh(DDT, 880, 888),
+  rewrite: gh(Z, 3971, 3981),
   childWrite: gh(Z, 4110, 4114),
   extend: gh(Z, 3780, 3789),
-  quotaComment: gh(DDT, 113, 127),
-  overQuota: gh(DDT, 1136, 1163),
-  logTxg: gh("module/zfs/ddt_log.c", 41),
-  prune: gh(DDT, 129, 134),
-  scrubDdt: gh(DDT, 180, 186),
-  cryptDedup: gh(CRYPT, 147, 163),
-  suites: gh(CRYPT, 39, 40),
-  lens: gh("include/sys/zio.h", 129, 131),
-  masterKey: gh("module/zfs/dsl_crypt.c", 37, 44),
-  shareKey: gh("module/zfs/dsl_crypt.c", 60, 62),
-  macros: gh(SPA, 452, 470),
-  iv2: gh(SPA, 531, 538),
+  key: gh("include/sys/ddt.h", 95, 105),
+  value: gh("include/sys/ddt.h", 150, 169),
+  log: gh(DDT, 144, 156),
+  logFlags: gh(DDT, 303, 310),
+  quotaAuto: gh("module/zcommon/zpool_prop.c", 143, 145),
   encodeParams: gh(CRYPT, 751, 773),
   encodeMac: gh(CRYPT, 809, 827),
+  iv2: gh(SPA, 531, 538),
+  macros: gh(SPA, 452, 470),
   noEmbed: gh(SPA, 320, 322),
-  encryptRest: gh(Z, 5183, 5199),
+  writePolicy: gh("module/zfs/dmu.c", 2523, 2526),
+  suites: gh(CRYPT, 39, 40),
+  lens: gh("include/sys/zio.h", 129, 131),
   fold: gh("module/zfs/zio_checksum.c", 324, 341),
   scrubRaw: gh("module/zfs/dsl_scan.c", 4841),
   eacces: gh("module/zfs/dsl_crypt.c", 2818, 2823),
-  rotate: gh(CRYPT, 187),
-  dontCompress: gh(Z, 125),
-  stages: gh("include/sys/zio_impl.h", 135, 144),
-  logFlags: gh(DDT, 303, 310),
-  quotaAuto: gh("module/zcommon/zpool_prop.c", 143, 145),
+  clear: gh(CRYPT, 115, 120),
 };
 ---
 
 <Base
   lang={lang}
   roomId="compression-dedup-encryption"
-  title="Compression, déduplication, chiffrement · Uberblok"
-  description="Trois transformations dans le pipeline d’écriture de ZFS, lues dans le code d’OpenZFS : la limite de compression et ses quatre issues, la table de déduplication et ce qu’elle coûte, et le pointeur de bloc d’un bloc chiffré, vérifié sans sa clé. Interactif."
+  title="Qu’arrive-t-il à un bloc compressé, dédupliqué ou chiffré ? · Uberblok"
+  description="ZFS ne garde un bloc compressé que s’il gagne un huitième, compté en secteurs entiers ; la déduplication cherche la somme de contrôle de chaque bloc dans une table ; le chiffrement range son sel, son IV et son MAC dans le pointeur de bloc, si bien que le scrub n’a pas besoin de la clé. En interactif, avec le code d’OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Salle {roomNumber(r.id)}</p>
-      <h1>{r.title.fr}</h1>
-      <div class="prose problem">
+      <p class="kicker">Salle {roomNumber(r.id)} · {r.title.fr}</p>
+      <h1>Qu’arrive-t-il à un bloc compressé, dédupliqué ou chiffré ?</h1>
+      <div class="prose answer">
         <p class="lead">
-          Entre l’application et le disque, trois fonctions peuvent transformer un bloc. Chacune économise ou protège
-          quelque chose, et chacune a un prix que le code paie à chaque écriture.
+          ZFS écrit les fichiers par blocs, de 128 Kio par défaut, et un disque les range en secteurs entiers de
+          512 octets ou de 4 Kio. Avant qu’un bloc soit écrit, trois fonctionnalités facultatives agissent sur lui,
+          dans cet ordre : la compression, le chiffrement, puis la déduplication. ZFS ne garde un bloc compressé que
+          si cela économise au moins un huitième de sa taille, compté en secteurs entiers ; sinon, il le range tel quel.
         </p>
         <p>
-          <strong>La compression</strong> économise de la place, mais compresser coûte du temps processeur, et un bloc qui
-          rétrécit de quelques octets n’économise rien une fois arrondi à des secteurs entiers. <strong>La
-          déduplication</strong> évite d’écrire un bloc déjà présent sur disque, mais pour le savoir elle doit chercher
-          chaque bloc écrit dans une table, garder cette table sur disque et la mettre à jour. <strong>Le
-          chiffrement</strong> cache les données, mais le pool doit pouvoir vérifier, réparer et envoyer des blocs dont
-          il n’a peut-être pas la clé. Le code répond à chaque problème par une règle, et cette salle prend les trois
-          règles l’une après l’autre. Dans <a href={L.stages}>le pipeline d’écriture</a>, elles s’exécutent dans cet
-          ordre : la compression, puis le chiffrement, puis la somme de contrôle de ce qui sera écrit, puis la recherche de déduplication par
-          cette somme de contrôle.
+          La déduplication évite d’écrire un bloc déjà présent sur le disque. ZFS cherche la somme de contrôle de
+          chaque bloc dans une table, la table de déduplication. S’il l’y trouve, le nouveau pointeur de bloc (la
+          fiche où un bloc parent note l’adresse et la somme de contrôle de chaque enfant) reprend l’adresse de la
+          copie existante, et un compteur de références augmente. Sinon, le bloc est écrit et
+          reçoit une entrée. Le prix : une recherche à chaque écriture et une table qui grossit avec les données.
+        </p>
+        <p>
+          Pour chiffrer un bloc, ZFS utilise un sel et un vecteur d’initialisation (IV), deux valeurs qui rendent le
+          chiffrement de chaque bloc différent, et calcule un code d’authentification (MAC), qui prouve que le bloc
+          n’a pas été modifié. Les trois vont dans le pointeur de bloc, à la place de l’adresse de la troisième copie,
+          d’une moitié de la somme de contrôle et de quelques bits libres. L’autre moitié porte sur les octets
+          chiffrés : un scrub peut donc vérifier chaque bloc sans la clé.
         </p>
       </div>
     </header>
 
     <section class="section" aria-labelledby="compress">
-      <h2 id="compress"><span class="n">1</span> Compression : gagner un huitième, ou stocker tel quel</h2>
+      <h2 id="compress"><span class="n">1</span> Compresser un bloc</h2>
       <div class="prose">
         <p>
-          Le compresseur reçoit une limite : sept huitièmes du bloc, arrondis vers le bas à un nombre entier de
-          secteurs. Si sa sortie ne tient pas, le bloc est stocké non compressé. Deux cas n’atteignent jamais le
-          compresseur ou jamais le disque : un bloc de zéros devient un trou, et une sortie de 112 octets ou moins est
-          repliée dans le pointeur de bloc lui-même. Choisissez les données, la taille du bloc, celle du secteur et la
-          compression, et suivez la branche qui décide.
+          La figure suit un bloc à travers les tests du chemin d’écriture. Choisissez les données, la taille du bloc,
+          celle du secteur et la compression. La ligne sous les réglages dit ce qui s’est passé, et ce que le choix a
+          changé est entouré.
+        </p>
+        <p>
+          Avec des données compressibles, la sortie reste sous la limite, le trait plein à sept huitièmes du bloc
+          arrondis au secteur inférieur, et le bloc prend moins de secteurs sur le disque. Des données déjà compressées
+          dépassent la limite et le bloc est rangé tel quel. Avec la compression active, un bloc de zéros n’est pas
+          écrit du tout : Que des zéros donne un trou. Un bloc qui se compresse en 112 octets ou moins va dans son
+          pointeur de bloc plutôt que sur le disque : essayez Presque vides.
+        </p>
+        <p>
+          Choisissez ensuite un bloc de 4 Kio sur des secteurs de 4 Kio. Sept huitièmes d’un secteur, arrondis au
+          secteur inférieur, ne font plus rien : le bloc ne reste compressé que s’il tombe à 112 octets ou moins, et il va alors dans son pointeur de bloc. Le tableau sous
+          la figure montre les mêmes données pour les trois tailles de secteur.
         </p>
       </div>
       <CompressLab lang={lang} />
     </section>
 
     <section class="section" aria-labelledby="dedup">
-      <h2 id="dedup"><span class="n">2</span> Déduplication : une table consultée à chaque écriture</h2>
+      <h2 id="dedup"><span class="n">2</span> Écrire deux fois le même bloc</h2>
       <div class="prose">
         <p>
-          Avec <code>dedup=on</code>, chaque bloc écrit est cherché dans la table de déduplication (DDT) par sa somme de
-          contrôle. Si la table le connaît déjà, le nouveau pointeur de bloc reçoit l’adresse de la copie existante et
-          un compteur de références augmente : rien n’est écrit. Sinon, le bloc est écrit et une nouvelle entrée note où.
-          Écrivez des blocs, réécrivez le même, puis faites dépasser son quota à la table.
+          Chaque bouton Écrire écrit un bloc de ce contenu, dans un nouveau groupe de transactions (le lot de modifications que
+          ZFS valide à quelques secondes d’intervalle). La figure s’ouvre après trois écritures : A, B, puis de nouveau
+          A, qui a été trouvé dans la table.
+        </p>
+        <p>
+          Écrivez C : C n’est pas dans la table, le bloc est donc écrit et la table reçoit une entrée pour sa somme de contrôle.
+          Écrivez C une deuxième fois : il est trouvé, le compteur de l’entrée passe à 2 et aucun bloc n’est écrit. Le
+          compteur de recherches augmente à chaque écriture.
+        </p>
+        <p>
+          Recommencez, écrivez A, puis activez « Table de déduplication au-dessus de son quota » et écrivez B. B n’obtient pas d’entrée et
+          il est écrit comme n’importe quel bloc. Écrivez A : il est encore trouvé dans la table, et encore dédupliqué.
         </p>
       </div>
       <DedupLab lang={lang} />
-      <div class="prose after cost">
-        <p>
-          <strong>Ce que ça coûte.</strong> La figure compte une recherche dans la DDT par écriture, trouvée ou non : un
-          dataset en <code>dedup=on</code> la paie pour chaque bloc, pas seulement pour les doublons. Chaque entrée est
-          une clé de <a href={L.key}>40 octets</a> (la somme de contrôle de 256 bits et un mot de tailles et
-          d’indicateurs) et une valeur de <a href={L.value}>256 octets au format traditionnel, 72 au nouveau format
-          « flat »</a>. La table vit sur disque sous forme d’objets ZAP, et le code dit pourquoi la mettre à jour coûte
-          cher : « each entry only takes up a tiny portion of a ZAP leaf node, and so required reading the whole node,
-          updating the entry, and writing it back. On busy pools, this could add serious IO and memory overheads. »
-          (chaque entrée n’occupe qu’une petite partie d’une feuille de ZAP : il fallait lire toute la feuille, modifier
-          l’entrée et la réécrire. Sur un pool chargé, cela pouvait coûter beaucoup d’E/S et de mémoire). La
-          fonctionnalité <code>fast_dedup</code> répond par un journal : les entrées modifiées sont ajoutées à un journal
-          sur disque et gardées en mémoire, puis vidées vers le ZAP un peu à chaque txg. Seules les tables créées avec
-          cette fonctionnalité <a href={L.logFlags}>reçoivent le journal</a> ; une table créée avant garde la réécriture
-          d’une feuille de ZAP à chaque txg. Un <code>dedup_table_quota</code> peut plafonner la taille de la table sur
-          disque ; au-delà, les nouveaux blocs ne sont tout simplement pas dédupliqués. Sa valeur par défaut,
-          <code>auto</code>, <a href={L.quotaAuto}>ne fixe aucune taille</a> et <a href={L.overQuota}>ne plafonne la
-          table que sur un pool doté d’un vdev dedup ou special</a> : sur un pool de disques simples, la table grandit
-          avec les données. Le code ne donne aucun chiffre de mémoire par téraoctet ni de taux de
-          déduplication : ils dépendent des données, et cette salle ne les invente pas.
-        </p>
-      </div>
     </section>
 
     <section class="section" aria-labelledby="crypt">
-      <h2 id="crypt"><span class="n">3</span> Chiffrement : les secrets dans le pointeur de bloc, les sommes de contrôle en clair</h2>
+      <h2 id="crypt"><span class="n">3</span> Décharger la clé, puis lancer un scrub</h2>
       <div class="prose">
         <p>
-          Un bloc chiffré a besoin d’un sel, d’un IV et d’un MAC, et ils voyagent là où le bloc est référencé : dans son
-          pointeur de bloc, à la place de l’adresse de la troisième copie et de la moitié de la somme de contrôle.
-          L’autre moitié de la somme de contrôle est calculée sur le texte chiffré, si bien que le pool peut vérifier
-          chaque bloc sans la clé. Comparez les mots de quatre sortes de pointeurs de bloc, puis déchargez la clé d’un
-          fichier chiffré et lancez un scrub.
+          À gauche, les 16 mots d’un pointeur de bloc. Pour un bloc de données chiffré, les mots surlignés sont ceux qui
+          diffèrent d’un bloc ordinaire : la troisième adresse, la moitié haute du compteur de remplissage et la
+          seconde moitié de la somme de contrôle.
+        </p>
+        <p>
+          À droite, un petit fichier chiffré : son bloc de dnodes, qui décrit le fichier, un bloc indirect qui pointe
+          vers les données, et trois blocs de données. Appuyez sur « Décharger la clé » : les données s’affichent chiffrées. Lancez un
+          scrub : chaque bloc passe encore. Lisez le fichier : la lecture échoue au premier bloc de données, qui ne
+          peut pas être déchiffré. Inversez un bit, puis relancez le scrub : le bloc abîmé est repéré, avec ou sans la
+          clé.
         </p>
       </div>
       <CryptLab lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">L’idée, à trois profondeurs</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">Dans le code</h2>
+      <p class="prose">
+        Les figures suivent dix endroits du code d’OpenZFS. Ouvrez une note Source pour voir les lignes, tirées de la
+        version zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>En une phrase</h3>
-        <p class="lead prose">
-          La compression ne garde un bloc compressé que s’il économise au moins un huitième, compté en secteurs entiers ; la
-          déduplication remplace une écriture par une référence quand la somme de contrôle du bloc est déjà dans sa
-          table, au prix d’une recherche à chaque écriture ; le chiffrement range son sel, son IV et son MAC dans le
-          pointeur de bloc et laisse une somme de contrôle tronquée du texte chiffré, si bien que le scrub n’a pas besoin
-          de clé.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>En un paragraphe</h3>
+      <div class="step">
+        <h3>L’ordre des étapes</h3>
         <p class="prose">
-          Dans <code>zio_write_compress</code>, un bloc de zéros devient un trou ; sinon le compresseur reçoit une limite
-          de sept huitièmes du bloc, arrondie vers le bas au secteur, et une sortie qui ne tient pas laisse le bloc non
-          compressé ; une sortie d’au plus 112 octets va dans le pointeur de bloc, qui contient alors des données au lieu
-          d’adresses ; le reste est arrondi à des secteurs entiers. Ensuite, dans un dataset chiffré, le chiffrement
-          prend le troisième DVA pour le sel et le début de l’IV, le haut du nombre de blocs remplis pour la fin de l’IV,
-          et la moitié de la somme de contrôle pour le MAC ; seuls les blocs de niveau 0 des types chiffrés sont
-          chiffrés. La somme de contrôle vient après, calculée sur ce qui sera écrit, texte chiffré compris, et le
-          scrub, qui lit les blocs bruts, en vérifie les 128 bits restants. Enfin, avec la déduplication,
-          <code>zio_ddt_write</code> cherche cette somme de contrôle dans la DDT : si elle y est, le DVA de l’entrée est
-          copié dans le nouveau pointeur de bloc et une référence est ajoutée, sans écriture ; sinon le bloc est écrit
-          et son DVA noté dans une nouvelle entrée ; une table au-dessus de son quota refuse les nouvelles entrées, et
-          le bloc est écrit sans son bit D.
+          Chaque étape d’une écriture est un bit, et une écriture parcourt ses étapes du bit le plus bas au plus haut. La compression vient avant le
+          chiffrement, et la somme de contrôle est calculée sur les octets qui seront écrits. La recherche de
+          déduplication vient ensuite : elle utilise donc la somme de contrôle du bloc compressé et chiffré.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>enum zio_stage</code>, zio_impl.h</Fragment>
+          <Excerpt
+            lang={lang}
+            path="include/sys/zio_impl.h"
+            from={135}
+            to={144}
+            symbol="enum zio_stage"
+            notes={[
+              { from: 135, to: 138, text: "La compression, puis le chiffrement, puis la somme de contrôle de ce qui sera écrit." },
+              { from: 140, text: "Le nop-write, qui saute une écriture dont la nouvelle somme de contrôle est égale à l’ancienne. Les figures le laissent de côté." },
+              { from: 142, to: 144, text: `Les étapes de déduplication. Une écriture passe <a href="${L.execute}">au bit suivant présent dans son pipeline</a> : elles viennent donc en dernier.` },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>En détail</h3>
-        <div class="prose">
-          <p><strong>La limite.</strong> Avant de compresser, le chemin d’écriture demande quelle taille la sortie peut avoir.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={1791}
-          to={1809}
-          symbol="zio_get_compression_max_size"
-          notes={[
-            { from: 1797, to: 1798, text: "Sept huitièmes de la source : au moins 12,5 % doivent être gagnés, une « legacy value » (valeur héritée), dit le commentaire." },
-            { from: 1800, to: 1802, text: "ZLE, qui ne compresse que les suites de zéros, échappe à ce qui suit." },
-            { from: 1804, text: `Arrondi vers le bas à un multiple de <code>spa_gcd_alloc</code>, qui pour un pool de disques simples d’un seul ashift est <a href="${L.minAlloc}">le secteur</a> (<a href="${L.gcd}">le plus grand diviseur commun des tailles d’allocation des vdev</a>) : une économie inférieure à un secteur ne rapporte rien.` },
-            { from: 1806, to: 1807, text: `S’il reste moins d’un secteur, la seule sortie qui vaille est celle qui tient dans un pointeur de bloc : <code>BPE_PAYLOAD_SIZE</code>, <a href="${L.bpe}">14 mots de 8 octets</a>, 112 octets.` },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Sept huitièmes de 128 Kio font 112 Kio, déjà un multiple de 512 octets, de 4 Kio et de 8 Kio : pour la taille
-            d’enregistrement par défaut, l’arrondi ne change rien. Il compte pour les petits blocs : à ashift 12, sept
-            huitièmes de 8 Kio s’arrondissent à 4 Kio, et sept huitièmes de 4 Kio s’arrondissent à zéro, si bien qu’un
-            bloc de 4 Kio sur des secteurs de 4 Kio n’est compressé que s’il tombe à 112 octets. Le tableau de la figure
-            montre les mêmes données aux trois tailles de secteur.
-          </p>
-          <p><strong>Les quatre issues.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={1982}
-          to={2017}
-          symbol="zio_write_compress"
-          notes={[
-            { from: 1983, to: 1984, text: `Rien de ceci ne s’exécute sans compression : un bloc de zéros est alors écrit comme un autre, sauf si la déduplication est active : elle <a href="${L.dedupEmpty}">active la détection des zéros</a> parce que « storing many references to an all zeros block in the dedup table would be expensive » (garder beaucoup de références à un bloc de zéros dans la table coûterait cher).` },
-            { from: 1986, to: 1987, text: "Que des zéros : PSIZE 0, qui devient un trou plus bas." },
-            { from: 1991, to: 1995, text: `Le compresseur tourne avec la limite comme taille de sortie ; <a href="${L.compressData}"><code>zio_compress_data</code> renvoie la taille source</a> quand la sortie ne tient pas.` },
-            { from: 1996, to: 1997, text: "Un trou : la compression est notée comme désactivée, et PSIZE reste à 0." },
-            { from: 1998, to: 2001, text: "Une sortie qui n’a rien gagné : la compression est désactivée pour ce bloc, stocké à sa taille logique." },
-            { from: 2002, to: 2017, text: `Au plus 112 octets, non chiffré, au niveau 0, d’un type sans nombre de blocs remplis, avec <code>embedded_data</code> activé : les données sont encodées dans le pointeur de bloc, dont <a href="${L.embeddedLayout}">les mots contiennent alors la charge utile</a>, et l’écriture s’arrête là, sans allocation.` },
-          ]}
-        />
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={2018}
-          to={2039}
-          symbol="zio_write_compress"
-          notes={[
-            { from: 2027, to: 2028, text: `<code>zio_roundup_alloc_size</code> <a href="${L.roundup}">arrondit à l’allocation minimale, ou au multiple du secteur au-dessus</a>.` },
-            { from: 2029, to: 2032, text: "Si le résultat n’est pas plus petit que le bloc, il est stocké non compressé. La limite arrondie rend ce cas rare ; ZLE, non arrondi, l’atteint, comme une sortie de 112 octets d’un bloc chiffré, qui ne peut pas être embarqué." },
-            { from: 2034, to: 2035, text: `La fin du dernier secteur est remplie de zéros et PSIZE est la taille arrondie, pour que « the compressed size of the BP (and thus compressratio property) are correct » (la taille compressée du pointeur, donc la propriété compressratio, soient justes). Un trou <a href="${L.holeBirth}">n’alloue rien ; si le bloc existait déjà, il garde sa taille, son type et son niveau, et naît dans ce txg (<code>hole_birth</code>)</a>, si bien qu’un envoi incrémental le voit ; les autres blocs <a href="${L.setProps}">reçoivent PSIZE, compression, somme de contrôle et bit D</a>.` },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Sur un disque seul, l’espace alloué est PSIZE <a href={L.asize}>arrondi au secteur</a> : un bloc est compté en
-            secteurs entiers, compressé ou non, et c’est pourquoi la limite se compte en secteurs.
-          </p>
-          <p><strong>Déduplication : la recherche.</strong> Un bloc qui porte le bit D passe par <code>zio_ddt_write</code>.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={3816}
-          to={3832}
-          symbol="zio_ddt_write"
-          notes={[
-            { from: 3823, text: "Chaque écriture dédupliquée cherche son pointeur de bloc, sous le verrou de la DDT." },
-            { from: 3824, to: 3832, text: "NULL : la table dépasse son quota. Le bit D est effacé et le bloc passe par le pipeline d’écriture ordinaire, sans déduplication." },
-          ]}
-        />
-        <Excerpt
-          lang={lang}
-          path={DDT}
-          from={1374}
-          to={1387}
-          symbol="ddt_lookup"
-          notes={[
-            { from: 1376, to: 1384, text: `NULL vient d’ici : la clé n’est dans aucune table (un bloc jamais vu) et <a href="${L.overQuota}"><code>ddt_over_quota</code></a> dit que la table est trop grosse. Une clé trouvée est toujours renvoyée : au-dessus du quota, un doublon est encore dédupliqué ; <a href="${L.quotaComment}">seules les nouvelles entrées sont refusées</a>.` },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Un bloc déjà connu.</strong> Une entrée qui a assez de DVA pour les <code>copies</code> du bloc :</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={3958}
-          to={3987}
-          symbol="zio_ddt_write"
-          notes={[
-            { from: 3962, text: "L’entrée contient autant de DVA que l’écriture en demande." },
-            { from: 3971, to: 3981, text: "Une réécriture garde sa naissance d’origine si cela donne le même pointeur de bloc : alors rien ne change." },
-            { from: 3983, to: 3986, text: `<code>ddt_bp_fill</code> copie les DVA de l’entrée dans le nouveau pointeur de bloc, <a href="${L.fill}">avec le txg courant pour naissance logique et celle de l’entrée pour naissance physique</a> ; <a href="${L.addref}"><code>ddt_phys_addref</code></a> ajoute une référence ; la fonction rend la main sans aucune écriture.` },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Les deux naissances expliquent le « né au txg 102, physique 100 » de la figure : les données ont été écrites
-            au txg 100, et le pointeur de bloc créé au txg 102. La <a href={roomUrl(lang, "send-receive")}>salle send /
-            receive</a> envoie selon la naissance logique, si bien qu’un bloc dédupliqué après un instantané est quand
-            même envoyé.
-          </p>
-          <p><strong>Un bloc inconnu.</strong> Une entrée neuve n’a pas de DVA : la branche précédente n’est pas prise, et une écriture fille est <a href={L.childWrite}>lancée avec l’entrée attachée</a>.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={4156}
-          to={4167}
-          symbol="zio_ddt_write"
-          notes={[
-            { from: 4161, text: "Le compteur de références de l’entrée neuve passe de 0 à 1 tout de suite, avant la fin de l’écriture ; c’est défait si l’écriture échoue." },
-            { from: 4165, text: `L’écriture fille part ; quand elle a son DVA, <a href="${L.extend}"><code>zio_ddt_child_write_ready</code> le copie dans l’entrée</a>, pour la prochaine fois.` },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>La table sur disque.</strong> Les entrées modifiées dans un txg doivent rejoindre les objets de stockage de la DDT.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DDT}
-          from={136}
-          to={156}
-          symbol="DDT : le journal de déduplication"
-          notes={[
-            { from: 138, to: 142, text: "Sans le journal, chaque entrée modifiée était réécrite à la fin de son txg, et une entrée n’est qu’une petite partie d’une feuille de ZAP : lire toute la feuille, modifier une entrée, réécrire la feuille." },
-            { from: 144, to: 150, text: `Avec <code>fast_dedup</code>, sur une table créée avec cette fonctionnalité (<a href="${L.logFlags}">seules celles-là reçoivent <code>DDT_FLAG_LOG</code></a>), les entrées modifiées vont dans un journal en mémoire et sont ajoutées à un journal sur disque, relu seulement à l’import. Par défaut, les journaux sont échangés au bout de <a href="${L.logTxg}">8 txg au plus</a>.` },
-            { from: 152, to: 156, text: "Une partie du journal est vidée vers le ZAP à chaque txg, autant qu’il faut pour suivre sans nuire au débit, comme en décident les réglages <code>zfs_dedup_log_*</code>, « and not using too much memory » (sans trop de mémoire). Le commentaire ne donne pas de chiffre ici." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Deux autres mécanismes complètent le tableau, dans le même commentaire : <a href={L.prune}>l’élagage</a>
-            retire les vieilles entrées jamais dupliquées, pour faire de la place sous le quota, et le scrub
-            <a href={L.scrubDdt}>parcourt d’abord la DDT</a>, si bien qu’un bloc référencé de nombreuses fois n’est vérifié
-            qu’une fois.
-          </p>
-          <p><strong>Le pointeur de bloc chiffré.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={SPA}
-          from={188}
-          to={225}
-          symbol="blkptr_t, chiffré"
-          notes={[
-            { from: 194, to: 201, text: "Les deux premiers DVA, comme dans tout pointeur de bloc : un bloc chiffré garde au plus deux copies." },
-            { from: 202, to: 205, text: `Les deux mots du troisième DVA contiennent le sel et IV1, les 64 premiers bits de l’IV de 96 bits (<a href="${L.encodeParams}"><code>zio_crypt_encode_params_bp</code></a>).` },
-            { from: 216, text: `IV2, les 32 derniers bits de l’IV, dans la <a href="${L.iv2}">moitié haute du nombre de blocs remplis</a>, dont un bloc chiffré de niveau 0 n’a pas besoin.` },
-            { from: 218, to: 225, text: `128 bits de somme de contrôle, puis le MAC de 128 bits (<a href="${L.encodeMac}"><code>zio_crypt_encode_mac_bp</code></a>).` },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Le bit X, bit 61 du mot 6, a <a href={L.macros}>trois sens</a> : sur un bloc de niveau 0 d’un type chiffré, il
-            signifie chiffré ; sur un bloc de niveau 0 d’un type non chiffré, authentifié ; sur un bloc indirect, que les
-            mots de MAC contiennent une somme de contrôle des MAC du dessous. Un pointeur de bloc embarqué <a href={L.noEmbed}>ne
-            peut pas être chiffré</a> : il n’a plus de mots pour le sel, l’IV et le MAC. Le chiffrement est
-            <a href={L.suites}>AES-GCM ou AES-CCM, avec des clés de 128, 192 ou 256 bits</a>, l’authentification
-            SHA512-HMAC, avec <a href={L.lens}>un sel de 8 octets, un IV de 12 octets et un MAC de 16 octets</a>.
-          </p>
-          <p><strong>Ce que reçoit chaque sorte de bloc.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={5123}
-          to={5153}
-          symbol="zio_encrypt"
-          notes={[
-            { from: 5123, to: 5131, text: "Un bloc indirect n’est pas chiffré : son pointeur de bloc reçoit, dans les mots de MAC, une somme de contrôle des MAC des blocs qu’il désigne." },
-            { from: 5137, to: 5144, text: "Le bloc d’objset porte ses deux MAC en lui-même." },
-            { from: 5146, to: 5153, text: `Un bloc de niveau 0 d’un type non chiffré est seulement authentifié : un MAC, les données en clair. <a href="${L.encryptRest}">Ce qui reste est chiffré</a>, et sel, IV et MAC sont encodés dans son pointeur de bloc.` },
-          ]}
-        />
-        <Excerpt
-          lang={lang}
-          path="module/zfs/dmu.c"
-          from={2511}
-          to={2535}
-          symbol="dmu_write_policy"
-          notes={[
-            { from: 2523, to: 2526, text: "Dans un dataset chiffré, un type chiffré garde au plus deux copies, puisque le troisième DVA contient sel et IV." },
-            { from: 2527, to: 2529, text: "Les blocs des types non chiffrés ne sont pas dédupliqués : la DDT ne note pas les types d’objets." },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Ce qui reste en clair, et pourquoi le scrub n’a pas besoin de clé.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={CRYPT}
-          from={85}
-          to={120}
-          symbol="zio_crypt.c, commentaire de tête"
-          notes={[
-            { from: 89, to: 91, text: "Le MAC prend la seconde moitié de la somme de contrôle, « leaving the first 128 bits for a truncated regular checksum of the ciphertext which can be used for scrubbing » (laissant les 128 premiers bits à une somme de contrôle tronquée du texte chiffré, utilisable par le scrub)." },
-            { from: 94, to: 100, text: "Les types d’objets qui doivent rester lisibles, dont le master node, sont seulement authentifiés, et peuvent garder jusqu’à trois copies." },
-            { from: 115, to: 120, text: "Le cœur de chaque dnode reste en clair « for scrubbing and claiming » (pour le scrub et la réclamation) ; seuls les tampons bonus sont chiffrés." },
-          ]}
-        />
-        <Excerpt
-          lang={lang}
-          path="module/zfs/zio_checksum.c"
-          from={508}
-          to={526}
-          symbol="zio_checksum_error_impl"
-          notes={[
-            { from: 515, to: 516, text: "Un pointeur de bloc qui porte le bit X, sauf un bloc d’objset." },
-            { from: 517, to: 520, text: `Pour une somme de contrôle qui n’est pas faite pour la déduplication (fletcher-4, par exemple), les mots 2 et 3 sont repliés sur 0 et 1, <a href="${L.fold}">comme à l’écriture</a>.` },
-            { from: 522, to: 525, text: "Les mots 2 et 3 sont ignorés des deux côtés : le MAC est laissé au déchiffrement." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Le scrub lit avec <a href={L.scrubRaw}><code>ZIO_FLAG_RAW</code></a>, qui saute le déchiffrement, si bien que
-            cette vérification est tout ce qu’il fait : le scrub de la figure vérifie chaque bloc clé déchargée, et
-            attrape un bit inversé. Une lecture qui doit déchiffrer <a href={L.eacces}>cherche la clé et échoue avec
-            <code>EACCES</code></a> quand elle n’est pas chargée. La clé elle-même est une clé maîtresse tirée au hasard,
-            <a href={L.masterKey}>stockée sur disque chiffrée par la clé d’enveloppe de l’utilisateur</a>, si bien que
-            changer de phrase de passe ne rechiffre aucune donnée ; instantanés et clones <a href={L.shareKey}>la
-            partagent</a>. Des blocs chiffrés ne peuvent être dédupliqués que s’ils ont le même texte chiffré : avec la
-            déduplication, leur sel et leur IV <a href={L.cryptDedup}>viennent d’un HMAC du texte en clair</a> au lieu
-            d’être aléatoires, et la déduplication ne fonctionne
-            qu’au sein d’une famille de clones.
-          </p>
-        </div>
+      <div class="step">
+        <h3>La limite</h3>
+        <p class="prose">
+          Avant de compresser, <code>zio_get_compression_max_size</code> calcule la taille permise pour la sortie :
+          sept huitièmes du bloc, arrondis vers le bas à un nombre entier de secteurs. Gagner moins d’un secteur ne sert à rien, puisqu’un bloc occupe des secteurs entiers sur le disque.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_get_compression_max_size</code>, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={1797}
+            to={1807}
+            symbol="zio_get_compression_max_size"
+            notes={[
+              { from: 1797, to: 1798, text: "Sept huitièmes de la source : au moins 12,5 % doivent être économisés, une « valeur héritée », dit le commentaire." },
+              { from: 1800, to: 1802, text: "Pour ZLE, qui ne compresse que les suites de zéros, la limite n’est pas arrondie." },
+              { from: 1804, text: `Arrondi vers le bas à un multiple de <code>spa_gcd_alloc</code>, qui, sur un pool de disques simples d’un seul ashift, est <a href="${L.minAlloc}">le secteur</a> (<a href="${L.gcd}">le plus grand commun diviseur des tailles d’allocation des vdevs</a>).` },
+              { from: 1806, to: 1807, text: `S’il reste moins d’un secteur, seule une sortie qui tient dans un pointeur de bloc vaut la peine : <code>BPE_PAYLOAD_SIZE</code>, <a href="${L.bpe}">14 mots de 8 octets</a>, 112 octets.` },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Des zéros, trop gros, ou assez petit pour le pointeur</h3>
+        <p class="prose">
+          <code>zio_write_compress</code> cherche d’abord un bloc de zéros, puis lance le compresseur avec la limite
+          comme taille de sortie. L’issue dépend de la taille qu’il renvoie.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_write_compress</code>, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={1986}
+            to={2004}
+            symbol="zio_write_compress"
+            notes={[
+              { from: 1986, to: 1987, text: `Que des zéros : PSIZE 0. Ce test ne tourne qu’avec la compression active. Compression coupée et déduplication active, ZFS <a href="${L.dedupEmpty}">active un mode qui ne détecte que les zéros</a>, car « storing many references to an all zeros block in the dedup table would be expensive » (garder beaucoup de références à un bloc de zéros dans la table coûterait cher).` },
+              { from: 1991, to: 1995, text: `Le compresseur reçoit la limite comme taille de sortie ; <a href="${L.compressData}">il renvoie la taille de la source</a> quand sa sortie ne tient pas.` },
+              { from: 1996, to: 1997, text: `PSIZE 0 donne un trou : rien n’est alloué. Si le bloc existait déjà, le trou <a href="${L.holeBirth}">garde sa taille et naît dans ce txg</a>, pour qu’un envoi incrémental le voie.` },
+              { from: 1998, to: 2001, text: "Rien d’économisé : la compression est coupée pour ce bloc, rangé à sa taille complète." },
+              { from: 2002, to: 2004, text: `Au plus 112 octets, non chiffré, au niveau 0, avec <code>embedded_data</code> active : les données sont <a href="${L.embed}">encodées dans le pointeur de bloc</a>, dont <a href="${L.embeddedLayout}">les mots portent alors les données</a>, et l’écriture s’arrête là.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>L’arrondi au secteur</h3>
+        <p class="prose">
+          Toute autre sortie est arrondie à des secteurs entiers. Si la taille arrondie n’est pas plus petite que le
+          bloc, le bloc est finalement rangé non compressé.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_write_compress</code>, l’arrondi, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={2027}
+            to={2035}
+            symbol="zio_write_compress"
+            notes={[
+              { from: 2027, to: 2028, text: `<code>zio_roundup_alloc_size</code> <a href="${L.roundup}">arrondit à l’allocation minimale, ou au multiple du secteur au-dessus</a>.` },
+              { from: 2029, to: 2032, text: "Pas plus petit que le bloc : rangé non compressé. La limite arrondie vers le bas rend ce cas rare ; ZLE, dont la limite n’est pas arrondie, peut l’atteindre, comme une sortie de 112 octets d’un bloc chiffré, qui ne peut pas aller dans le pointeur." },
+              { from: 2034, to: 2035, text: `La fin du dernier secteur est mise à zéro et PSIZE est la taille arrondie : la propriété <code>compressratio</code> compte ce remplissage. Sur un seul disque, l’espace alloué est PSIZE <a href="${L.asize}">arrondi au secteur</a>.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Chercher la somme de contrôle</h3>
+        <p class="prose">
+          Un bloc d’un dataset avec la déduplication active passe par <code>zio_ddt_write</code>, qui cherche sa somme de
+          contrôle dans la table de déduplication. Au-dessus de son quota, la table refuse les nouvelles entrées, et un
+          bloc qu’elle n’a jamais vu est écrit normalement.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_ddt_write</code>, la recherche, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={3823}
+            to={3832}
+            symbol="zio_ddt_write"
+            notes={[
+              { from: 3823, text: `Chaque écriture dédupliquée cherche son pointeur de bloc, par sa somme de contrôle. Une entrée, c’est <a href="${L.key}">une clé de 40 octets</a> et <a href="${L.value}">une valeur de 256 octets, ou de 72 dans le format « flat », plus récent</a>.` },
+              { from: 3824, to: 3832, text: `NULL vient de <a href="${L.ddtLookup}"><code>ddt_lookup</code></a> quand la clé n’est dans aucune table et que <a href="${L.overQuota}">la table dépasse son quota</a>. Le bit D est effacé et le bloc suit le chemin d’écriture ordinaire. Une clé trouvée est encore renvoyée : <a href="${L.quotaComment}">seules les nouvelles entrées sont refusées</a>. Le quota par défaut, <code>auto</code>, <a href="${L.quotaAuto}">ne fixe aucune taille</a> et ne plafonne la table que sur un pool doté d’un vdev dedup ou special ; sur un pool de disques simples, la table grandit avec les données.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Un bloc trouvé n’écrit rien</h3>
+        <p class="prose">
+          Quand l’entrée contient déjà une adresse, le nouveau pointeur de bloc est rempli à partir d’elle et le compteur de références augmente. La naissance logique du nouveau pointeur est le groupe de transactions en cours, et sa naissance
+          physique celui où les données ont été écrites : c’est pourquoi la figure affiche « né au txg 102, physique
+          100 ».
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_ddt_write</code>, bloc trouvé, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={3983}
+            to={3986}
+            symbol="zio_ddt_write"
+            notes={[
+              { from: 3983, text: `<code>ddt_bp_fill</code> copie les adresses de l’entrée dans le nouveau pointeur de bloc, <a href="${L.fill}">avec le txg en cours comme naissance logique et celui de l’entrée comme naissance physique</a>. Une réécriture <a href="${L.rewrite}">remplit d’abord le pointeur avec son txg de naissance d’origine</a>, et ne fait rien si cela donne le même pointeur de bloc.` },
+              { from: 3984, text: `<a href="${L.addref}"><code>ddt_phys_addref</code></a> ajoute une référence.` },
+              { from: 3985, to: 3986, text: "La fonction rend la main sans aucune E/S d’écriture." },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Un bloc absent est écrit, et son entrée remplie</h3>
+        <p class="prose">
+          Une nouvelle entrée n’a pas encore d’adresse. Le bloc est écrit par une E/S enfant, et quand cette écriture a
+          son adresse, l’adresse est copiée dans l’entrée pour la prochaine fois.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_ddt_write</code>, bloc absent, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={4161}
+            to={4165}
+            symbol="zio_ddt_write"
+            notes={[
+              { from: 4161, text: "Le compteur de la nouvelle entrée passe de 0 à 1 dès maintenant, avant la fin de l’écriture ; c’est annulé si l’écriture échoue." },
+              { from: 4165, text: `L’<a href="${L.childWrite}">écriture enfant</a> part ; quand elle a son adresse, <a href="${L.extend}"><code>zio_ddt_child_write_ready</code> la copie dans l’entrée</a>.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Garder la table sur le disque</h3>
+        <p class="prose">
+          Les entrées modifiées pendant un groupe de transactions doivent rejoindre la table sur le disque, rangée sous
+          forme d’objets ZAP. Un commentaire de <code>ddt.c</code> explique pourquoi cela coûtait cher. La
+          fonctionnalité <code>fast_dedup</code> ajoute un journal pour cela, et la propriété
+          <code>dedup_table_quota</code> peut plafonner la taille de la table.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label">Le journal de déduplication, ddt.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DDT}
+            from={138}
+            to={142}
+            symbol="DDT: the dedup log"
+            notes={[
+              { from: 138, to: 142, text: `Sans le journal, chaque entrée modifiée était réécrite à la fin de son txg : toute la feuille de ZAP lue, une entrée mise à jour, la feuille réécrite. Avec <code>fast_dedup</code>, les entrées modifiées sont <a href="${L.log}">ajoutées à un journal puis vidées vers le ZAP un peu à chaque txg</a> ; seules les tables créées avec cette fonctionnalité <a href="${L.logFlags}">reçoivent le journal</a>.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Où vont les valeurs du chiffrement</h3>
+        <p class="prose">
+          Un commentaire de <code>spa.h</code> décrit le pointeur d’un bloc chiffré. Le MAC prend la moitié de la somme
+          de contrôle, le sel et le début de l’IV prennent la troisième adresse, et la fin de l’IV prend la moitié haute
+          du compteur de remplissage.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>blkptr_t</code>, chiffré, spa.h</Fragment>
+          <Excerpt
+            lang={lang}
+            path={SPA}
+            from={250}
+            to={257}
+            symbol="blkptr_t, chiffré"
+            notes={[
+              { from: 250, to: 254, text: `Le MAC prend la seconde moitié de la somme de contrôle (<a href="${L.encodeMac}"><code>zio_crypt_encode_mac_bp</code></a>) ; la première moitié détecte encore les dégâts, avec ou sans clé.` },
+              { from: 254, to: 256, text: `Le sel et les 64 premiers bits de l’IV dans la troisième adresse (<a href="${L.encodeParams}"><code>zio_crypt_encode_params_bp</code></a>) : un bloc chiffré <a href="${L.writePolicy}">garde donc au plus deux copies</a>. Un pointeur de bloc qui porte des données <a href="${L.noEmbed}">ne peut pas être chiffré</a> : il n’a plus de mots libres.` },
+              { from: 256, to: 257, text: `Les 32 derniers bits de l’IV dans <a href="${L.iv2}">la moitié haute du compteur de remplissage</a>. Le même bit X <a href="${L.macros}">marque trois sortes de blocs</a> : chiffré, seulement authentifié, ou bloc indirect qui porte une somme de contrôle des MAC du dessous. Le chiffrement est <a href="${L.suites}">AES-GCM ou AES-CCM</a>, avec <a href="${L.lens}">un sel de 8 octets, un IV de 12 octets et un MAC de 16 octets</a>.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Un scrub sans la clé</h3>
+        <p class="prose">
+          Quand elle vérifie un bloc qui utilise le chiffrement, <code>zio_checksum_error_impl</code> ne compare que la
+          première moitié de la somme de contrôle. Le scrub lit les blocs sans les déchiffrer : cette comparaison lui
+          suffit, et elle marche avec la clé déchargée.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_checksum_error_impl</code>, zio_checksum.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/zio_checksum.c"
+            from={515}
+            to={525}
+            symbol="zio_checksum_error_impl"
+            notes={[
+              { from: 515, to: 516, text: "Un pointeur de bloc qui utilise le chiffrement, sauf un bloc d’objset, qui porte ses MAC en lui-même." },
+              { from: 517, to: 520, text: `Pour une somme de contrôle qui n’est pas faite pour la déduplication (fletcher-4, par exemple), les mots 2 et 3 sont repliés dans 0 et 1, <a href="${L.fold}">comme l’a fait l’écriture</a>.` },
+              { from: 522, to: 525, text: `Les mots du MAC sont ignorés des deux côtés ; le déchiffrement vérifie le MAC. Le scrub lit <a href="${L.scrubRaw}">en brut</a> et s’arrête donc ici ; une lecture qui doit déchiffrer <a href="${L.eacces}">échoue avec <code>EACCES</code></a> quand la clé n’est pas chargée. Le cœur du dnode <a href="${L.clear}">reste en clair</a> pour la même raison.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Ce que les figures laissent de côté</h2>
-      <p class="prose muted">
-        La sortie du compresseur est une entrée de la figure, pas le calcul d’un vrai compresseur : le code ne donne aucun
-        taux, et les préréglages sont des exemples. LZ4 tient lieu de tous les compresseurs sauf ZLE ; tous suivent la même
-        limite. Les niveaux de compression ne sont pas montrés, ni la règle qui <a href={L.syncPass}>cesse de
-        compresser</a> les réécritures à partir de la <a href={L.dontCompress}>passe de synchronisation 8</a>. Le pool est
-        fait de disques simples d’un seul ashift, où l’allocation minimale et le secteur sont égaux ; raidz et pools mixtes
-        ne le sont pas. La déduplication écrit un bloc par txg avec <code>copies=1</code> ; la vérification, les
-        collisions, les copies multiples, l’extension partielle des DVA de fast dedup et le journal sont racontés, pas
-        animés ; les DVA sont inventés. Le texte chiffré, le sel, l’IV et le MAC de la figure sont des substituts, pas de
-        l’AES ; la somme de contrôle est le fletcher-4 des octets de la figure. La rotation de clé, qui prend un nouveau
-        sel après <a href={L.rotate}>400 000 000 blocs</a>, le chiffrement du ZIL et les MAC d’objset ne sont pas montrés,
-        pas plus qu’un chiffre de débit, de mémoire ou de taux : le code n’en donne pas.
-      </p>
+      <div class="prose muted">
+        <p>
+          La sortie du compresseur est une donnée de la figure, pas le calcul d’un vrai compresseur, et les choix
+          proposés sont des exemples. LZ4 représente tous les compresseurs sauf ZLE, puisqu’ils suivent tous la même
+          limite. Les niveaux de compression sont laissés de côté, comme la règle qui arrête de compresser les
+          réécritures à partir de la huitième passe de synchronisation. Le pool est fait de disques simples d’un seul
+          ashift, où l’allocation minimale et le secteur sont égaux ; le RAID-Z et les pools mixtes ne sont pas montrés.
+        </p>
+        <p>
+          La figure de déduplication écrit un bloc par groupe de transactions, en une seule copie, à des adresses
+          inventées. La vérification octet par octet (<code>dedup=verify</code>), les collisions de sommes de contrôle,
+          les copies supplémentaires et l’élagage, qui retire les vieilles entrées jamais dupliquées, sont laissés de côté ; le journal de déduplication est seulement décrit, plus haut, dans « Dans le code ». Le scrub parcourt d’abord la table de déduplication, si bien qu’un
+          bloc référencé de nombreuses fois n’est vérifié qu’une fois. Le code ne donne aucun chiffre de mémoire par
+          téraoctet ni de taux de déduplication : les deux dépendent des données.
+        </p>
+        <p>
+          Le texte chiffré, le sel, l’IV et le MAC de la figure de chiffrement sont des substituts, pas de l’AES ; la
+          somme de contrôle est un fletcher-4 des octets de la figure. La clé qui chiffre les données est une clé
+          maîtresse aléatoire, rangée sur le disque chiffrée par la clé de l’utilisateur : changer de phrase secrète ne
+          rechiffre aucune donnée, et instantanés et clones partagent cette clé. Avec la déduplication, le sel et l’IV
+          viennent des données au lieu d’être aléatoires, si bien que des blocs chiffrés ne sont dédupliqués qu’au sein
+          d’un même dataset et de ses clones. La rotation de clé, qui prend un nouveau sel après 400 millions de blocs,
+          et le chiffrement du journal d’intention sont laissés de côté. La suite du trajet d’un bloc est dans
+          <a href={roomUrl(lang, "metaslabs")}>Metaslabs et space maps</a> ; un envoi incrémental choisit les blocs
+          par leur naissance logique, si bien qu’un bloc dédupliqué après un instantané est encore envoyé, comme le
+          montre <a href={roomUrl(lang, "send-receive")}>send / receive</a>.
+        </p>
+      </div>
     </section>
   </article>
   <RoomNav lang={lang} roomId="compression-dedup-encryption" />
@@ -443,9 +443,9 @@ const L = {
   }
   .room-head h1 {
     margin-top: var(--space-3);
-    max-width: 18ch;
+    max-width: 22ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -454,10 +454,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -465,12 +465,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
-  }
-  .cost {
-    border-left: 2px solid var(--line-strong);
-    padding-left: var(--space-4);
   }
 </style>

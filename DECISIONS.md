@@ -2867,6 +2867,62 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   Rejected: scrolling to the records instead of the pointer (the reader loses the cause), and
   a second scroll after the first (the page jumps twice per press).
 
+## v1.4 compression, dedup and encryption room (ALG-203)
+
+### D31.1 The compression, dedup and encryption room as a question; three figures that outline what each action changed
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 13 excerpts (320 lines of code) and 64 links to GitHub in each language: 34 in the
+  excerpts, 22 in the prose and 8 in the figures, where each branch, dedup outcome and read verdict
+  carried a "code" link. It has three figures (`CompressLab`, `DedupLab`, `CryptLab`), and the issue
+  asks for one action and one visible effect in each.
+- **Question.** "What do compression, dedup and encryption do to a block?" (« Qu’arrive-t-il à un bloc
+  compressé, dédupliqué ou chiffré ? », « ¿Qué le pasa a un bloque comprimido, deduplicado o
+  cifrado? »). The answer takes the three features in the order the write path runs them, one
+  paragraph each: the seven-eighths rule counted in sectors, holes and embedded blocks; the lookup on
+  every write and what a hit and a miss do; where the salt, IV and MAC go and why scrub needs no key.
+  Block pointer, salt, IV and MAC are glossed once.
+- **Figures.** Improved, not rebuilt; the model (`src/lib/transforms.ts`) is unchanged. As in D27.1,
+  what the last action changed is outlined with a dashed ink outline until the next action, a class
+  rather than an animation, so it reads the same under reduced motion. In `CompressLab`, the flags
+  compare the HTML each row, the deciding branch and the outcome line draw before and after
+  (`compressChanges`), so an outline always means a visible change; a field-by-field comparison was
+  tried first and the code review found it wrong both ways. In `DedupLab`, the entry whose count or
+  address changed, the new block pointer, the new block on disk and the counters that moved (the
+  lookup counter on every write, which is the cost of dedup); the quota, which changed nothing on
+  screen before, now shows a note in the table. In `CryptLab`, the key outlines the four blocks whose
+  look changed and the key line, a flipped bit its block, a scrub its five verdicts, a read its result.
+  The line that says what happened moves under the buttons (in `CryptLab`, under the file's buttons,
+  since a change of kind already shows its sentence above the words and is only announced). Outlined
+  rows and items say "(changed)" to a screen reader. No code links in the figures (D21.1), and the
+  lines no longer name functions. Without script the figures show their opening state and text
+  version, as before. `scripts/verify-transforms.mjs` runs the room alone in EN, FR and ES (it was EN
+  and FR inside `verify.mjs`).
+- **Code.** Ten Source notes, 92 lines (`ANALYSIS.md` room entries 16 to 25: 16 is new, the order of
+  the write stages in `zio_impl.h`; the others are short cuts of excerpts 1, 4, 5, 6, 2, 8, 10, 3 and
+  14, checked against `zfs-2.4.4`). "The idea, at three depths" is gone; the cost of the table, the
+  quota's `auto` default and the cipher parameters move into the notes, and what the figures leave out
+  is told without GitHub links.
+- **Rejected.** Animating the outline (it cannot be read at the reader's pace or under reduced
+  motion). Showing the dedup log in the figure: it changes when entries reach the disk, not what a
+  write does, and the note shows the comment that explains it. A visible line for a change of block
+  pointer kind: the sentence above the words is that line.
+- **Design/UX pass** ([ALG-203](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-203), 7 SHOULDs
+  and 4 NITs, all taken). The plain answer is 68, 82 and 80 words in EN (it was 117, 94 and 95); zeros and
+  embedding move to section 1, and the block pointer is glossed in a parenthesis where the answer
+  first needs it. The key button names its next action
+  ("Unload the key" / "Load the key") instead of a pressed state, because a toggle labelled with the
+  state it leaves contradicts itself once pressed. A failed read marks the block where it stopped, as the
+  scrub marks a damaged one, and the duplicate message under the file is gone. A dedup hit outlines
+  the block on disk it reuses, since its list of references grew. In `CompressLab` the branch numbers
+  are a CSS counter inside each branch's box, so the outline wraps them; bar rows get inner room.
+  Below 30rem each group's label takes its own line and the DDT drops the physical birth (the block
+  pointers show it); its key column is headed "Key". While the line under the controls says the
+  sentence, the figure keeps only its first words (the outcome's name, "Hit: nothing written."); during
+  a drag, or after a quota change in `DedupLab`, the figure says it in full. The limit label names
+  the seven eighths, and keys the dashed line, only when they differ. A scrub that finds damage
+  outlines only the failed checksum. The branch panel is as tall as the result beside it.
+
 ## v1.4 snapshots room (ALG-195)
 
 ### D28.1 The snapshots room as a question; a figure that says what each sync did and what a destroy would free

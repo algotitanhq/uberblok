@@ -2459,6 +2459,87 @@ nothing outlined and no outline key without script, 0 problems. `npm test` green
 fix: the repeated records could take focus inside an `aria-hidden` box (now `inert`), and the
 copy could outlive a rotation (now dropped when the width changes). Both fixed.
 
+## v1.4 compression, dedup and encryption room (ALG-203): a question, three figures that outline what each action changed
+
+**What changed.** The compression, dedup and encryption room, in EN, FR and ES, asks one question
+("What do compression, dedup and encryption do to a block?"), answers it in three plain paragraphs,
+keeps its three figures with what to try in each, then shows the code in ten Source notes (D21.1,
+D31.1). In each figure, an action outlines what it changed and the line under the buttons says it in
+plain words, without code links; the dedup table shows when it is over its quota. Ten short excerpts
+are new in `ANALYSIS.md` (room entries 16 to 25). The other rooms are unchanged, except the Engine
+room's computed excerpt count (166 → 176 after merging `main` with the vdevs room).
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 64 | 46 |
+| of them in the prose | 22 | 0 |
+| in the figures | 8 | 0 |
+| in excerpts and Source notes | 34 | 46 |
+| Code excerpts (citations) | 13 | 10 |
+| Source notes | 0 | 10 |
+| Lines of code shown | 320 | 92 |
+
+**Proof.** `npm test` (all pass; 5 new tests: no link in any figure state, the outlines of each
+figure, the quota note and the text version), `npm run build` (astro check 0 errors, FR typography
+0 failures), `check-permalinks` (ANALYSIS.md 176 excerpts, 0 failures; built site 0 failures),
+`check-sources` (44 pages, 0 problems), `check-csp` (44 pages), `check-source-links` (44 links ok).
+`scripts/verify-transforms.mjs` against the preview, EN, FR and ES at 390 and 1440 px: 114 replays
+against the model (compression at four sizes and two ashifts, dedup miss, hit and over quota, key
+off, scrub, read, flipped bit) with 0 mismatches; after one action per figure, exactly the expected
+outlines and no link in any figure; the Source note in the side panel; 69 keyboard stops with a solid
+focus ring in each language and the keyboard drive announced six times; reduced motion (no running
+animation, the outlines still drawn); no script (opening state, nothing outlined); 54 captures (not
+committed), 0 console errors. Captures read by eye: dedup hit, key unloaded, compressed block on a
+phone, the panel in French. The whole-site `scripts/verify.mjs` at 34081a1 (every room, after merging
+`main`): 523 captures, 0 console errors, no mismatch in any room.
+
+**Reviews.** `technical-writer` on the three languages (30 edits proposed, most taken): 112 bytes "or
+less", and then the block goes into its pointer; salt and IV glossed; the counter bits said plainly
+(its gloss of the fill count as "the count of blocks below" was wrong for a data block and not taken);
+a false "described" in what the figures leave out; button names in what to try; hit and miss glossed;
+calques in FR and ES, "hueco" in ES as in the figure. Not taken: « journal d’intentions » and
+« registro de intenciones », since the ZIL room uses the singular. `code-reviewer` on the whole diff:
+no blocker; the compression outline compared fields and was wrong both ways, it now compares what is
+drawn (D31.1); outlined rows said to screen readers; the text version says the quota; lifting the
+quota outlines nothing; a change of kind clears the file's outline; the counters had taken the disk
+list's style (caught in the captures too). All fixed and replayed at the head. Not taken: the
+standalone check by `pathToFileURL`, kept as in the other verify scripts.
+
+**Debts.** None found outside the room. On a 390 px phone the dedup table scrolls sideways to show
+its last column, as on `main`.
+
+### Design/UX fixes ([ALG-203](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-203), one pass)
+
+The full list from the design review (7 SHOULDs, 4 NITs) is fixed in this PR, and the change is
+logged under D31.1. The plain answer has 68, 82 and 80 words in EN (it had 117, 94 and 95), 76, 88
+and 85 in FR, and 73, 92 and 88 in ES. The key button names its next action. A failed read is marked
+on its block. A dedup hit outlines the block it reuses. Outlines wrap the step numbers. On a phone,
+labels sit on their own line. The DDT fits at 390 px in all three languages. Lines are no longer
+repeated in the figures. The dashed seven-eighths line has a key. After a bit flip, a scrub outlines
+only the checksum that failed. The panels are the same height.
+
+**Proof.** `npm test` passes all 263 tests (one new: the limit label; the dedup and encryption tests
+now cover the reused block, the brief line, the read mark and the failed checksum). `npm run build`
+passes, with FR typography at 0 failures. `scripts/verify-transforms.mjs` ran at a5669ef against the
+preview, in EN, FR and ES at 390 and 1440 px: 0 mismatches, 54 captures and 0 console errors. After
+one action per figure, the hit now also outlines the block on disk. The key button reads "Load the
+key" after it is pressed. The keyboard check finds 69 stops in each language and announces all six
+actions. Reduced motion and no-script both pass. Captures read by eye: the failed read (EN desktop,
+ES phone), the 4 KiB and 16 KiB compression bars, the FR and ES dedup figures at 390 px, and the
+mobile controls. The whole-site verify did not run again, because the change stays inside the room:
+its page, its three figures and `transforms.css`.
+
+**Reviews.** `code-reviewer` on the fixes found no blocker, and four of its points were taken:
+- The quota line brings back the full sentence for the last write.
+- A dragged range shows the full outcome.
+- The read mark fades in, and the key button keeps its width.
+- Step numbers are not read twice.
+
+Not taken: a "(changed)" text on the read mark (its own text says it), and a comment on exact
+seven-eighths values (block sizes are powers of two).
+
 | GitHub links in the article | 44 | 24 |
 | of them in the prose | 27 | 0 |
 | in excerpts and Source notes | 17 | 24 |

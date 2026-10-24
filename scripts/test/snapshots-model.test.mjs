@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   create, opening, change, ask, sync, ds, head, snapshots, referencedBy, owners, wouldKill, taskRefusal,
-  changeRefusal, dlInsert, tree, SLOTS,
+  changeRefusal, dlInsert, tree, SLOTS, heldOnlyBy, pinned, destroyFrees, copy,
 } from "../../src/lib/snapshots.ts";
 
 // A block by slot letter and birth txg, among blocks of a directory.
@@ -323,4 +323,86 @@ test("random sequences: no block freed while referenced, none leaked, owners = r
   }
   assert.ok(txgs === 12000);
   for (const [k, v] of Object.entries(outcomes)) assert.ok(v > 20, `${k} exercised (${v})`);
+});
+
+test("random sequences: a destroy alone in its txg frees exactly the blocks only that snapshot held", () => {
+  let checked = 0, nonEmpty = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const r = rng(seed);
+    const s = seed % 2 ? opening() : create(5);
+    for (let step = 0; step < 25; step++) {
+      const snaps = snapshots(s);
+      const victim = snaps.length && r() < 0.35 ? snaps[Math.floor(r() * snaps.length)] : null;
+      if (victim && !taskRefusal(s, { kind: "destroy", snap: victim.id })) {
+        // Nothing else in this txg: the blocks only it holds, and the figure's prediction.
+        const want = heldOnlyBy(s, victim.id).sort((a, b) => a - b);
+        assert.deepEqual(destroyFrees(s, victim.id).slice().sort((a, b) => a - b), want, `seed ${seed}: destroyFrees`);
+        ask(s, { kind: "destroy", snap: victim.id });
+        const ev = sync(s);
+        const got = ev.find((e) => e.k === "destroy").freed.slice().sort((a, b) => a - b);
+        assert.deepEqual(got, want, `seed ${seed}: destroy of ${victim.name}`);
+        checked++;
+        if (want.length) nonEmpty++;
+        continue;
+      }
+      for (let i = 0, n = Math.floor(r() * 3); i < n; i++) {
+        const dir = head(s, "clone") && r() < 0.4 ? "clone" : "fs";
+        const slot = Math.floor(r() * 4);
+        const c = r() < 0.7 ? "write" : "delete";
+        if (!changeRefusal(s, dir, slot, c)) change(s, dir, slot, c);
+      }
+      const x = r();
+      if (x < 0.35 && !taskRefusal(s, { kind: "snapshot" })) ask(s, { kind: "snapshot" });
+      else if (x < 0.42 && snaps.length) {
+        const t = { kind: "clone", origin: snaps[Math.floor(r() * snaps.length)].id };
+        if (!taskRefusal(s, t)) ask(s, t);
+      }
+      sync(s);
+      // pinned, from the deadlists: on disk, in no head's tree, and on some deadlist.
+      const heads = ["fs", "clone"].map((d) => head(s, d)).filter(Boolean).flatMap((h) => tree(s, h));
+      const dead = new Set(s.datasets.flatMap((d) => d.deadlist.flatMap((e) => e.blocks)));
+      for (const b of s.blocks) {
+        const want = b.freed === undefined && !heads.includes(b.id) && dead.has(b.id);
+        assert.equal(pinned(s, b.id), want, `seed ${seed}: pinned ${label(s, b.id)}`);
+      }
+    }
+  }
+  assert.ok(checked > 200 && nonEmpty > 50, `destroys checked ${checked}, freeing something ${nonEmpty}`);
+});
+
+test("the opening state: A8 and R8 are kept only for fs@s1, and destroying it would free them", () => {
+  const s = opening();
+  const pins = s.blocks.filter((b) => pinned(s, b.id)).map((b) => label(s, b.id)).sort();
+  assert.deepEqual(pins, ["A8", "R8"]);
+  assert.deepEqual(heldOnlyBy(s, "s1").map((id) => label(s, id)).sort(), ["A8", "R8"]);
+});
+
+test("random sequences: destroyFrees predicts the destroy with changes and tasks waiting in the same txg", () => {
+  let checked = 0, more = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const r = rng(seed);
+    const s = seed % 2 ? opening() : create(5);
+    for (let step = 0; step < 25; step++) {
+      for (let i = 0, n = Math.floor(r() * 4); i < n; i++) {
+        const dir = head(s, "clone") && r() < 0.4 ? "clone" : "fs";
+        const slot = Math.floor(r() * 4);
+        const c = r() < 0.7 ? "write" : "delete";
+        if (!changeRefusal(s, dir, slot, c)) change(s, dir, slot, c);
+      }
+      const snaps = snapshots(s);
+      if (r() < 0.3 && !taskRefusal(s, { kind: "snapshot" })) ask(s, { kind: "snapshot" });
+      const victim = snaps.length && r() < 0.5 ? snaps[Math.floor(r() * snaps.length)] : null;
+      if (victim && !taskRefusal(s, { kind: "destroy", snap: victim.id })) {
+        const before = copy(s);
+        const want = destroyFrees(s, victim.id);
+        assert.deepEqual(s, before, "destroyFrees leaves the state alone");
+        if (heldOnlyBy(s, victim.id).length !== want.length) more++;
+        ask(s, { kind: "destroy", snap: victim.id });
+        const got = sync(s).find((e) => e.k === "destroy" && e.snap === victim.id);
+        assert.deepEqual(got.freed, want, `seed ${seed}: destroy of ${victim.name}`);
+        checked++;
+      } else sync(s);
+    }
+  }
+  assert.ok(checked > 500 && more > 50, `checked ${checked}, waiting changes added blocks in ${more}`);
 });

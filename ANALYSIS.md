@@ -3189,6 +3189,62 @@ Destroying snapshot S, whose next dataset N is the next snapshot or the head. L3
 - One snapshot per dataset per txg: `ds_prev_snap_txg >= tx->tx_txg` returns `EAGAIN` — [`module/zfs/dsl_dataset.c#L1538-L1539`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_dataset.c#L1538-L1539).
 - Hand-checked sequence (the unit tests replay it). `fs` starts with `ds_prev_snap_txg` 1 and deadlist keys {0}. Txg 8: write A, B, C (born 8, root R8). Txg 9: snapshot `@s1` (`ds_bp` = R8; `fs` keys {0, 1}, `ds_prev_snap_txg` 9). Txg 10: overwrite A: A8 and R8 are killed, 8 > 9 is false, both go to entry 1 of `fs`'s deadlist; A10 and R10 are born. Txg 11: write D and snapshot `@s2` in the same txg: R10 is killed, 10 > 9, freed; D11 and R11 are born, then `@s2` takes `ds_bp` = R11 and the deadlist {1: A8, R8}; `fs` keys {0, 1, 9}, `ds_prev_snap_txg` 11. Txg 12: overwrite D: D11 and R11, 11 > 11 is false, entry 9 of `fs`; D11 is owned by `@s2` alone. Txg 13: destroy `@s1` (`ds_prev_snap_txg` 1): `@s2`'s entries at or above key 1 are freed (A8, R8, referenced by `@s1` alone); `@s1`'s empty deadlist merges into `@s2`'s; key 9 is removed from `fs`, its entry (D11, R11) merged into entry 1. Txg 14: clone `@s2`: `ds_bp` = R11, `ds_prev_snap_txg` 11, keys {0, 1}. Txg 15: overwrite C in the clone: C8 and R11, born at or before 11, go to the clone's entry 1, not to free space; C15 is the clone's own. Destroying `@s2` now is refused, `EEXIST`.
 
+### 9. `dsl_dataset_block_kill`, the test — module/zfs/dsl_dataset.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_dataset.c#L294-L294
+
+```c
+	if (BP_GET_BIRTH(bp) > dsl_dataset_phys(ds)->ds_prev_snap_txg) {
+```
+
+Excerpt 2's first line, the one the room's question turns on. A block born after the dataset's latest snapshot is freed (L312-L315); otherwise the `else` at [L332](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_dataset.c#L332) puts it on the deadlist ([L344](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_dataset.c#L344)). The room shows this line alone; its Source note links both branches.
+
+### 10. `dsl_dataset_snapshot_sync_impl`, the copied block pointer — module/zfs/dsl_dataset.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_dataset.c#L1782-L1784
+
+```c
+	rrw_enter(&ds->ds_bp_rwlock, RW_READER, FTAG);
+	dsphys->ds_bp = dsl_dataset_phys(ds)->ds_bp;
+	rrw_exit(&ds->ds_bp_rwlock, FTAG);
+```
+
+Excerpt 3's last three lines. L1783: the snapshot's `ds_bp` is the head's, copied under the read lock of L1782 and L1784. This one copy is the whole snapshot of the data: no block of the tree is read or written. The creation txg (L1775) and the hand-off of the deadlist (L1776) are just above.
+
+### 11. `dsl_deadlist_insert`, the entry a block goes to — module/zfs/dsl_deadlist.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_deadlist.c#L487-L492
+
+```c
+	dle_tofind.dle_mintxg = BP_GET_BIRTH(bp);
+	dle = avl_find(&dl->dl_tree, &dle_tofind, &where);
+	if (dle == NULL)
+		dle = avl_nearest(&dl->dl_tree, where, AVL_BEFORE);
+	else
+		dle = AVL_PREV(&dl->dl_tree, dle);
+```
+
+Excerpt 4 without the recovery branch. L487-L488: look the block's birth up among the keys. L489-L492: no exact key, take the nearest one before; an exact key, take the one before it. Either way, the entry with the largest key strictly below the birth, so the entry says between which two snapshots the block was born.
+
+### 12. `dsl_destroy_snapshot_sync_impl`, the free and the merge — module/zfs/dsl_destroy.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dsl_destroy.c#L415-L424
+
+```c
+		/* Move blocks to be freed to pool's free list. */
+		dsl_deadlist_move_bpobj(&ds_next->ds_deadlist,
+		    &dp->dp_free_bpobj, dsl_dataset_phys(ds)->ds_prev_snap_txg,
+		    tx);
+		dsl_dir_diduse_space(tx->tx_pool->dp_free_dir,
+		    DD_USED_HEAD, used, comp, uncomp, tx);
+
+		/* Merge our deadlist into next's and free it. */
+		dsl_deadlist_merge(&ds_next->ds_deadlist,
+		    dsl_dataset_phys(ds)->ds_deadlist_obj, tx);
+```
+
+Excerpt 8 from the free on. L415-L418: every entry of the next dataset's deadlist with a key at or above the destroyed snapshot's `ds_prev_snap_txg` goes to the pool's free list; only that snapshot held those blocks, and no block pointer is read to know it. L419-L420: space accounting. L422-L424: the snapshot's own deadlist joins the next one's.
+
 ## Room: The ARC
 
 **Problem.** A plain LRU cache is destroyed by one large scan: reading a big file once pushes out every block that was being reused. A plain LFU cache never forgets yesterday's hot set. The ARC keeps two lists, "seen once recently" (MRU) and "seen at least twice" (MFU), plus ghost lists that remember only the headers of recently evicted blocks; a hit in a ghost list is evidence that the corresponding list was too small, and the balance between the lists moves accordingly.

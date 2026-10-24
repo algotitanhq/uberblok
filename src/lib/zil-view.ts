@@ -8,12 +8,10 @@ import {
   type Zil, type Ev, type Flags, type AllocClass, type Try, type Lwb, type Write, type LwbState, type WrState, type Block, type Rec,
 } from "./zil";
 
-export type ZilStrings = Record<string, string> & { refs: Record<string, string>; lang: string };
+export type ZilStrings = Record<string, string> & { lang: string };
 
 const fill = (tpl: string, vars: Record<string, string | number>) =>
   tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
-const code = (s: string | number) => `<code>${s}</code>`;
-const see = (S: ZilStrings, r: string) => ` <a class="see" href="${S.refs[r]}">${S.see}</a>`;
 
 /** A whole number in the page's language, with narrow no-break spaces (FR) or commas (EN) between thousands. */
 export function num(S: ZilStrings, x: number): string {
@@ -39,8 +37,14 @@ const stateBadge = (st: WrState) => `<span class="wr ${st.toLowerCase().replace(
 
 // ---------- Frames: a commit drawn step by step ----------
 
-/** What is visible at step k of an action's events: the model's state after the action, with the steps not reached yet taken out. */
+/**
+ * What is visible at step k of an action's events. A commit (write() with O_DSYNC, fsync()) is
+ * drawn from the model's state after the action, with the steps not reached yet taken out. A txg
+ * sync and a mount are drawn from the state before the action (`pre`), with the steps reached so
+ * far laid over it: the writes synced or replayed, the blocks freed, the header.
+ */
 export interface Frame {
+  pre: boolean;
   states: Record<number, LwbState>;
   hiddenLwbs: number[];
   recs: number[];
@@ -50,13 +54,22 @@ export interface Frame {
   /** Lwbs whose commit waiter has been attached. */
   waiters: number[];
   header: Zil["header"];
-  /** The txg a create commit has synced so far (0 if none): its writes are in the tree from that step on. */
+  /** The txg synced so far by this action (0 if none): its writes are in the tree from that step on. */
   syncedTxg: number;
+  /** Blocks freed so far by this action. */
+  freed: number[];
+  /** Writes replayed so far by this action. */
+  replayed: number[];
   done: boolean;
   before: Zil;
 }
 
+/** Actions drawn from the state before them: a txg sync and a mount. Only sync() starts with a
+ * "sync" event and only mount() emits "destroy" (src/lib/zil.ts). */
+export const drawnBefore = (ev: Ev[]) => ev[0]?.k === "sync" || ev.some((e) => e.k === "destroy");
+
 export function frameAt(before: Zil, after: Zil, ev: Ev[], k: number): Frame {
+  const pre = drawnBefore(ev);
   const states: Record<number, LwbState> = {};
   for (const l of before.lwbs) states[l.id] = l.state;
   const recs = before.lwbs.flatMap((l) => l.recs.map((r) => r.seq));
@@ -64,6 +77,8 @@ export function frameAt(before: Zil, after: Zil, ev: Ev[], k: number): Frame {
   const inPlace = [...before.inPlace];
   const assigned = new Set<number>();
   const waiters = before.lwbs.filter((l) => l.waiters).map((l) => l.id);
+  const freed: number[] = [];
+  const replayed: number[] = [];
   let header = before.header;
   let droppedTxg = 0;
   let syncedTxg = 0;
@@ -76,6 +91,8 @@ export function frameAt(before: Zil, after: Zil, ev: Ev[], k: number): Frame {
     } else if (e.k === "create" || e.k === "alloc") blocks.push(e.blk.id);
     else if (e.k === "inplace") inPlace.push(e.write);
     else if (e.k === "waiter") waiters.push(e.lwb);
+    else if (e.k === "free") freed.push(e.blk.id);
+    else if (e.k === "replay") replayed.push(e.write);
     if (e.k === "reuse") header = after.header;
     if (e.k === "head") header = { ...header, log: e.blk };
     if (e.k === "reuse") blocks.push(e.blk.id);
@@ -84,20 +101,27 @@ export function frameAt(before: Zil, after: Zil, ev: Ev[], k: number): Frame {
   }
   const pendingBefore = [...new Set([...before.pending.map((i) => i.write), ...after.pending.map((i) => i.write)])];
   const fresh = ev[0]?.k === "itx" ? [ev[0].write] : [];
+  const gone = pre ? syncedTxg : droppedTxg;
   return {
+    pre,
     states,
     hiddenLwbs: after.lwbs.filter((l) => !(l.id in states)).map((l) => l.id),
     recs,
     blocks,
     inPlace,
-    pending: [...new Set([...pendingBefore, ...fresh])].filter((w) => !assigned.has(w) && after.writes[w - 1].txg > droppedTxg),
+    pending: [...new Set([...pendingBefore, ...fresh])].filter((w) => !assigned.has(w) && after.writes[w - 1].txg > gone),
     waiters,
     header: k >= ev.length - 1 ? after.header : header,
     syncedTxg,
+    freed,
+    replayed,
     done: k >= ev.length - 1,
     before,
   };
 }
+
+/** The state a frame is drawn from: the state before a sync or a mount, until its last step. */
+const base = (s: Zil, f?: Frame) => (f && f.pre && !f.done ? f.before : s);
 
 // ---------- The decision panel ----------
 
@@ -107,29 +131,30 @@ export function decision(s: Zil, S: ZilStrings, bytes: number, f: Flags): string
   const plan = logWrite(input, 0);
   const sz = size(S, bytes);
   const lines: string[] = [];
-  if (f.direct && !directPath(bytes, f)) lines.push(fill(S.rDirectShort, { size: sz }) + see(S, "shortDirect"));
+  if (f.direct && !directPath(bytes, f)) lines.push(fill(S.rDirectShort, { size: sz }));
   for (const r of reasons) {
-    if (r === "throughput") lines.push(S.rThroughput + see(S, "tput"));
-    else if (r === "direct") lines.push(S.rDirect + see(S, "tput"));
-    else if (r === "small") lines.push(fill(S.rSmall, { size: sz }) + see(S, "imm"));
-    else if (r === "halfBlock") lines.push(fill(S.rHalfBlock, { size: sz }) + see(S, "imm"));
-    else if (r === "indirect") lines.push(fill(f.dsync ? S.rIndirectCommit : S.rIndirect, { size: sz }) + see(S, "imm"));
-    else if (r === "slog") lines.push((s.pool.slog === "full" ? S.rSlogFull : S.rSlog) + see(S, "slog"));
-    else if (r === "copied") lines.push(S.rCopied + see(S, "ret"));
-    else if (r === "needCopy") lines.push(S.rNeedCopy + see(S, "ret"));
+    if (r === "throughput") lines.push(S.rThroughput);
+    else if (r === "direct") lines.push(S.rDirect);
+    else if (r === "small") lines.push(fill(S.rSmall, { size: sz }));
+    else if (r === "halfBlock") lines.push(fill(S.rHalfBlock, { size: sz }));
+    else if (r === "indirect") lines.push(fill(f.dsync ? S.rIndirectCommit : S.rIndirect, { size: sz }));
+    else if (r === "slog") lines.push((s.pool.slog === "full" ? S.rSlogFull : S.rSlog));
+    else if (r === "copied") lines.push(S.rCopied);
+    else if (r === "needCopy") lines.push(S.rNeedCopy);
   }
-  if (plan[0].downgraded) lines.push(fill(S.rDowngrade, { size: sz }) + see(S, "down"));
-  if (state === "WR_INDIRECT") lines.push(S.rIndirectEnd + see(S, "inplace"));
+  if (plan[0].downgraded) lines.push(fill(S.rDowngrade, { size: sz }));
+  if (state === "WR_INDIRECT") lines.push(S.rIndirectEnd);
   const final = plan[0].state;
   return `<p class="verdict">${stateBadge(final)} <span class="for">${sz}${f.dsync ? " · O_DSYNC" : ""}${f.direct ? " · O_DIRECT" : ""}</span></p>
 <ol class="reasons">${lines.map((l) => `<li>${l}</li>`).join("")}</ol>
-<p class="commit">${f.dsync ? S.commitYes : S.commitNo}${see(S, "commitFlag")}</p>`;
+<p class="commit">${f.dsync ? S.commitYes : S.commitNo}</p>`;
 }
 
 // ---------- The application's file ----------
 
 function statusOf(w: Write, f?: Frame): Write["status"] {
   if (!f || f.done) return w.status;
+  if (f.replayed.includes(w.id)) return "replayed";
   const b = f.before.writes[w.id - 1];
   const st = b ? b.status : "memory";
   return (st === "memory" || st === "logged") && w.txg <= f.syncedTxg ? "synced" : st;
@@ -150,7 +175,7 @@ export function writes(s: Zil, S: ZilStrings, f?: Frame): string {
     .map((w) => {
       const status = statusOf(w, f);
       const inPlace = f ? f.inPlace.includes(w.id) : w.inPlace;
-      return `<li class="w ${status}"><span class="wid">${fill(S.wLine, { id: w.id, size: size(S, w.size), off: fill(S.kib, { n: num(S, w.off / KIB) }), txg: w.txg })}</span>${stateBadge(w.state)}<span class="wst">${fill(st[status], { txg: w.txg })}</span>${inPlace ? `<span class="tag">${S.inPlace}</span>` : ""}</li>`;
+      return `<li class="w ${status}" data-w="${w.id}" data-wtxg="${w.txg}"><span class="wid">${fill(S.wLine, { id: w.id, size: size(S, w.size), off: fill(S.kib, { n: num(S, w.off / KIB) }), txg: w.txg })}</span>${stateBadge(w.state)}<span class="wst">${fill(st[status], { txg: w.txg })}</span>${inPlace ? `<span class="tag">${S.inPlace}</span>` : ""}</li>`;
     })
     .join("")}</ul>`;
 }
@@ -158,7 +183,7 @@ export function writes(s: Zil, S: ZilStrings, f?: Frame): string {
 // ---------- Memory: pending itxs and the lwbs ----------
 
 const recChip = (S: ZilStrings, r: Rec, split: boolean) =>
-  `<li class="rec ${r.state.toLowerCase().replace(/_/g, "-")}" title="lrc_txg ${r.txg}">${fill(S.rec, { seq: r.seq, w: r.write, state: r.state.replace("WR_", ""), len: size(S, r.len) })}${split ? ` <span class="part">${S.recPart}</span>` : ""}</li>`;
+  `<li class="rec ${r.state.toLowerCase().replace(/_/g, "-")}" data-seq="${r.seq}">${fill(S.rec, { seq: r.seq, w: r.write, state: r.state.replace("WR_", ""), len: size(S, r.len) })}${split ? ` <span class="part">${S.recPart}</span>` : ""}</li>`;
 
 /** Records that are part of a write split across lwbs. */
 const splitSeqs = (recs: Rec[]) => {
@@ -167,7 +192,7 @@ const splitSeqs = (recs: Rec[]) => {
   return new Set(recs.filter((r) => r.state === "WR_NEED_COPY" && (by.get(r.write) ?? 0) > 1).map((r) => r.seq));
 };
 
-function lwbCard(_s: Zil, S: ZilStrings, l: Lwb, f: Frame | undefined, split: Set<number>): string {
+function lwbCard(S: ZilStrings, l: Lwb, f: Frame | undefined, split: Set<number>): string {
   const state = f ? f.states[l.id] ?? l.state : l.state;
   const at = LWB_STATES.indexOf(state);
   const blk = l.blk && (!f || f.blocks.includes(l.blk.id)) ? l.blk : null;
@@ -176,26 +201,27 @@ function lwbCard(_s: Zil, S: ZilStrings, l: Lwb, f: Frame | undefined, split: Se
   const steps = LWB_STATES.map((x, i) => `<li class="${i < at ? "past" : i === at ? "now" : ""}"${i === at ? ' aria-current="step"' : ""}>${x}</li>`).join("");
   return `<li class="lwb${state === "FLUSH_DONE" ? " done" : ""}" data-lwb="${l.id}">
 <p class="lh"><strong>${fill(S.lwbTitle, { id: l.id })}</strong> <span class="lb">${blk ? fill(S.lwbBlock, { b: blk.id, cls: clsName(S, blk.cls) }) : S.lwbNoBlock}</span>${(f ? f.waiters.includes(l.id) : l.waiters > 0) && at < 6 ? ` <span class="tag wait">${S.lwbWaiter}</span>` : ""}</p>
-<ol class="steps" aria-label="lwb_state_t">${steps}</ol>
+<ol class="steps" aria-label="${S.lwbStates}">${steps}</ol>
 ${recs.length ? `<p class="used"><span class="meter"><span style="width:${((used / lwbRoom(l.size)) * 100).toFixed(1)}%"></span></span> ${fill(S.lwbUsed, { used: size(S, used), room: size(S, lwbRoom(l.size)) })}</p><ul class="recs">${recs.map((r) => recChip(S, r, split.has(r.seq))).join("")}</ul>` : ""}
 </li>`;
 }
 
-export function memory(s: Zil, S: ZilStrings, f?: Frame): string {
+export function memory(s0: Zil, S: ZilStrings, f?: Frame): string {
+  const s = base(s0, f);
   const pendingWrites = f ? f.pending : [...new Set(s.pending.map((i) => i.write))];
-  const pend = pendingWrites.map((id) => s.writes[id - 1]).filter(Boolean);
+  const pend = pendingWrites.map((id) => s0.writes[id - 1]).filter(Boolean);
   const pendHtml = pend.length
-    ? `<ul class="itxs">${pend.map((w) => `<li class="itx">${stateBadge(w.state)} w${w.id} · ${size(S, w.size)} · txg ${w.txg}</li>`).join("")}</ul>`
+    ? `<ul class="itxs">${pend.map((w) => `<li class="itx" data-itx="${w.id}">${stateBadge(w.state)} w${w.id} · ${size(S, w.size)} · txg ${w.txg}</li>`).join("")}</ul>`
     : `<p class="none">${S.noPending}</p>`;
-  const lwbs = s.lwbs.filter((l) => !f || !f.hiddenLwbs.includes(l.id));
+  const lwbs = s.lwbs.filter((l) => !f || (!f.hiddenLwbs.includes(l.id) && !(l.blk && f.freed.includes(l.blk.id))));
   const split = splitSeqs(s.lwbs.flatMap((l) => l.recs));
   const shown = lwbs.slice(-5);
   const lwbHtml = s.phase !== "running"
     ? `<p class="none">${s.phase === "crashed" ? S.phaseCrashed : S.phaseImported}</p>`
     : lwbs.length
-      ? `<ol class="lwbs">${shown.map((l) => lwbCard(s, S, l, f, split)).join("")}</ol>`
+      ? `<ol class="lwbs">${shown.map((l) => lwbCard(S, l, f, split)).join("")}</ol>`
       : `<p class="none">${S.noLwbs}</p>`;
-  return `<h4>${S.pendingLabel}${see(S, "itx")}</h4>${pendHtml}<h4>${S.lwbsLabel}${see(S, "states")}</h4>${lwbHtml}`;
+  return `<h4>${S.pendingLabel}</h4>${pendHtml}<h4>${S.lwbsLabel}</h4>${lwbHtml}`;
 }
 
 // ---------- Disk: the header, the chain, the devices ----------
@@ -213,6 +239,7 @@ function chain(s: Zil, f?: Frame): Link[] {
   const out: Link[] = [];
   for (const l of s.lwbs) {
     if (!l.blk || (f && !f.blocks.includes(l.blk.id))) break;
+    if (f && f.freed.includes(l.blk.id)) continue;
     const state = f ? f.states[l.id] ?? l.state : l.state;
     const at = LWB_STATES.indexOf(state);
     const recs = f ? l.recs.filter((r) => f.recs.includes(r.seq)) : l.recs;
@@ -222,96 +249,152 @@ function chain(s: Zil, f?: Frame): Link[] {
   return out;
 }
 
-export function disk(s: Zil, S: ZilStrings, f?: Frame): string {
+export function disk(s0: Zil, S: ZilStrings, f?: Frame): string {
+  const s = base(s0, f);
   const h = f ? f.header : s.header;
   const head = `<dl class="hdr">
-<div><dt>${S.hLog}</dt><dd>${h.log === null ? S.hHole : `b${h.log}`}</dd></div>
-<div><dt>${S.hClaim}</dt><dd>${h.claimTxg}</dd></div>
-<div><dt>${S.hFlags}</dt><dd>${h.replayNeeded ? "ZIL_REPLAY_NEEDED" : "0"}</dd></div>
-<div><dt>${S.hReplaySeq}</dt><dd>${h.replaySeq}</dd></div>
+<div data-h="log"><dt>${S.hLog}</dt><dd>${h.log === null ? S.hHole : `b${h.log}`}</dd></div>
+<div data-h="claim"><dt>${S.hClaim}</dt><dd>${h.claimTxg || S.hNever}</dd></div>
+<div data-h="flags"><dt>${S.hFlags}</dt><dd>${h.replayNeeded ? S.yes : S.no}</dd></div>
+<div data-h="seq"><dt>${S.hReplaySeq}</dt><dd>${h.replaySeq}</dd></div>
 </dl>`;
   const links = chain(s, f);
   const ch = links.length
-    ? `<ol class="chain"><li class="zh">zh_log</li>${links
+    ? `<ol class="chain"><li class="zh">${S.chainStart}</li>${links
         .map(
           (c) =>
-            `<li class="blk ${c.kind}"><span class="arrow" aria-hidden="true">→</span><span class="bcol"><span class="bid">b${c.blk.id}</span><span class="bcls">${clsName(S, c.blk.cls)}</span>${
-              c.kind === "end" ? `<span class="bnote">${S.unwritten}</span>` : c.recs.length ? `<span class="brecs">${c.recs.map((r) => `#${r.seq}`).join(" ")}</span>` : ""
+            `<li class="blk ${c.kind}" data-b="${c.blk.id}"><span class="arrow" aria-hidden="true">→</span><span class="bcol"><span class="bid">b${c.blk.id}</span><span class="bcls">${clsName(S, c.blk.cls)}</span>${
+              c.kind === "end" ? `<span class="bnote">${S.unwritten}</span>` : c.recs.length ? `<span class="brecs">${c.recs.map((r) => `<span data-seq="${r.seq}">#${r.seq}</span>`).join(" ")}</span>` : ""
             }</span></li>`,
         )
         .join("")}</ol>`
     : `<p class="none">${S.chainEmpty}</p>`;
   // Devices: every block ever allocated, by class; freed ones greyed.
-  const live = new Map<number, string>();
-  for (const c of links) live.set(c.blk.id, c.kind);
+  const kinds = new Map<number, string>();
+  for (const c of links) kinds.set(c.blk.id, c.kind);
   const all = [
     ...(s.phase === "running" ? s.lwbs.flatMap((l) => (l.blk && (!f || f.blocks.includes(l.blk.id)) ? [l.blk] : [])) : s.disk.map((d) => d.blk)),
     ...s.freed.filter((b) => !f || f.blocks.includes(b.id)),
     ...(s.kept ? [s.kept] : []),
   ];
-  const freed = new Set(s.freed.map((b) => b.id));
+  const freed = new Set([...s.freed.map((b) => b.id), ...(f ? f.freed : [])]);
   const cell = (b: Block) =>
-    `<li class="cell ${freed.has(b.id) ? "freed" : live.get(b.id) ?? "end"}" title="${freed.has(b.id) ? S.freedLabel : ""}">b${b.id}</li>`;
+    `<li class="cell ${freed.has(b.id) ? "freed" : kinds.get(b.id) ?? "end"}" data-cell="${b.id}"${freed.has(b.id) ? ` title="${S.freedLabel}"` : ""}>b${b.id}${freed.has(b.id) ? `<span class="visually-hidden"> (${S.freedLabel})</span>` : ""}</li>`;
   const sorted = (xs: Block[]) => [...new Map(xs.map((b) => [b.id, b])).values()].sort((a, b) => a.id - b.id).slice(-14);
   const onSlog = sorted(all.filter((b) => b.cls === "log"));
   const onPool = sorted(all.filter((b) => b.cls !== "log"));
   const inPlace = f ? f.inPlace : s.inPlace;
-  const data = inPlace.slice(-6).map((id) => `<li class="cell data">${fill(S.dataBlock, { id })}</li>`).join("");
+  const data = inPlace.slice(-6).map((id) => `<li class="cell data" data-data="${id}">${fill(S.dataBlock, { id })}</li>`).join("");
   const slogRow = s.pool.slog !== "none" || onSlog.length
     ? `<div class="dev slog${s.pool.slog === "full" ? " full" : ""}"><p class="dl">${S.devSlog}${s.pool.slog === "full" ? ` · ${S.slogFull}` : ""}</p><ul class="cells">${onSlog.map(cell).join("") || `<li class="none">${S.devEmpty}</li>`}</ul></div>`
     : "";
   const poolRow = `<div class="dev pool"><p class="dl">${S.devPool}</p><ul class="cells">${onPool.map(cell).join("")}${data}${!onPool.length && !data ? `<li class="none">${S.devEmpty}</li>` : ""}</ul></div>`;
-  return `<h4>${S.headerLabel}${see(S, "header")}</h4>${head}<h4>${S.chainLabel}${see(S, "issue")}</h4>${ch}<div class="devs">${slogRow}${poolRow}</div>`;
+  return `<h4>${S.headerLabel}</h4>${head}<h4>${S.chainLabel}</h4>${ch}<div class="devs">${slogRow}${poolRow}</div>`;
 }
 
 // ---------- Words for the log, the summary and the text version ----------
 
-export function eventLine(S: ZilStrings, e: Ev): string {
+/**
+ * For the narration (`short`): where a log block went and why it is not on the SLOG. The log under
+ * the figure lists every class tried; the narration does not, so the step bar stays small on a phone.
+ */
+function where(S: ZilStrings, cls: AllocClass, t: Try[]): string {
+  if (t.length < 2) return clsName(S, cls);
+  return fill(S.eWhy, { cls: clsName(S, cls), why: t[0].why === "full" ? S.whySlogFull : S.whyNoSlog });
+}
+
+export function eventLine(S: ZilStrings, e: Ev, short = false): string {
   switch (e.k) {
     case "itx":
-      return fill(e.recs > 1 ? S.eItxN : S.eItx, { size: size(S, e.size), recs: plural(S, e.recs, "itx1", "itxN"), txg: e.txg, state: e.state }) + see(S, "itx");
+      return fill(e.recs > 1 ? S.eItxN : S.eItx, { size: size(S, e.size), recs: plural(S, e.recs, "rec1", "recN"), txg: e.txg, state: e.state });
     case "create":
-      return `${fill(S.eCreate, { b: e.blk.id, size: size(S, e.blk.size), cls: clsName(S, e.blk.cls) })} ${fill(S.eTried, { list: tried(S, e.tried) })}${see(S, "create")}`;
+      if (short) return fill(S.eCreate, { b: e.blk.id, size: size(S, e.blk.size), cls: where(S, e.blk.cls, e.tried) });
+      return `${fill(S.eCreate, { b: e.blk.id, size: size(S, e.blk.size), cls: clsName(S, e.blk.cls) })} ${fill(S.eTried, { list: tried(S, e.tried) })}`;
     case "createWait":
-      return fill(S.eCreateWait, { txg: e.txg }) + see(S, "createWait");
+      return fill(S.eCreateWait, { txg: e.txg });
     case "dropSynced":
-      return fill(S.eDropSynced, { itxs: plural(S, e.itxs, "itx1", "itxN"), txg: e.txg }) + see(S, "dropSynced");
+      return fill(S.eDropSynced, { itxs: plural(S, e.itxs, "rec1", "recN"), txg: e.txg });
     case "reuse":
-      return fill(S.eReuse, { b: e.blk.id, cls: clsName(S, e.blk.cls) }) + see(S, "reuse");
+      return fill(S.eReuse, { b: e.blk.id, cls: clsName(S, e.blk.cls) });
     case "lwb":
-      return fill(S.eLwb, { id: e.lwb, state: code(e.state) }) + see(S, "states");
+      return fill(S[`eLwb${e.state}`], { id: e.lwb });
     case "assign":
-      return fill(e.split ? S.eAssignPart : S.eAssign, { seq: e.seq, w: e.write, state: e.state, len: size(S, e.len), id: e.lwb, bytes: size(S, e.bytes) }) + see(S, "assign");
+      return fill(e.split ? S.eAssignPart : S.eAssign, { seq: e.seq, w: e.write, state: e.state, len: size(S, e.len), id: e.lwb, bytes: size(S, e.bytes) });
     case "waiter":
-      return fill(S.eWaiter, { id: e.lwb }) + see(S, "close");
+      return fill(S.eWaiter, { id: e.lwb });
     case "inplace":
-      return fill(S.eInPlace, { w: e.write }) + see(S, "inplace");
+      return fill(S.eInPlace, { w: e.write });
     case "alloc": {
       const fb = e.tried.length > 1;
-      return fill(fb ? S.eAllocFallback : S.eAlloc, { id: e.lwb, b: e.blk.id, next: e.next, cls: clsName(S, e.blk.cls), list: tried(S, e.tried.slice(0, -1)) }) + see(S, "alloc");
+      if (short) return fill(S.eAlloc, { id: e.lwb, b: e.blk.id, next: e.next, cls: where(S, e.blk.cls, e.tried) });
+      return fill(fb ? S.eAllocFallback : S.eAlloc, { id: e.lwb, b: e.blk.id, next: e.next, cls: clsName(S, e.blk.cls), list: tried(S, e.tried.slice(0, -1)) });
     }
     case "returns":
-      return (e.via === "sync" ? (e.how === "fsync" ? S.eReturnsFsyncSynced : S.eReturnsWriteSynced) : e.how === "fsync" ? S.eReturnsFsync : S.eReturnsWrite) + see(S, "flush");
+      return (e.via === "sync" ? (e.how === "fsync" ? S.eReturnsFsyncSynced : S.eReturnsWriteSynced) : e.how === "fsync" ? S.eReturnsFsync : S.eReturnsWrite);
     case "nothing":
-      return S.eNothing + see(S, "prune");
+      return S.eNothing;
     case "sync":
-      return fill(S.eSync, { txg: e.txg, writes: plural(S, e.writes, "write1", "writeN"), dropped: plural(S, e.dropped, "itx1", "itxN") }) + see(S, "clean");
+      return fill(S.eSync, { txg: e.txg, writes: plural(S, e.writes, "write1", "writeN"), dropped: plural(S, e.dropped, "rec1", "recN") });
     case "free":
-      return fill(S.eFree, { b: e.blk.id }) + see(S, "sync");
+      return fill(S.eFree, { b: e.blk.id });
     case "head":
-      return (e.blk === null ? S.eHeadHole : fill(S.eHead, { b: e.blk })) + see(S, "sync");
+      return (e.blk === null ? S.eHeadHole : fill(S.eHead, { b: e.blk }));
     case "crash":
       return fill(S.eCrash, { lost: plural(S, e.lost, "write1", "writeN") });
     case "claim":
-      return fill(S.eClaim, { first: e.first, blocks: plural(S, e.blocks, "block1", "blockN"), recs: plural(S, e.recs, "rec1", "recN"), needed: e.needed ? S.yes : S.no }) + see(S, "claim");
+      if (e.blocks === 0) return fill(S.eClaimHole, { first: e.first });
+      return fill(S.eClaim, { first: e.first, blocks: plural(S, e.blocks, "block1", "blockN"), recs: plural(S, e.recs, "rec1", "recN"), needed: e.needed ? S.yes : S.no });
     case "replay":
-      return fill(S.eReplay, { seq: e.seq, txg: e.txg, w: e.write }) + see(S, "replay");
+      return fill(S.eReplay, { seq: e.seq, txg: e.txg, w: e.write });
     case "skip":
-      return fill(e.why === "txg" ? S.eSkipTxg : S.eSkipSeq, { seq: e.seq, txg: e.txg }) + see(S, "replay");
+      return fill(e.why === "txg" ? S.eSkipTxg : S.eSkipSeq, { seq: e.seq, txg: e.txg });
     case "destroy":
-      return e.kept === null ? S.eDestroy + see(S, "destroy") : fill(S.eDestroyKeep, { b: e.kept }) + see(S, "keepFirst");
+      return e.kept === null ? S.eDestroy : fill(S.eDestroyKeep, { b: e.kept });
     case "refused":
       return e.why === "crashed" ? S.eRefCrashed : e.why === "imported" ? S.eRefImported : e.why === "notImported" ? S.eRefNotImported : S.eRefNotCrashed;
+  }
+}
+
+/** The parts of the figure an event changed: they get a ring until the next step (D30.1). */
+export function targets(e: Ev): string[] {
+  switch (e.k) {
+    case "itx":
+      return [`[data-itx="${e.write}"]`, `[data-w="${e.write}"]`];
+    case "create":
+    case "reuse":
+    case "alloc":
+      return [`[data-b="${e.blk.id}"]`, `[data-cell="${e.blk.id}"]`];
+    case "createWait":
+    case "head":
+    case "destroy":
+      return ['[data-h="log"]'];
+    case "dropSynced":
+    case "sync":
+      return [`[data-wtxg="${e.txg}"]`];
+    case "lwb":
+    case "waiter":
+      return [`[data-lwb="${e.lwb}"]`];
+    case "assign":
+      return [`[data-lwb="${e.lwb}"] [data-seq="${e.seq}"]`];
+    case "inplace":
+      return [`[data-data="${e.write}"]`];
+    case "returns":
+    case "nothing":
+      // The last write, or the "no write yet" line when fsync() is pressed first.
+      return [".writes > li:last-child", "[data-writes] > .none"];
+    case "free":
+      return [`[data-cell="${e.blk.id}"]`];
+    case "crash":
+      return ["[data-memory]", ".w.lost"];
+    case "claim":
+      return ['[data-h="claim"]', '[data-h="flags"]'];
+    case "replay":
+      // The write the narration names first: on a phone the file panel sits far above the chain.
+      return [`[data-w="${e.write}"]`, `[data-b] [data-seq="${e.seq}"]`];
+    case "skip":
+      return [`[data-b] [data-seq="${e.seq}"]`];
+    case "refused":
+      return [];
   }
 }
 

@@ -1,17 +1,16 @@
 ---
-// The figure of the ZIL and SLOG room: an application writing to a file, the
-// decision of zil_write_state for the next write, the itxs and lwbs in
-// memory, and on disk the log header, the chain of log blocks and the devices
-// they live on. The visitor picks the log device, logbias, O_DSYNC, O_DIRECT
-// and a size, writes, fsyncs, syncs the txg, cuts the power, imports and
-// mounts; src/lib/zil.ts (a transcription of zil.c, zfs_log.c and zio.c)
-// decides every outcome, and src/lib/zil-view.ts draws it, at build time for
-// the opening state (readable without JavaScript) and in the browser after,
-// a commit step by step. Refs: ANALYSIS.md, room "ZIL and SLOG";
-// simplifications: DECISIONS.md D8.2.
+// The figure of the ZIL and SLOG room: an application writing to a file, what
+// the next write puts in its record, the records and lwbs in memory, and on
+// disk the log header, the chain of log blocks and the devices they live on.
+// The visitor picks the log device, logbias, O_DSYNC, O_DIRECT and a size,
+// writes, fsyncs, syncs the txg, cuts the power, imports and mounts; each
+// action then shows one step per press of Next step, and a ring marks what the
+// step changed (D30.1). src/lib/zil.ts (a transcription of zil.c, zfs_log.c and
+// zio.c) decides every outcome, and src/lib/zil-view.ts draws it, at build time
+// for the opening state (readable without JavaScript) and in the browser after.
+// Refs: ANALYSIS.md, room "ZIL and SLOG"; simplifications: DECISIONS.md D8.2.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { empty, SIZES, KIB } from "../lib/zil";
 import { ZIL_STRINGS } from "../lib/zil-strings";
@@ -21,40 +20,8 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const Z = "module/zfs/zil.c";
-const ZL = "module/zfs/zfs_log.c";
-const VN = "module/zfs/zfs_vnops.c";
-const refs = {
-  tput: gh(Z, 2216, 2217),
-  imm: gh(Z, 2227, 2228),
-  slog: gh(Z, 2230, 2232),
-  ret: gh(Z, 2240, 2245),
-  down: gh(ZL, 645, 647),
-  inplace: gh(VN, 1467, 1468),
-  commitFlag: gh(VN, 756, 757),
-  itx: gh(ZL, 627, 649),
-  states: gh("include/sys/zil_impl.h", 83, 92),
-  create: gh(Z, 1022, 1023),
-  createWait: gh(Z, 1034, 1056),
-  dropSynced: gh(Z, 3280, 3283),
-  assign: gh(Z, 2334, 2369),
-  close: gh(Z, 3375, 3379),
-  alloc: gh("module/zfs/zio.c", 4561, 4595),
-  issue: gh(Z, 2073, 2092),
-  flush: gh(Z, 1508, 1524),
-  prune: gh(Z, 3040, 3062),
-  clean: gh(Z, 2862),
-  sync: gh(Z, 4206, 4224),
-  claim: gh(Z, 1232, 1253),
-  replay: gh(Z, 4696, 4712),
-  destroy: gh(Z, 4822, 4823),
-  keepFirst: gh(Z, 4181, 4192),
-  reuse: gh(Z, 1004, 1011),
-  shortDirect: gh(VN, 296, 299),
-  header: gh("include/sys/zil.h", 63, 71),
-};
 const S0 = ZIL_STRINGS[lang];
-const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as ZilStrings;
+const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as ZilStrings;
 const t = UI[lang];
 const s0 = empty();
 const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u00a0KiB` : `${n} KiB`);
@@ -93,6 +60,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     </div>
   </div>
   <p class="visually-hidden" data-summary>{summary(s0, S)}</p>
+  <p class="visually-hidden" data-status aria-live="polite"></p>
 
   <section class="panel decision" aria-labelledby={`zl-dec-${lang}`}>
     <h3 id={`zl-dec-${lang}`} set:html={S.decisionLabel} />
@@ -114,10 +82,27 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     </section>
   </div>
 
-  <noscript><p class="muted">{t.noScript}</p></noscript>
+  <ul class="key" aria-label={S.keyLabel}>
+    <li><span class="wr wr-copied">WR_COPIED</span> {S.keyCopied}</li>
+    <li><span class="wr wr-need-copy">WR_NEED_COPY</span> {S.keyNeedCopy}</li>
+    <li><span class="wr wr-indirect">WR_INDIRECT</span> {S.keyIndirect}</li>
+    <li><span class="kcell written" aria-hidden="true">b1</span> {S.keyWritten}</li>
+    <li><span class="kcell end" aria-hidden="true">b2</span> {S.keyEnd}</li>
+    <li><span class="kcell freed" aria-hidden="true">b0</span> {S.keyFreed}</li>
+    <li class="khit" hidden><span class="kring" aria-hidden="true"></span> {S.keyHit}</li>
+  </ul>
+
+  <div class="stepbar" hidden>
+    <div class="stepbtns">
+      <button class="btn btn--primary" type="button" data-step="next" aria-disabled="true">{S.next}</button>
+      <button class="btn" type="button" data-step="skip" aria-disabled="true">{S.skip}</button>
+    </div>
+    <p class="narration" aria-live="polite" data-now>{S.idle}</p>
+  </div>
+
+  <noscript><p class="muted noscript">{t.noScript}</p></noscript>
   <section class="zl-log" aria-labelledby={`zl-log-${lang}`} hidden>
     <h3 id={`zl-log-${lang}`}>{S.logLabel}</h3>
-    <p class="visually-hidden" data-status aria-live="polite"></p>
     <ol data-log><li class="muted">{S.logEmpty}</li></ol>
   </section>
   <details class="text-version">
@@ -127,31 +112,40 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
 </figure>
 
 <script>
-  import { strings, wait, reducedMotion, fill } from "../lib/svg";
+  import { strings, reducedMotion, fill } from "../lib/svg";
   import { empty, write, fsync, sync, crash, importPool, mount, clone, SIZES, type Zil, type Ev, type Flags, type SlogMode, type Logbias } from "../lib/zil";
-  import { decision, writes, memory, disk, describe, summary, eventLine, eventClass, frameAt, type ZilStrings, type Frame } from "../lib/zil-view";
+  import { decision, writes, memory, disk, describe, summary, eventLine, eventClass, frameAt, targets, drawnBefore, type ZilStrings, type Frame } from "../lib/zil-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-zl]")) {
     const S = strings<ZilStrings>(root);
     const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
     const logEl = q("[data-log]");
+    const now = q("[data-now]");
     let s: Zil = empty();
     let size = SIZES[0];
     const flags: Flags = { dsync: false, direct: false };
-    let run = 0;
-    let busy = false;
+    // The action being shown one step per press: its events, the state before it, and how many
+    // steps are shown so far.
+    let ev: Ev[] = [];
+    let before: Zil = clone(s);
+    let shown = 0;
+    const stepping = () => shown < ev.length;
 
     const keyOf = (el: Element | null) => {
       if (!(el instanceof HTMLElement) || !root.contains(el)) return null;
-      for (const k of ["act", "pool", "bias", "flag", "size"]) if (el.dataset[k]) return `[data-${k}="${el.dataset[k]}"]`;
+      for (const k of ["act", "pool", "bias", "flag", "size", "step"]) if (el.dataset[k]) return `[data-${k}="${el.dataset[k]}"]`;
       return null;
     };
 
     function controls() {
-      const ph = s.phase;
-      root.toggleAttribute("data-busy", busy);
-      // Steps that do not apply in this phase are disabled; while a commit is drawn, every control
-      // but Start again is aria-disabled instead, so that the focused button keeps the focus.
+      const busy = stepping();
+      // A sync or a mount is drawn from the state before it until its last step: the buttons
+      // follow the figure, not the model, so Sync still names the txg being synced.
+      const shownState = busy && drawnBefore(ev) ? before : s;
+      const ph = shownState.phase;
+      // Steps that do not apply in this phase are disabled; while an action still has steps to
+      // show, every control but the step buttons and Start again is aria-disabled instead, so
+      // that the focused button keeps the focus and a press can say why.
       for (const b of root.querySelectorAll<HTMLButtonElement>("[data-act]")) {
         const a = b.dataset.act!;
         b.disabled = a === "import" ? ph !== "crashed" : a === "mount" ? ph !== "imported" : a === "reset" ? false : ph !== "running";
@@ -160,6 +154,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
         if (busy) b.setAttribute("aria-disabled", "true");
         else b.removeAttribute("aria-disabled");
       }
+      for (const b of root.querySelectorAll<HTMLButtonElement>("[data-step]")) b.setAttribute("aria-disabled", String(!busy));
       for (const b of root.querySelectorAll<HTMLButtonElement>("[data-pool]")) {
         b.setAttribute("aria-pressed", String(b.dataset.pool === s.pool.slog));
         // The devices are the pool's: they do not change between a crash and the mount.
@@ -168,7 +163,7 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       for (const b of root.querySelectorAll<HTMLElement>("[data-bias]")) b.setAttribute("aria-pressed", String(b.dataset.bias === s.logbias));
       for (const b of root.querySelectorAll<HTMLElement>("[data-flag]")) b.setAttribute("aria-pressed", String(flags[b.dataset.flag as keyof Flags]));
       for (const b of root.querySelectorAll<HTMLElement>("[data-size]")) b.setAttribute("aria-pressed", String(Number(b.dataset.size) === size));
-      q("[data-sync]").textContent = fill(S.syncBtn, { txg: s.txg });
+      q("[data-sync]").textContent = fill(S.syncBtn, { txg: shownState.txg });
     }
 
     function draw(f?: Frame) {
@@ -182,18 +177,28 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
       q("[data-decision]").innerHTML = decision(s, S, size, flags);
       q("[data-summary]").textContent = summary(s, S);
       q("[data-describe]").innerHTML = describe(s, S);
+      // The panels are drawn again with no ring, so the ring's key goes too.
+      q(".khit").hidden = true;
       controls();
-      if (focusKey) {
-        const el = root.querySelector<HTMLButtonElement>(focusKey);
-        if (el && !el.disabled) el.focus({ preventScroll: true });
-        else {
-          const next = s.phase === "crashed" ? "import" : s.phase === "imported" ? "mount" : "write";
-          q(`[data-act="${next}"]`).focus({ preventScroll: true });
-        }
+      refocus(focusKey);
+    }
+
+    function refocus(focusKey: string | null) {
+      if (!focusKey) return;
+      const el = root.querySelector<HTMLButtonElement>(focusKey);
+      if (el && !el.disabled) el.focus({ preventScroll: true });
+      else {
+        const next = s.phase === "crashed" ? "import" : s.phase === "imported" ? "mount" : "write";
+        q(`[data-act="${next}"]`).focus({ preventScroll: true });
       }
     }
 
-    const plain = (html: string) => html.replace(/ ?<a class="see"[^>]*>[^<]*<\/a>/g, "").replace(/<[^>]+>/g, "");
+    const plain = (html: string) => html.replace(/<[^>]+>/g, "");
+    /** A message in the narration, announced even when it repeats. */
+    function tell(t: string) {
+      now.textContent = "";
+      requestAnimationFrame(() => (now.textContent = t));
+    }
     function say(t: string) {
       const el = q("[data-status]");
       el.textContent = "";
@@ -202,58 +207,109 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     /** After a toggle, the new decision is read out. */
     const sayDecision = () => say(plain(q("[data-decision] .verdict").innerHTML + " " + q("[data-decision] .reasons").innerHTML.replace(/<\/li>/g, " ")));
 
-    async function act(f: () => Ev[]) {
-      const me = ++run;
+    // The ring: what the last step changed, until the next step. A class, so it reads under
+    // reduced motion too; it fades in only when motion is allowed.
+    function ring(e: Ev | undefined): Element[] {
+      for (const x of root.querySelectorAll(".hit")) x.classList.remove("hit", "hit-first");
+      const els = e ? targets(e).flatMap((sel) => [...root.querySelectorAll(sel)]) : [];
+      for (const x of els) x.classList.add("hit");
+      // The part show() scrolls to when the ringed parts do not fit together: the first one drawn.
+      els.find((x) => { const r = x.getBoundingClientRect(); return r.width || r.height; })?.classList.add("hit-first");
+      q(".khit").hidden = !els.length;
+      return els;
+    }
+    // The figure is taller than most screens: after a step, bring the ringed parts into view
+    // above the bar, which sticks to the bottom of the screen. All of them when they fit
+    // together, otherwise the first, which is the one the narration names.
+    function show(els: Element[]) {
+      const rs = els.map((x) => x.getBoundingClientRect()).filter((r) => r.width || r.height);
+      if (!rs.length) return;
+      const room = Math.min(q(".stepbar").getBoundingClientRect().top, innerHeight) - 8;
+      const top = Math.min(...rs.map((r) => r.top));
+      const bottom = Math.max(...rs.map((r) => r.bottom));
+      const [t, b] = bottom - top <= room - 8 ? [top, bottom] : [rs[0].top, rs[0].bottom];
+      if (t >= 8 && b <= room) return;
+      const by = t < 8 || b - t > room - 8 ? t - 8 : b - room;
+      window.scrollBy({ top: by, behavior: reducedMotion() ? "auto" : "smooth" });
+    }
+
+    function logLine(e: Ev) {
+      const li = document.createElement("li");
+      li.className = eventClass(e);
+      li.innerHTML = eventLine(S, e);
+      logEl.append(li);
+    }
+
+    /** Shows the steps up to `upTo` (exclusive) of the action in progress. */
+    function advance(upTo: number, focusKey: string | null) {
+      if (!ev.length) return;
+      for (let k = shown; k < upTo; k++) logLine(ev[k]);
+      shown = upTo;
+      const k = shown - 1;
+      const last = shown >= ev.length;
+      if (last) render(focusKey);
+      else {
+        draw(frameAt(before, s, ev, k));
+        controls();
+        refocus(focusKey);
+      }
+      const line = eventLine(S, ev[k], true);
+      now.innerHTML = ev.length > 1 ? `${fill(S.stepOf, { k: shown, n: ev.length })} ${line}` : line;
+      show(ring(ev[k]));
+    }
+
+    function act(f: () => Ev[]) {
       const focusKey = keyOf(document.activeElement);
-      const before = clone(s);
-      const ev = f();
-      const steps = ev.filter((e) => e.k === "lwb").length;
+      before = clone(s);
+      ev = f();
+      shown = 0;
       logEl.replaceChildren();
-      say(ev.filter((e) => e.k !== "lwb").map((e) => plain(eventLine(S, e))).join(" "));
-      if (reducedMotion() || steps === 0) {
-        for (const e of ev) {
-          const li = document.createElement("li");
-          li.className = eventClass(e);
-          li.innerHTML = eventLine(S, e);
-          logEl.append(li);
-        }
+      // A refusal changes nothing: the line says why, with no step to show.
+      if (ev.every((e) => e.k === "refused")) {
+        for (const e of ev) logLine(e);
+        shown = ev.length;
+        now.textContent = plain(eventLine(S, ev[0], true));
+        ring(undefined);
         render(focusKey);
         return;
       }
-      // A commit, drawn step by step: each event shows the model's state up to it.
-      busy = true;
-      controls();
-      for (let k = 0; k < ev.length; k++) {
-        draw(frameAt(before, s, ev, k));
-        const li = document.createElement("li");
-        li.className = eventClass(ev[k]);
-        li.innerHTML = eventLine(S, ev[k]);
-        logEl.append(li);
-        const lw = root.querySelector<HTMLElement>(`[data-lwb="${(ev[k] as { lwb?: number }).lwb}"]`);
-        lw?.animate([{ outline: "2px solid var(--accent)" }, { outline: "2px solid transparent" }], { duration: 420 });
-        await wait(ev[k].k === "lwb" ? 230 : 380);
-        if (me !== run) return;
-      }
-      busy = false;
-      render(focusKey);
+      // The first step shows at once; Next step moves the focus there if the action has more.
+      advance(1, stepping() ? '[data-step="next"]' : focusKey);
     }
 
     root.addEventListener("click", (e) => {
       const el = (e.target as Element).closest<HTMLElement>("button");
       if (!el || !root.contains(el)) return;
       const d = el.dataset;
+      const focusKey = keyOf(el);
       if (d.act === "reset") {
-        run++;
-        busy = false;
         s = empty();
+        before = clone(s);
+        ev = [];
+        shown = 0;
         size = SIZES[0];
         flags.dsync = flags.direct = false;
         logEl.innerHTML = `<li class="muted">${S.logEmpty}</li>`;
+        now.textContent = S.idle;
         q("[data-status]").textContent = "";
+        ring(undefined);
         render();
         return;
       }
-      if (busy) return;
+      if (d.step) {
+        if (!stepping()) {
+          tell(ev.length ? S.done : S.idle);
+          return;
+        }
+        // The focus stays in the bar, which is on screen: after Show every step the reader sees
+        // the end of the action, not the top of the figure.
+        advance(d.step === "skip" ? ev.length : shown + 1, focusKey);
+        return;
+      }
+      if (el.getAttribute("aria-disabled") === "true") {
+        if (stepping()) tell(S.busy);
+        return;
+      }
       if (d.pool) {
         s.pool = { slog: d.pool as SlogMode };
         render();
@@ -271,16 +327,27 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
         size = Number(d.size);
         render();
         sayDecision();
-      } else if (d.act === "write") void act(() => write(s, size, { ...flags }));
-      else if (d.act === "fsync") void act(() => fsync(s));
-      else if (d.act === "sync") void act(() => sync(s));
-      else if (d.act === "crash") void act(() => crash(s));
-      else if (d.act === "import") void act(() => importPool(s));
-      else if (d.act === "mount") void act(() => mount(s));
+      } else if (d.act === "write") act(() => write(s, size, { ...flags }));
+      else if (d.act === "fsync") act(() => fsync(s));
+      else if (d.act === "sync") act(() => sync(s));
+      else if (d.act === "crash") act(() => crash(s));
+      else if (d.act === "import") act(() => importPool(s));
+      else if (d.act === "mount") act(() => mount(s));
+    });
+
+    // The bar sticks to the bottom of the screen: a part of the figure reached with Tab is
+    // scrolled above it, never left under it.
+    root.addEventListener("focusin", (e) => {
+      const el = e.target as Element;
+      if (el.closest(".stepbar")) return;
+      const top = q(".stepbar").getBoundingClientRect().top;
+      const r = el.getBoundingClientRect();
+      if (top < innerHeight && r.bottom > top - 8) window.scrollBy({ top: r.bottom - top + 8 });
     });
 
     render(null);
     q(".zl-bar").hidden = false;
+    q(".stepbar").hidden = false;
     q(".zl-log").hidden = false;
   }
 </script>
@@ -609,7 +676,6 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
     gap: var(--space-2);
   }
   .disk :global(.hdr dt) {
-    font-family: var(--font-mono);
     color: var(--fg-muted);
   }
   .disk :global(.hdr dd) {
@@ -770,9 +836,109 @@ const kib = (n: number) => (lang === "fr" ? `${n} Kio` : lang === "es" ? `${n}\u
   .zl-log :global(li.refused) {
     border-left-color: var(--bad);
   }
-  .zl :global(a.see) {
-    font-size: 0.85em;
+  /* What the last step changed (D30.1): a ring until the next step. Static, so it reads under
+     reduced motion too; it fades in only when motion is allowed. */
+  .zl :global(.hit) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .zl :global(.hit) {
+      animation: hit var(--dur-2) var(--ease);
+    }
+  }
+  @keyframes hit {
+    from {
+      outline-color: transparent;
+      outline-offset: 6px;
+    }
+  }
+  .key {
+    list-style: none;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    font-size: var(--step--1);
     color: var(--fg-muted);
+  }
+  .key li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .key li[hidden] {
+    display: none;
+  }
+  .kcell {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 2px;
+    padding: 1px 5px;
+    color: var(--fg);
+    background: var(--surface-2);
+  }
+  .kcell.written {
+    border-color: var(--ok);
+  }
+  .kcell.end {
+    border-style: dashed;
+  }
+  .kcell.freed {
+    color: var(--fg-faint);
+    background: transparent;
+    border-color: var(--line);
+    text-decoration: line-through;
+  }
+  .kring {
+    width: 1.4rem;
+    height: 0.9rem;
+    border-radius: 3px;
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  /* Next step and the line that says what it did stick to the bottom of the screen while the
+     figure is in view, so the button stays where it is and the ringed part can be scrolled
+     into view above it (D30.1). */
+  .stepbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    align-items: center;
+    margin: var(--space-4) calc(-1 * var(--space-2)) 0;
+    padding: var(--space-2);
+    background: var(--bg);
+    border-top: 1px solid var(--line-strong);
+  }
+  .stepbar[hidden] {
+    display: none;
+  }
+  .stepbtns {
+    display: flex;
+    gap: var(--space-2);
+    flex: none;
+  }
+  .stepbar .btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .narration {
+    margin: 0;
+    flex: 1 1 24rem;
+    min-width: 0;
+    font-size: var(--step--1);
+    line-height: 1.4;
+    max-width: 60rem;
+  }
+  .noscript {
+    margin: var(--space-5) 0 0;
+    font-size: var(--step--1);
   }
   .text-version {
     margin-top: var(--space-5);

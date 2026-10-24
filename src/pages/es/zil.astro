@@ -2,34 +2,27 @@
 import Base from "../../layouts/Base.astro";
 import ZilLab from "../../components/ZilLab.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomUrl, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D30.1): the question, a plain
+// answer, the figure, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "es";
 const r = room("zil");
 const Z = "module/zfs/zil.c";
 const ZL = "module/zfs/zfs_log.c";
-const VN = "module/zfs/zfs_vnops.c";
 const L = {
-  fsync: gh(VN, 117, 120),
-  commitFlag: gh(VN, 756, 757),
-  writeCommit: gh(VN, 1091, 1092),
-  direct: gh(VN, 1042, 1043),
-  logWrite: gh(ZL, 627, 649),
-  downgrade: gh(ZL, 645, 647),
-  oneBlock: gh(ZL, 648, 649),
-  itxAssign: gh(Z, 2714),
-  lrcTxg: gh(Z, 2776),
+  itxAssign: gh(ZL, 693),
+  tput: gh(Z, 2216, 2217),
   immediate: gh(Z, 2191),
-  maxCopied: gh(Z, 2186),
-  specialIsSlog: gh(Z, 2199),
   hasSlogs: gh("module/zfs/spa_misc.c", 2741, 2744),
-  twice: gh(VN, 1381, 1386),
-  getData: gh(VN, 1388, 1397),
-  dmuSync: gh(VN, 1467, 1468),
-  directBp: gh(VN, 1450, 1458),
-  stateComment: gh("include/sys/zil_impl.h", 39, 82),
+  downgrade: gh(ZL, 645, 647),
+  createWait: gh(Z, 1034, 1056),
+  waiters: gh(Z, 1508, 1524),
   open: gh(Z, 1758),
   close: gh(Z, 1880),
   nextLwb: gh(Z, 1931),
@@ -37,70 +30,57 @@ const L = {
   issued: gh(Z, 2113),
   writeDone: gh(Z, 1605),
   flushDone: gh(Z, 1493),
-  waiters: gh(Z, 1508, 1524),
-  closeAtOnce: gh(Z, 3375, 3379),
-  waiterDone: gh(Z, 1340, 1349),
-  async: gh(Z, 4080),
   nextBlk: gh(Z, 2039),
   slogFlag: gh(Z, 2118, 2119),
-  create: gh(Z, 1022, 1023),
-  chainT: gh("include/sys/zil.h", 92, 97),
-  minBlk: gh("include/sys/zil.h", 99),
-  lrWrite: gh("include/sys/zil.h", 353, 362),
-  maxBlock: gh(Z, 1783),
-  maxLogData: gh(Z, 2164, 2167),
-  seq: gh(Z, 2381),
-  addTxg: gh(Z, 2387),
-  plan: gh(Z, 1789),
-  header: gh("include/sys/zil.h", 63, 71),
-  flags: gh("include/sys/zil.h", 76, 77),
+  allocRest: gh("module/zfs/zio.c", 4567, 4595),
   vdevLogMg: gh("module/zfs/vdev.c", 1571, 1578),
   clean: gh(Z, 2862),
-  spaClaim: gh("module/zfs/spa.c", 5697, 5699),
   parse: gh(Z, 499, 572),
   claimWrite: gh(Z, 634, 655),
+  spaClaim: gh("module/zfs/spa.c", 5697, 5699),
+  flags: gh("include/sys/zil.h", 76, 77),
   mount: gh("module/os/linux/zfs/zfs_vfsops.c", 795, 801),
   noReplay: gh(Z, 4801, 4803),
   destroy: gh(Z, 4822, 4823),
-  bulk: gh(Z, 145),
-  bulkUse: gh(Z, 1988, 1992),
-  fallback: gh(Z, 4104, 4117),
-  shortDirect: gh(VN, 296, 299),
-  blksz: gh(VN, 808, 821),
   keepFirst: gh(Z, 4181, 4192),
   reuse: gh(Z, 1004, 1011),
-  createWait: gh(Z, 1034, 1056),
-  createCall: gh(Z, 3157, 3164),
-  synced: gh(Z, 3209),
-  dropSynced: gh(Z, 3280, 3283),
-  keepWhy: gh(Z, 1074, 1078),
-  slogFirst: gh("module/zfs/zio.c", 4561, 4565),
 };
 ---
 
 <Base
   lang={lang}
   roomId="zil"
-  title="ZIL y SLOG · Uberblok"
-  description="Cómo OpenZFS 2.4.4 hace que fsync() vuelva antes de que se sincronice el txg: un registro de intención por dataset, hecho de entradas que se escriben en una cadena de bloques de registro en un SLOG o en el pool, se liberan cuando el txg se sincroniza y se reproducen tras un fallo. Interactivo, con el código."
+  title="¿Qué espera fsync()? El ZIL y el SLOG · Uberblok"
+  description="En ZFS, fsync() espera unas pocas entradas escritas en un registro de intención, no el txg: el registro es una cadena de bloques en un SLOG o en el pool, que se libera cuando el txg se sincroniza y se reproduce tras un corte de corriente. Interactivo, con el código de OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Sala {roomNumber(r.id)}</p>
-      <h1>{r.title.es}</h1>
-      <div class="prose problem">
+      <p class="kicker">Sala {roomNumber(r.id)} · {r.title.es}</p>
+      <h1>¿Qué espera fsync()?</h1>
+      <div class="prose answer">
         <p class="lead">
-          Un programa que llama a <code>fsync()</code> pide una sola promesa: cuando la llamada retorne, sus datos sobrevivirán
-          a un corte de corriente. Una base de datos la pide en cada confirmación.
+          Un programa que llama a fsync para un archivo exige una garantía: cuando la llamada vuelve, los datos que
+          escribió sobreviven a un corte de corriente. Una base de datos la pide en cada confirmación. ZFS escribe sus
+          cambios en el pool por lotes, los grupos de transacciones o txg, y solo confirma un txg cada pocos segundos,
+          después de reescribir cada bloque del camino que va desde el cambio hasta la raíz del pool. Esperar eso en cada
+          fsync sería lento, y escribiría mucho más de lo que cambió el programa.
         </p>
         <p>
-          ZFS escribe sus cambios en <a href={roomUrl(lang, "txg")}>grupos de transacciones</a>, y un txg solo se sincroniza
-          cada pocos segundos. Forzar la sincronización de un txg en cada <code>fsync()</code> reescribiría grandes partes del
-          árbol por unos pocos bytes de datos, y haría esperar a quien llama a que todo terminara. ZFS hace otra cosa. Cada dataset
-          mantiene un <em>registro de intención</em>, el ZIL: cada cambio se anota como una pequeña entrada, y con
-          <code>fsync()</code> las entradas se escriben de inmediato en una cadena de bloques de registro. Una vez
-          sincronizado el txg que contiene el cambio real, ya no hacen falta y se desechan. El registro solo se lee después
-          de un fallo. Un dispositivo de registro separado, un <em>SLOG</em>, da a esos bloques un sitio propio.
+          Por eso cada dataset lleva también un registro de intención, el ZIL. Cada escritura deja en memoria una pequeña
+          entrada sobre sí misma: qué archivo, en qué posición, qué longitud y, a menudo, los datos. Cuando el programa
+          llama a fsync, ZFS escribe enseguida las entradas de ese archivo en un bloque de registro en disco, espera a que
+          el disco vacíe su caché y vuelve. El txg escribe igualmente el cambio en el pool más tarde, como siempre, y una
+          vez hecho, el bloque de registro ya no hace falta y se libera. En un pool sin dispositivo de registro aparte, una
+          escritura grande no se copia en el registro: sus datos se escriben una sola vez, en su sitio en el pool, y la
+          entrada solo apunta a ellos.
+        </p>
+        <p>
+          El registro solo se lee después de un fallo. Cuando el pool se vuelve a importar, ZFS recorre la cadena de
+          bloques de registro e impide que el pool los reutilice. Cuando se monta el dataset, vuelve a aplicar cada entrada
+          cuyo txg nunca llegó al pool, así que vuelve cada escritura para la que fsync volvió. Una escritura que no se
+          sincronizó ni se registró se pierde, cosa que su programa aceptó al no llamar a fsync. Un dispositivo de registro
+          aparte, llamado SLOG, da a los bloques de registro un dispositivo propio; lo que aporta depende de lo rápido que
+          sea ese dispositivo.
         </p>
       </div>
     </header>
@@ -109,371 +89,323 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Escribir, fsync, cortar la corriente</h2>
       <div class="prose">
         <p>
-          Abajo, un pool nuevo y un archivo, que ya ocupa varios registros, cuyos bloques son de 128 KiB; el txg 100 está
-          abierto, y el dataset aún no tiene registro. Elige un dispositivo de registro, <code>logbias</code>, cómo se abre
-          el archivo y un tamaño: el primer panel dice lo que el código decidirá para el próximo <code>write()</code>, y por
-          qué. <code>write()</code> deja una entrada en memoria; <code>fsync()</code> la escribe en el registro, bloque a
-          bloque, y retorna una vez que el disco ha volcado su caché. Sincroniza el txg y los bloques del registro se liberan.
-          Corta la corriente cuando quieras, y luego importa el pool y monta el dataset.
+          La figura es un pool nuevo con un solo archivo, de bloques de 128 KiB. El txg 100 está abierto y el dataset aún
+          no tiene registro. Pulsa <code>write()</code>, luego <code>fsync()</code>, y luego Paso siguiente hasta que
+          <code>fsync()</code> vuelva. Cada pulsación muestra un paso: la línea al pie de la figura dice lo que hizo, y un
+          anillo marca la parte que cambió. Este primer <code>fsync()</code> crea el registro, lo que exige sincronizar un
+          txg, así que no registra nada: la escritura ya está en el pool cuando la llamada vuelve.
         </p>
         <p>
-          El primer <code>fsync()</code> crea el registro, y esa primera confirmación espera a que se sincronice el txg, así
-          que no registra nada; a partir de la segunda, las entradas van al registro. Así que empieza con una escritura y
-          <code>fsync()</code>, luego prueba una escritura de 4 KiB y <code>fsync()</code> sin SLOG, y corta la corriente;
-          lo mismo con una sincronización antes del corte; 128 KiB con y sin SLOG; <code>logbias=throughput</code>; una
-          escritura sin <code>fsync()</code> antes del corte.
+          Pulsa después otra vez <code>write()</code> y <code>fsync()</code>. Esta vez la entrada va a un bloque de registro,
+          y <code>fsync()</code> vuelve con el txg 101 todavía abierto. Corta la corriente, importa el pool y monta el
+          dataset: la entrada se reproduce. Empieza de nuevo, repite los dos pares de <code>write()</code> y
+          <code>fsync()</code> y sincroniza el txg 101 antes del corte: al registro ya no le queda nada que reproducir. Un
+          <code>write()</code> hecho después del último <code>fsync()</code> y antes del corte se pierde.
+        </p>
+        <p>
+          El panel de arriba dice lo que el próximo <code>write()</code> pondrá en su entrada. Prueba 128 KiB sin SLOG y
+          luego con uno, cuando el dataset ya tenga registro: tras Empezar de nuevo o tras una reproducción, el
+          siguiente <code>fsync()</code> vuelve a crear el registro y no registra nada. Sin SLOG, los datos se escriben en su sitio y la entrada solo apunta a ellos. Con un SLOG, todos
+          los datos van al registro, repartidos en dos bloques de registro. Con <code>logbias=throughput</code>, los datos
+          siempre se escriben en su sitio.
         </p>
       </div>
       <ZilLab lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">La idea, a tres profundidades</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">En el código</h2>
+      <p class="prose">
+        La figura sigue nueve sitios del código. Abre una nota Fuente para ver las líneas, tomadas de la versión zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>En una frase</h3>
-        <p class="lead prose">
-          ZFS hace que <code>fsync()</code> retorne pronto escribiendo de inmediato solo una entrada que describe el cambio,
-          en un registro propio de cada dataset, y el cambio en sí más tarde con su txg; el registro se desecha una vez
-          sincronizado ese txg, y solo se lee después de un fallo.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>En un párrafo</h3>
+      <div class="step">
+        <h3>Una entrada por escritura</h3>
         <p class="prose">
-          Cada <code>write()</code> crea una entrada en memoria, un <em>itx</em>, bajo el txg abierto.
-          <code>fsync()</code>, o una escritura en un archivo abierto con <code>O_DSYNC</code>, confirma las entradas del
-          archivo: se empaquetan en <em>bloques de escritura del registro</em>, los lwb, cada uno escrito como un bloque
-          cuyo final apunta al bloque siguiente, de modo que el registro es una cadena; la llamada retorna cuando el bloque
-          que contiene su última entrada está escrito y las cachés de los discos volcadas. Cuántos datos van al registro
-          se decide escritura a escritura: copiados en la entrada (WR_COPIED), copiados cuando se escribe el bloque
-          (WR_NEED_COPY), o escritos en su sitio en el pool con la entrada limitada a apuntar a ellos (WR_INDIRECT), para
-          que los datos grandes no se escriban dos veces. Con un SLOG, salvo con <code>logbias=throughput</code> o Direct
-          I/O, los datos siempre van al registro. Los bloques del registro salen primero del SLOG; un pool sin SLOG los toma
-          de un espacio reservado en sus vdevs ordinarios. Cuando un txg se sincroniza, se liberan los bloques del registro
-          cuyas entradas pertenecen todas a txg sincronizados. Tras un fallo, importar el pool reclama la cadena, y montar
-          el dataset reproduce cada entrada cuyo txg no se había sincronizado.
+          <code>zfs_log_write</code> se ejecuta en cada escritura. Rellena una entrada, un itx, con lo necesario para volver
+          a aplicar la escritura: qué archivo, en qué posición, qué longitud y cómo viajan los datos. Todavía no se escribe
+          nada en disco.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zfs_log_write</code>, zfs_log.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={ZL}
+            from={677}
+            to={682}
+            symbol="zfs_log_write"
+            notes={[
+              { from: 677, text: "Cómo viajan los datos: copiados en la entrada, copiados más tarde en el bloque de registro, o escritos en su sitio, según decida la nota siguiente." },
+              { from: 678, to: 680, text: "El archivo, el desplazamiento y la longitud: lo necesario para volver a aplicar la escritura tras un fallo." },
+              {
+                from: 681,
+                to: 682,
+                text: `Aún sin puntero de bloque: una entrada cuyos datos se escriben en su sitio recibe uno cuando se escribe ese bloque. Después, la entrada <a href="${L.itxAssign}">se pone en cola bajo el txg de la escritura</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>En detalle</h3>
-        <div class="prose">
-          <p>
-            <strong>Una entrada por escritura.</strong> En <code>zfs_write</code>, cada escritura queda registrada por
-            <a href={L.logWrite}><code>zfs_log_write</code></a>, que crea un itx y <a href={L.itxAssign}>lo pone en cola</a>
-            bajo el txg de la escritura, <a href={L.lrcTxg}><code>lrc_txg</code></a>. Todavía no se escribe nada. Si el
-            archivo se abrió con <code>O_SYNC</code> u <code>O_DSYNC</code>, o el dataset tiene <code>sync=always</code>, la
-            escritura <a href={L.commitFlag}>se confirma de inmediato</a>: <code>zfs_write</code> <a href={L.writeCommit}>llama
-            a <code>zil_commit</code></a> antes de retornar. Si no, la entrada espera a <code>fsync()</code>, que
-            <a href={L.fsync}>llama a la misma función</a>. Lo que contiene la entrada se decide primero:
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={2212}
-          to={2246}
-          symbol="zil_write_state"
-          notes={[
-            {
-              from: 2216,
-              to: 2217,
-              text: `<code>logbias=throughput</code>, o una escritura que tomó la <a href="${L.direct}">ruta Direct I/O</a>: siempre indirecta, con SLOG o sin él. El bloque de registro que contiene la entrada sigue <a href="${L.slogFirst}">saliendo primero del SLOG</a>: <code>logbias</code> decide adónde van los datos, no el registro.`,
-            },
-            {
-              from: 2219,
-              to: 2228,
-              text: `Indirecta solo a partir de <a href="${L.immediate}">32 KiB</a> y, para una escritura confirmada de inmediato, solo a partir de medio bloque, 64 KiB para el archivo de la figura, porque, como dice el comentario de arriba, la escritura siguiente podría reescribir el mismo bloque.`,
-            },
-            {
-              from: 2230,
-              to: 2232,
-              text: `Un pool con un SLOG nunca registra en indirecto. <a href="${L.hasSlogs}"><code>spa_has_slogs</code></a> pregunta si la clase log tiene un dispositivo, no si tiene sitio: un SLOG lleno sigue contando.`,
-            },
-            {
-              from: 2233,
-              to: 2238,
-              text: `Vdevs special sin SLOG: indirecta solo cuando los bloques del archivo van a la clase special (o <a href="${L.specialIsSlog}"><code>zil_special_is_slog</code></a> vale 0). El pool de la figura no tiene vdev special.`,
-            },
-            {
-              from: 2240,
-              to: 2245,
-              text: `Indirecta: la entrada lleva un puntero. Si no, WR_COPIED, los datos copiados en la entrada ahora, cuando la escritura se confirma de inmediato; o WR_NEED_COPY, los datos <a href="${L.getData}">leídos del archivo</a> cuando se llena el bloque de registro.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Después <code>zfs_log_write</code> <a href={L.downgrade}>convierte WR_COPIED en WR_NEED_COPY</a> cuando los datos
-            superan <a href={L.maxCopied}>7680 bytes</a>, ya que una entrada copiada debe caber en un solo bloque de registro,
-            y <a href={L.oneBlock}>corta una escritura indirecta en cada bloque del archivo</a>. <code>O_DIRECT</code> toma la
-            ruta Direct I/O solo para una escritura de al menos un bloque del archivo: <a href={L.shortDirect}>una más corta
-            pasa por el ARC</a>, así que en la figura solo la escritura de 128 KiB con <code>O_DIRECT</code> es Direct I/O.
-            Para WR_INDIRECT, el comentario de <code>zfs_get_data</code> da la razón: <a href={L.twice}>«for large writes it’s
-            cheaper to sync the data and get a pointer to it (indirect) so that we don’t have to write the data twice»</a>. El
-            bloque se escribe en su sitio <a href={L.dmuSync}>con <code>dmu_sync</code></a>, o ya lo escribió la
-            <a href={L.directBp}>escritura Direct I/O</a>. En la figura, el panel de arriba ejecuta esta función para cada
-            combinación de los botones; el distintivo de cada escritura es su resultado.
-          </p>
-          <p><strong>La confirmación.</strong> <code>zil_commit_impl</code>, llamada por <code>fsync()</code>:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={4097}
-          to={4122}
-          symbol="zil_commit_impl"
-          notes={[
-            {
-              from: 4097,
-              to: 4098,
-              text: `Una <em>espera de confirmación</em> (commit waiter) se pone en cola como un itx especial, detrás de todas las entradas del archivo (las demás entradas del archivo se <a href="${L.async}">pasaron a la lista síncrona</a> justo antes).`,
-            },
-            { from: 4100, text: "Las entradas pendientes se empaquetan en lwb y los lwb se emiten." },
-            {
-              from: 4101,
-              text: `Quien llama duerme hasta que el lwb que contiene su espera está escrito y volcado (<a href="${L.waiterDone}"><code>zil_commit_waiter_done</code></a>).`,
-            },
-            {
-              from: 4104,
-              to: 4117,
-              text: "Ante un error de escritura del registro, se recurre a esperar una sincronización completa del txg: igual de duradera, solo más lenta. La figura no tiene errores de E/S.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>La vida de un lwb.</strong> Cada lwb pasa por siete estados, en este orden:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="include/sys/zil_impl.h"
-          from={83}
-          to={92}
-          symbol="lwb_state_t"
-          notes={[
-            { from: 84, to: 85, text: `Nuevo, y luego <a href="${L.open}">abierto</a> con su primera entrada.` },
-            {
-              from: 86,
-              text: `<a href="${L.close}">Cerrado</a> cuando está lleno, o al final de una confirmación, que también <a href="${L.nextLwb}">crea el lwb siguiente</a>, todavía vacío.`,
-            },
-            {
-              from: 87,
-              to: 88,
-              text: `<a href="${L.ready}">Listo</a> cuando está lleno con sus datos; <a href="${L.issued}">emitido</a> una vez asignado el bloque siguiente.`,
-            },
-            {
-              from: 89,
-              to: 90,
-              text: `<a href="${L.writeDone}">Escritura terminada</a>, y luego <a href="${L.flushDone}">volcado terminado</a> cuando las cachés de los discos se han volcado: los que esperan en él <a href="${L.waiters}">se despiertan</a> y <code>fsync()</code> retorna.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            El comentario sobre el enum <a href={L.stateComment}>describe las transiciones</a> y los bloqueos que necesitan.
-            Con un solo escritor y nada más en curso, como en la figura, el lwb que contiene una confirmación
-            <a href={L.closeAtOnce}>se cierra y se emite de inmediato</a> en lugar de quedar abierto para más entradas. La
-            figura dibuja cada estado de cada lwb, en el panel de memoria.
-          </p>
-          <p><strong>El empaquetado.</strong> Cómo entran las entradas en los lwb:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={2334}
-          to={2369}
-          symbol="zil_lwb_assign"
-          notes={[
-            {
-              from: 2334,
-              to: 2346,
-              text: "Una entrada que no cabe cierra el lwb y abre el siguiente. La prueba larga deja que una entrada WR_NEED_COPY empiece en un bloque casi lleno solo cuando eso ahorra una división.",
-            },
-            { from: 2348, to: 2357, text: "Una entrada WR_COPIED debe caber entera: nunca se divide." },
-            {
-              from: 2359,
-              to: 2369,
-              text: "Una entrada WR_NEED_COPY mayor que el espacio que queda se divide: un clon toma lo que cabe, el resto pasa al bloque siguiente.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Cada entrada recibe entonces el número de secuencia siguiente, <a href={L.seq}><code>lrc_seq</code></a>, y el
-            lwb guarda <a href={L.addTxg}>el txg más alto de sus entradas</a>. La cabecera de una entrada de escritura,
-            <a href={L.lrWrite}><code>lr_write_t</code></a>, ocupa 192 bytes; el final de un bloque de registro,
-            <a href={L.chainT}><code>zil_chain_t</code></a>, 184 bytes; un bloque de registro, como mucho
-            <a href={L.maxBlock}>128 KiB</a>. Así que un bloque de 128 KiB contiene 130 888 bytes de entradas, y una
-            escritura WR_NEED_COPY de 128 KiB ocupa <a href={L.maxLogData}>130 696 bytes</a> en un lwb y 376 bytes en el
-            siguiente: la figura lo muestra con un SLOG.
-          </p>
-          <p><strong>La cadena, y dónde entra el SLOG.</strong> Cuando se emite un lwb, asigna el bloque del lwb <em>siguiente</em>:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={2073}
-          to={2092}
-          symbol="zil_lwb_write_issue"
-          notes={[
-            {
-              from: 2073,
-              to: 2074,
-              text: `El bloque siguiente se asigna ahora, y su puntero va al final de este bloque, <a href="${L.nextBlk}"><code>zc_next_blk</code></a>: cada bloque apunta al siguiente, a partir de <code>zh_log</code> en la cabecera.`,
-            },
-            { from: 2087, text: "El bloque nuevo nace en un txg abierto." },
-            {
-              from: 2088,
-              to: 2091,
-              text: "Hereda la semilla de la suma de comprobación de este bloque, con la palabra de secuencia incrementada: en la reproducción, así se distingue un bloque siguiente válido de datos antiguos.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            El primer bloque de una cadena, de <a href={L.minBlk}>4 KiB</a>, lo da <a href={L.create}><code>zil_create</code></a>,
-            con el mismo asignador, <code>zio_alloc_zil</code>:
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/zio.c"
-          from={4561}
-          to={4595}
-          symbol="zio_alloc_zil"
-          notes={[
-            {
-              from: 4561,
-              to: 4565,
-              text: `Primero la clase log, los dispositivos SLOG. Si tiene éxito, fija <code>slog</code>, que se convierte en <a href="${L.slogFlag}"><code>LWB_FLAG_SLOG</code></a> en el lwb.`,
-            },
-            { from: 4567, to: 4580, text: "Después el espacio de registro reservado en los vdevs special, y la clase special." },
-            {
-              from: 4582,
-              to: 4587,
-              text: `Después el <em>registro integrado</em>: el espacio que cada vdev ordinario de primer nivel <a href="${L.vdevLogMg}">reserva para el ZIL</a>. Un pool sin SLOG, o con uno lleno, y sin vdevs special, registra ahí.`,
-            },
-            { from: 4589, to: 4595, text: "Por último, la clase normal." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>La primera confirmación espera a un txg.</strong> La confirmación llama a <code>zil_create</code>
-            <a href={L.createCall}>cuando el dataset no tiene registro</a>. No puede escribir ella misma el bloque nuevo en
-            <code>zh_log</code>: la cabecera solo cambia en contexto de sincronización. Así que asigna el bloque en una
-            transacción y <a href={L.createWait}>espera a que ese txg se sincronice</a>. Las escrituras de ese txg están
-            entonces en el árbol, de modo que la confirmación <a href={L.synced}>encuentra su txg sincronizado</a> y
-            <a href={L.dropSynced}>destruye sus itx</a> en lugar de registrarlos; solo la espera de confirmación entra en el
-            primer lwb. La primera confirmación sobre un registro nuevo, un <code>fsync()</code> o una escritura
-            <code>O_DSYNC</code>, cuesta por tanto una sincronización de txg, y por eso <a href={L.keepWhy}>un registro sin nada
-            que reproducir conserva su primer bloque</a>.
-          </p>
-          <p>
-            En la figura, cada asignación enumera las clases que probó. El código dice adónde va un bloque de registro, no lo
-            rápido que es el dispositivo: lo que aporta un SLOG depende del dispositivo.
-          </p>
-          <p><strong>Cuando el txg se sincroniza.</strong> En contexto de sincronización, para cada dataset cuyo registro cambió:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={4206}
-          to={4224}
-          symbol="zil_sync"
-          notes={[
-            { from: 4207, text: "El <code>zh_log</code> de la cabecera sigue a la cabeza de la lista." },
-            {
-              from: 4208,
-              to: 4210,
-              text: "Un lwb se libera una vez volcado, cuando cada entrada que contiene pertenece a un txg sincronizado y su propio bloque se asignó en este txg o antes. El primero que no cumple detiene el bucle.",
-            },
-            { from: 4211, to: 4214, text: "Su bloque vuelve al asignador." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Las entradas de un txg sincronizado que nunca se escribieron en el registro simplemente las descarta
-            <a href={L.clean}><code>zil_clean</code></a>: el txg las hizo duraderas. En la figura, los bloques liberados
-            aparecen en gris y tachados.
-          </p>
-          <p><strong>Tras un fallo: la reclamación.</strong> Al importar, en el <a href={L.spaClaim}>primer txg</a> del pool, para cada dataset:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={1232}
-          to={1253}
-          symbol="zil_claim"
-          notes={[
-            {
-              from: 1239,
-              to: 1241,
-              text: `<a href="${L.parse}"><code>zil_parse</code></a> recorre la cadena desde <code>zh_log</code>, reclamando cada bloque para que el asignador no lo vuelva a entregar, y también <a href="${L.claimWrite}">los bloques a los que apuntan las entradas WR_INDIRECT</a>. El recorrido termina en el bloque asignado pero nunca escrito: su suma de comprobación no coincide.`,
-            },
-            { from: 1242, text: "El txg de reclamación: el primer txg del pool." },
-            {
-              from: 1245,
-              to: 1246,
-              text: `<a href="${L.flags}"><code>ZIL_REPLAY_NEEDED</code></a> si se encontró una entrada, o si se siguió más de un bloque. El recorrido cuenta el último bloque no escrito, así que un registro vacío cuenta uno.`,
-            },
-            { from: 1253, text: "Ese primer txg es el último txg sincronizado más uno." },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>La reproducción.</strong> Al montar, <a href={L.mount}><code>zil_replay</code></a> pasa cada entrada por:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={4696}
-          to={4712}
-          symbol="zil_replay_log_record"
-          notes={[
-            { from: 4708, to: 4709, text: "Una entrada ya reproducida por una reproducción anterior interrumpida se omite." },
-            {
-              from: 4711,
-              to: 4712,
-              text: "Una entrada de un txg anterior al txg de reclamación se omite: ese txg se sincronizó, el cambio ya está en el árbol. Todas las demás entradas se aplican de nuevo.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Sin <code>ZIL_REPLAY_NEEDED</code>, <code>zil_replay</code> <a href={L.noReplay}>solo destruye el registro</a>,
-            conservando su primer bloque: la cabecera vaciada <a href={L.keepFirst}>vuelve a designarlo</a>, con un nuevo GUID
-            de cadena, y la confirmación siguiente <a href={L.reuse}>escribe ahí</a> sin asignar nada. Si no, reproduce, y
-            luego <a href={L.destroy}>destruye el registro</a>. La cabecera que contiene todo esto,
-            <a href={L.header}><code>zil_header_t</code></a>, vive en el dataset: <code>zh_claim_txg</code>,
-            <code>zh_replay_seq</code>, <code>zh_log</code>, los números de secuencia reclamados y los indicadores. Así, un
-            fallo antes de la sincronización devuelve cada entrada del txg no sincronizado; un fallo después encuentra un
-            registro sin nada que reproducir, y una escritura a la que nunca siguió un <code>fsync()</code> y que nunca se
-            sincronizó se pierde, como su programa permitía. Tras una reproducción se destruye todo el registro, así que la
-            confirmación siguiente crea uno nuevo y vuelve a esperar a un txg.
-          </p>
-        </div>
+      <div class="step">
+        <h3>En la entrada, o en su sitio</h3>
+        <p class="prose">
+          <code>zil_write_state</code> decide qué parte de los datos lleva la entrada. Un bloque grande escrito una sola vez,
+          en su sitio, cuesta menos que los mismos datos escritos en el registro y luego en el pool, salvo cuando el pool
+          tiene un SLOG.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_write_state</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={2227}
+            to={2245}
+            symbol="zil_write_state"
+            notes={[
+              {
+                from: 2227,
+                to: 2228,
+                text: `En su sitio solo a partir de <a href="${L.immediate}">32 KiB</a> y, para una escritura confirmada de inmediato (<code>O_DSYNC</code>), solo a partir de medio bloque, porque la siguiente escritura podría reescribir el mismo bloque. Antes de esta prueba, <a href="${L.tput}"><code>logbias=throughput</code> o Direct I/O</a> siempre devuelve WR_INDIRECT.`,
+              },
+              {
+                from: 2230,
+                to: 2232,
+                text: `Un pool con SLOG nunca escribe en su sitio. <a href="${L.hasSlogs}"><code>spa_has_slogs</code></a> pregunta si la clase log tiene un dispositivo, no si le queda sitio: un SLOG lleno sigue contando.`,
+              },
+              { from: 2233, to: 2238, text: "Vdevs special sin SLOG. El pool de la figura no tiene ninguno." },
+              {
+                from: 2240,
+                to: 2245,
+                text: `WR_INDIRECT, escrito en su sitio; WR_COPIED, copiado en la entrada ahora, para una escritura confirmada de inmediato; si no, WR_NEED_COPY, copiado en el bloque de registro al llenarlo. Una escritura WR_COPIED <a href="${L.downgrade}">de más de 7680 bytes</a> pasa a WR_NEED_COPY, porque una entrada copiada debe caber en un solo bloque de registro.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>fsync() espera un bloque de registro</h3>
+        <p class="prose">
+          <code>fsync()</code> llama a <code>zil_commit</code>, y quien hace el trabajo es <code>zil_commit_impl</code>:
+          escribe las entradas del archivo y duerme hasta que el bloque que contiene la última de ellas está en
+          almacenamiento estable.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_commit_impl</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={4097}
+            to={4101}
+            symbol="zil_commit_impl"
+            notes={[
+              { from: 4097, to: 4098, text: "Una espera de confirmación se pone en cola detrás de cada entrada del archivo." },
+              {
+                from: 4100,
+                text: `Las entradas se colocan en lwb, bloques de escritura del registro, y los lwb se emiten. Un dataset sin registro crea uno primero, y <a href="${L.createWait}">espera a que se sincronice un txg</a> para que la cabecera pueda designar su primer bloque: la primera confirmación en un registro nuevo cuesta un txg.`,
+              },
+              { from: 4101, text: `Quien llama duerme hasta que el lwb que lleva su espera está escrito y <a href="${L.waiters}">las cachés de los discos se han vaciado</a>.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Los siete estados de un lwb</h3>
+        <p class="prose">
+          Un lwb es un bloque de registro en preparación, en memoria. La figura marca su estado en cada lwb, en el orden de
+          <code>lwb_state_t</code>.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>lwb_state_t</code>, zil_impl.h</Fragment>
+          <Excerpt
+            lang={lang}
+            path="include/sys/zil_impl.h"
+            from={83}
+            to={92}
+            symbol="lwb_state_t"
+            notes={[
+              { from: 84, to: 85, text: `Nuevo, y luego <a href="${L.open}">abierto</a> por su primera entrada.` },
+              {
+                from: 86,
+                text: `<a href="${L.close}">Cerrado</a> cuando está lleno, o al final de una confirmación, que además <a href="${L.nextLwb}">crea el lwb siguiente</a>, todavía vacío.`,
+              },
+              {
+                from: 87,
+                to: 88,
+                text: `<a href="${L.ready}">Listo</a> cuando sus entradas están completas; <a href="${L.issued}">emitido</a> cuando el bloque siguiente está asignado.`,
+              },
+              {
+                from: 89,
+                to: 90,
+                text: `<a href="${L.writeDone}">Escritura terminada</a>, y luego <a href="${L.flushDone}">volcado terminado</a> cuando las cachés de los discos se han vaciado: las confirmaciones que lo esperaban vuelven.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Cada bloque designa el siguiente</h3>
+        <p class="prose">
+          Antes de escribir un lwb, <code>zil_lwb_write_issue</code> asigna el bloque del lwb siguiente y pone su dirección
+          en la cola de este bloque. El registro es una cadena que empieza en la cabecera.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_lwb_write_issue</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={2086}
+            to={2092}
+            symbol="zil_lwb_write_issue"
+            notes={[
+              { from: 2087, text: `El bloque siguiente, cuyo puntero <a href="${L.nextBlk}">va en la cola de este bloque</a>, nace en un txg abierto.` },
+              {
+                from: 2088,
+                to: 2091,
+                text: "Toma la semilla de suma de verificación de este bloque, con la palabra de secuencia incrementada. Tras un fallo, el bloque siguiente debe coincidir con esa suma de verificación. El bloque asignado pero nunca escrito no coincide, y termina la cadena.",
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Primero el SLOG</h3>
+        <p class="prose">
+          <code>zio_alloc_zil</code> asigna cada bloque de registro, incluido el primero de una cadena. Prueba primero el
+          SLOG.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_alloc_zil</code>, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/zio.c"
+            from={4561}
+            to={4565}
+            symbol="zio_alloc_zil"
+            notes={[
+              { from: 4561, to: 4564, text: "Primero la clase log, los dispositivos SLOG." },
+              {
+                from: 4565,
+                text: `<code>slog</code> guarda si eso funcionó; se convierte en <a href="${L.slogFlag}"><code>LWB_FLAG_SLOG</code></a> en el lwb. Si no, la función <a href="${L.allocRest}">prueba en orden</a> el espacio de registro de los vdevs special, los vdevs special, el espacio que cada vdev normal <a href="${L.vdevLogMg}">reserva para el ZIL</a> y, por último, los vdevs normales. <code>logbias</code> no cambia este orden: con <code>throughput</code> los datos se escriben en su sitio, pero el bloque de registro sigue saliendo del SLOG.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Cuando el txg se sincroniza, el registro se libera</h3>
+        <p class="prose">
+          Una vez sincronizado un txg, las entradas de sus escrituras ya no hacen falta. <code>zil_sync</code> se ejecuta
+          durante esa sincronización y libera bloques de registro desde la cabeza de la cadena.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_sync</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={4206}
+            to={4214}
+            symbol="zil_sync"
+            notes={[
+              { from: 4207, text: "El <code>zh_log</code> de la cabecera, donde empieza la cadena, sigue a la cabeza de la lista." },
+              {
+                from: 4208,
+                to: 4210,
+                text: "Un lwb se queda si aún no se ha vaciado, o si su bloque o una de sus entradas pertenece a un txg posterior. El primero que se queda detiene el bucle.",
+              },
+              {
+                from: 4211,
+                to: 4214,
+                text: `Si no, su bloque se libera. Las entradas del txg sincronizado que nunca llegaron a un bloque de registro <a href="${L.clean}">se descartan de la memoria</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Tras un corte, la importación se apropia de la cadena</h3>
+        <p class="prose">
+          Al importar, en el primer txg del pool, <code>zil_claim</code> recorre la cadena de cada dataset. Solo marca los
+          bloques y cuenta las entradas; todavía no se reproduce nada.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_claim</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={1239}
+            to={1246}
+            symbol="zil_claim"
+            notes={[
+              {
+                from: 1239,
+                to: 1241,
+                text: `<a href="${L.parse}"><code>zil_parse</code></a> recorre la cadena desde <code>zh_log</code> y se apropia de cada bloque, para que el asignador no lo vuelva a dar, y también <a href="${L.claimWrite}">los bloques a los que apuntan las entradas WR_INDIRECT</a>.`,
+              },
+              { from: 1242, text: `El txg de apropiación: el primer txg del pool, <a href="${L.spaClaim}">el último sincronizado más uno</a>.` },
+              { from: 1243, to: 1244, text: "Los números de bloque y de entrada más altos vistos durante la apropiación." },
+              {
+                from: 1245,
+                to: 1246,
+                text: `<a href="${L.flags}"><code>ZIL_REPLAY_NEEDED</code></a> si se encontró una entrada, o si siguió más de un bloque. El último bloque, nunca escrito, cuenta: un registro vacío cuenta uno.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>El montaje reproduce lo que el txg no guardó</h3>
+        <p class="prose">
+          Al montar el dataset, <code>zil_replay</code> recorre otra vez la cadena y pasa cada entrada a
+          <code>zil_replay_log_record</code>, que omite lo que ya está en el pool.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_replay_log_record</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={4708}
+            to={4712}
+            symbol="zil_replay_log_record"
+            notes={[
+              { from: 4708, to: 4709, text: `Se omite una entrada ya reproducida por una reproducción anterior que se interrumpió. El montaje <a href="${L.mount}">llama a <code>zil_replay</code></a>.` },
+              {
+                from: 4711,
+                to: 4712,
+                text: `Se omite una entrada de un txg anterior al txg de apropiación: ese txg se sincronizó, así que su cambio está en el pool. Cada una de las demás entradas se aplica de nuevo, y luego <a href="${L.destroy}">el registro se destruye</a>. Si no hay nada que reproducir, <code>zil_replay</code> <a href="${L.noReplay}">solo destruye el registro</a> y <a href="${L.keepFirst}">conserva su primer bloque</a>, en el que la próxima confirmación <a href="${L.reuse}">escribe</a> sin esperar ningún txg.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Lo que la figura deja fuera</h2>
       <p class="prose muted">
-        La figura ejecuta las funciones anteriores sobre un archivo de un dataset, con un solo escritor y un solo txg en
-        curso, sincronizado de una vez en una pasada. El archivo ya ocupa varios registros, así que sus bloques son de
-        128 KiB; un archivo de un solo bloque más pequeño que <code>recordsize</code> <a href={L.blksz}>tiene un bloque más
-        pequeño</a>, y la regla del medio bloque usa ese. El primer bloque de una cadena nueva es de 4 KiB, como en el
-        código; cada bloque de registro posterior es de 128 KiB, mientras que el código elige el tamaño de cada bloque según
-        la ráfaga de entradas (<a href={L.plan}><code>zil_lwb_plan</code></a>). Así que en una cadena real las entradas se
-        dividen en otros puntos, y las cifras en bytes de la figura son las de bloques de 128 KiB. Cada <code>write()</code>
-        empieza al principio de un bloque del archivo. No hay errores de E/S, así que no hay
-        <a href={L.fallback}>recurso a <code>txg_wait_synced</code></a>; el volcado es un solo paso para todo el lwb, sin el
-        árbol de volcados por vdev; el plazo de confirmación nunca vence, porque un solo escritor cierra su lwb de inmediato.
-        Las escrituras que superan <a href={L.bulk}><code>zil_slog_bulk</code></a> por confirmación, 64 MiB, van a un SLOG
-        con <a href={L.bulkUse}>una prioridad más baja</a>; el formato Slim ZIL y el cifrado no se dibujan. Nada de esto
-        cambia un estado de escritura, una clase, ni qué escrituras se reproducen. Para cuándo se sincroniza un txg, véase
-        <a href={roomUrl(lang, "txg")}>Grupos de transacciones</a>; para cómo se reparten las clases el espacio del pool,
-        <a href={roomUrl(lang, "metaslabs")}>Metaslabs y space maps</a>.
+        La figura ejecuta las funciones de arriba sobre un solo archivo de un solo dataset, con un solo proceso que escribe y un solo
+        txg en curso, sincronizado de una vez en una sola pasada. La corriente se corta entre dos acciones, nunca en
+        medio de una. El archivo ya ocupa varios registros, así que sus bloques son de 128 KiB; un archivo de un solo
+        bloque menor que <code>recordsize</code> tiene un bloque más pequeño, y la regla del medio bloque lo usa. El primer
+        bloque de una cadena nueva es de 4 KiB, como en el código; cada bloque de registro posterior es de 128 KiB, donde
+        el código elige el tamaño de cada bloque según la ráfaga de entradas (<code>zil_lwb_plan</code>). Por eso, en una
+        cadena real las entradas se dividen en otros puntos, y las cuentas de bytes de la figura son las de bloques de
+        128 KiB. Cada <code>write()</code> empieza al principio de un bloque del archivo. No hay errores de E/S, así que la
+        confirmación nunca recurre a esperar una sincronización del txg; el volcado es un solo paso para todo el lwb, sin
+        el árbol de volcados por vdev; el plazo de confirmación nunca vence, porque un solo proceso que escribe cierra su lwb de
+        inmediato. Por encima de 64 MiB por confirmación (<code>zil_slog_bulk</code>), las escrituras van a un SLOG con
+        menos prioridad; el formato Slim ZIL y el cifrado no se dibujan. Nada de esto cambia cómo se registra una
+        escritura, adónde va un bloque de registro ni qué escrituras se reproducen. <a href={roomUrl(lang, "txg")}>Grupos de
+        transacciones</a> explica cuándo se sincroniza un txg, y <a href={roomUrl(lang, "metaslabs")}>Metaslabs y space
+        maps</a> cómo se reparten las clases el espacio del pool.
       </p>
     </section>
   </article>
@@ -488,7 +420,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -497,10 +429,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -508,8 +440,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

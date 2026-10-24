@@ -2570,3 +2570,81 @@ predicted by running the destroy on a copy); selecting a block during a sync cut
 (now only other actions stop the replay, and they write the rest of the log at once); the
 moving animation took the "frees" chips for where a block lives; the text version lacked what a
 destroy would free; a test of the hatching restated the code. All fixed, and view tests added.
+
+## v1.4 ZIL room (ALG-199): a question, and a figure that shows each action one step per press
+
+**What changed.** The ZIL room, in EN, FR and ES, asks one question ("What does fsync() wait
+for?"), answers it in three plain paragraphs, keeps its figure with what to try, then shows the
+code in nine Source notes (D21.1, D30.1). In `ZilLab`, each action shows one step per press of
+Next step (Show every step finishes it), rings what the step changed, and says the step in a
+plain sentence with no code link; on a phone Next step and the narration stay in a bar at the
+bottom. The model is unchanged. Eight short excerpts are new in `ANALYSIS.md` (ZIL room, 11 to
+18). No shared code changed; the other rooms are unchanged.
+
+**Measures** (built pages, `<article>` only; the same in EN, FR and ES):
+
+| | `main` | this branch |
+|---|---|---|
+| GitHub links in the article | 79 | 37 |
+| of them in the prose | 41 | 0 |
+| in the figure | 7 | 0 |
+| in excerpts and Source notes | 31 | 37 |
+| Code excerpts (citations) | 9 | 9 |
+| Lines of code shown | 220 | 74 |
+
+**Proof.** `npm run build` (0 errors, French typography 14 files), `npm test` (262 pass after the merge of `main`),
+`check-permalinks` (ANALYSIS.md 157 excerpts, 0 failures; built pages 1698 line references,
+0 failures), `check-csp` (44 pages). `scripts/verify-zil.mjs` (new, scoped to this room): EN,
+FR, ES on desktop and a 390 px phone; write, fsync, write, fsync, power cut, import, mount, one
+press at a time (16, 11, 1, 1 and 2 steps): every step rings a part of the figure and shows the
+ring's key, the narration is set and polite, no link in the figure, the focus is on Next step
+while the action has steps, and on the phone the ringed part and Next step are on screen; Show
+every step ends the action with the focus in the bar; a setting changed afterwards hides the
+ring's key; reduced motion runs no animation; with no script the panels and the text version
+are shown and the controls are not; Enter and Space work with a visible focus; at 1280 px a
+Source note opens in the side panel; no horizontal overflow, no console error. 41 captures,
+0 problems. The whole-site `scripts/verify.mjs` on the final head: 488 captures, 0 console
+errors, 0 mismatches in any room. Its ZIL checks now step through each action (the reduced-
+motion fsync primes the log first) and scroll a button to mid-screen before pressing it, since on
+a phone the sticky step bar can cover it. The `targets()` test parses the HTML itself: CI runs
+`npm test` before `npm ci`, so it cannot import a package.
+
+**Reviews.** `technical-writer` on the three languages: "Start again and sync the txg" led to a
+run with no record to replay, and the 128 KiB split needs a log that already exists (both
+now say what to press); « retorna », « réclamer »/« reclamar », « écrivain »/« escritor » and
+« promesse »/« promesa » were calques; two narration lines and the last paragraph ended in
+fragments. All fixed. `code-reviewer` on the diff: after Show every step the focus jumped to
+`write()` off screen (it stays in the bar); a part reached with Tab could sit under the sticky
+bar (scrolled above it); the `targets()` test matched attributes as text (it now runs the
+selectors, and found that `returns` rang nothing when `fsync()` came before any write, fixed);
+the buttons showed the state after a sync while the figure showed the state before (they follow
+the figure); Next step before any action said "last step" (it says how to start); a repeated
+message was not announced again; the ring's key stayed after a setting changed. All fixed.
+
+**Debts.** `scripts/verify.mjs` still checks this room against the model in EN and FR only;
+`verify-zil.mjs` covers ES.
+
+### Design/UX fixes (ALG-199)
+
+The three items of the Design/UX review are fixed (D30.1).
+- **SHOULD:** at a replay the write is ringed first, and after a step the figure scrolls to fit
+  every ringed part above the bar when they fit together, otherwise the first one.
+- **NIT:** the narration of an allocation keeps only where the block went and why ("…, because
+  there is no SLOG"), and the log keeps every class tried. On a 360 × 740 phone the bar goes from
+  27 % of the screen to 19–22 % at those steps.
+- **NIT:** without script, "This figure needs JavaScript…" has the text version's top margin and
+  small size.
+
+`verify-zil.mjs` now also runs at 360 × 740. It checks that the first ringed part is on screen
+after every press, and all ringed parts when they fit, on desktop too. It also checks that the
+step bar stays under a quarter of a phone screen. `code-reviewer` on the diff: two NITs, both
+fixed. The part marked first is the first one drawn, and an empty selection no longer passes
+the check.
+
+**Proof.** `npm test` 264 pass, `npm run build` 0 errors, `verify-zil.mjs` EN, FR and ES at
+1280, 390 and 360 px: 59 captures, 0 problems. Captures read by eye: ES 360 at `zfs mount`
+step 1 (w2 and its ring on screen), ES 360 at fsync step 7, EN 1440 without script. Only
+`ZilLab` and `zil-*` changed, so the whole-site run was not repeated.
+
+**Debt.** The `zpool import` narration, a single step, is still 24 % of a 360 px screen in FR
+and ES.

@@ -925,19 +925,25 @@ for (const lang of ["en", "fr"]) {
 // large write with and without SLOG, logbias=throughput, a crash before the
 // txg sync then replay, a crash after it, a write never fsynced) replayed in
 // the page, with motion, against the model (src/lib/zil.ts): every write's
-// state and status, the header and the chain drawn after each step must be the
-// model's. Then the decision panel for every combination of the buttons.
+// state and status, the header and the chain drawn after each action (its steps
+// shown with Show every step, D30.1) must be the model's. Then the decision
+// panel for every combination of the buttons.
 const ZR = PAGES.find((p) => p.id === "zil");
 const ZL = {
-  en: { waits: /waits for txg 100 to sync/, viaSync: /through the txg sync that creating the log forced/, claim0yes: /0 records\. ZIL_REPLAY_NEEDED: yes/, returns: /fsync\(\) returns/, wreturns: /write\(\) returns/, claim1: /1 record\. ZIL_REPLAY_NEEDED: yes/, claim0: /0 records\. ZIL_REPLAY_NEEDED: no/, replay: /Replay #1/, lost: /neither synced nor logged: 1 write/ },
-  fr: { waits: /attend la synchronisation du txg 100/, viaSync: /par la synchronisation de txg que la création du journal a imposée/, claim0yes: /0 enregistrement\. ZIL_REPLAY_NEEDED : oui/, returns: /fsync\(\) rend la main/, wreturns: /write\(\) rend la main/, claim1: /1 enregistrement\. ZIL_REPLAY_NEEDED : oui/, claim0: /0 enregistrement\. ZIL_REPLAY_NEEDED : non/, replay: /Rejeu #1/, lost: /ni synchronisé ni journalisé : 1 écriture/ },
+  en: { waits: /waits for txg 100 to sync/, viaSync: /because creating the log synced its txg/, claim0yes: /0 records\. The walk ends[^|]*Replay needed: yes/, returns: /fsync\(\) returns/, wreturns: /write\(\) returns/, claim1: /1 record\. The walk ends[^|]*Replay needed: yes/, claim0: /0 records\. The walk ends[^|]*Replay needed: no/, replay: /Record #1 belongs to txg \d+, which never synced/, lost: /neither synced nor logged: 1 write/ },
+  fr: { waits: /attend donc que le txg 100 soit synchronisé/, viaSync: /parce que la création du journal a synchronisé leur txg/, claim0yes: /0 enregistrement\. Le parcours[^|]*Rejeu nécessaire\s?: oui/, returns: /fsync\(\) rend la main/, wreturns: /write\(\) rend la main/, claim1: /1 enregistrement\. Le parcours[^|]*Rejeu nécessaire\s?: oui/, claim0: /0 enregistrement\. Le parcours[^|]*Rejeu nécessaire\s?: non/, replay: /L’enregistrement #1 appartient au txg \d+, jamais synchronisé/, lost: /ni synchronisée ni journalisée\s?: 1 écriture/ },
 };
 const zilState = (page) =>
   page.evaluate(() => {
     const f = document.querySelector("[data-zl]");
     return {
       writes: [...f.querySelectorAll(".writes .w")].map((w) => [w.querySelector(".wr").textContent, [...w.classList].find((c) => c !== "w")]),
-      header: [...f.querySelectorAll(".hdr dd")].map((d) => d.textContent.trim()),
+      // The header in plain words (D30.1): the block, the claim txg (a number or "not claimed"),
+      // replay needed (yes or no, in the page's language), the last replayed record.
+      header: [...f.querySelectorAll(".hdr dd")].map((d, i) => {
+        const t = d.textContent.trim();
+        return i === 1 ? (/^\d+$/.test(t) ? t : "0") : i === 2 ? (/^(yes|oui|sí)$/.test(t) ? "1" : "0") : t;
+      }),
       chain: [...f.querySelectorAll(".chain .blk")].map((b) => [b.querySelector(".bid").textContent, [...b.classList].find((c) => c !== "blk")]),
       data: f.querySelectorAll(".cell.data").length,
       log: [...f.querySelectorAll("[data-log] li")].map((l) => l.textContent.trim().replace(/\s+/g, " ")).join(" | "),
@@ -945,7 +951,7 @@ const zilState = (page) =>
   });
 const zilWant = (m) => ({
   writes: m.writes.map((w) => [w.state, w.status]),
-  header: [m.header.log === null ? null : `b${m.header.log}`, String(m.header.claimTxg), m.header.replayNeeded ? "ZIL_REPLAY_NEEDED" : "0", String(m.header.replaySeq)],
+  header: [m.header.log === null ? null : `b${m.header.log}`, String(m.header.claimTxg), m.header.replayNeeded ? "1" : "0", String(m.header.replaySeq)],
   chain: m.phase !== "running" ? m.disk.map((d) => [`b${d.blk.id}`, d.written ? "written" : "end"])
     : m.kept && !m.lwbs.length ? [[`b${m.kept.id}`, "end"]]
     : m.lwbs.filter((l) => l.blk).map((l) => [`b${l.blk.id}`, l.state === "FLUSH_DONE" ? "written" : "end"]),
@@ -964,15 +970,21 @@ const ZSEQ = [
   { id: "throughput", set: ['[data-pool="slog"]', '[data-bias="throughput"]', '[data-flag="dsync"]'], steps: ["write", "write", "sync", "crash", "import", "mount"], expect: ["viaSync", "wreturns", "claim0"] },
   { id: "no-fsync", set: [], steps: ["write", "crash", "import", "mount"], expect: ["lost"] },
 ];
+// On a phone the sticky step bar can cover a button near the bottom of the screen;
+// a reader scrolls it up, so the check does too.
+const zclick = async (loc) => {
+  await loc.evaluate((e) => e.scrollIntoView({ block: "center" }));
+  await loc.click();
+};
 for (const lang of ["en", "fr"]) {
   for (const vp of ["iphone", "desktop"]) {
     const { ctx, page } = await open(VIEWPORTS[vp], ZR[lang]);
     const fig = page.locator("[data-zl]");
     for (const sq of ZSEQ) {
-      await fig.locator('[data-act="reset"]').click();
+      await zclick(fig.locator('[data-act="reset"]'));
       const m = zilModel.empty();
       for (const sel of sq.set) {
-        await fig.locator(sel).click();
+        await zclick(fig.locator(sel));
         if (sel.includes("pool")) m.pool = { slog: sel.match(/"(\w+)"/)[1] };
         if (sel.includes("bias")) m.logbias = "throughput";
       }
@@ -980,8 +992,8 @@ for (const lang of ["en", "fr"]) {
       const flags = { dsync: sq.set.some((x) => x.includes("dsync")), direct: false };
       const logs = [];
       for (const step of sq.steps) {
-        await fig.locator(`[data-act="${step}"]`).click();
-        await page.waitForFunction(() => !document.querySelector("[data-zl]").hasAttribute("data-busy"), null, { timeout: 60000 });
+        await zclick(fig.locator(`[data-act="${step}"]`));
+        if ((await fig.locator('[data-step="skip"]').getAttribute("aria-disabled")) === "false") await zclick(fig.locator('[data-step="skip"]'));
         ({ write: () => zilModel.write(m, size, flags), fsync: () => zilModel.fsync(m), sync: () => zilModel.sync(m), crash: () => zilModel.crash(m), import: () => zilModel.importPool(m), mount: () => zilModel.mount(m) })[step]();
         const got = await zilState(page);
         const want = zilWant(m);
@@ -1013,11 +1025,11 @@ for (const lang of ["en", "fr"]) {
       for (const size of zilModel.SIZES)
         for (const dsync of [false, true])
           for (const direct of [false, true]) {
-            await fig.locator(`[data-pool="${slog}"]`).click();
-            await fig.locator(`[data-bias="${bias}"]`).click();
-            await fig.locator(`[data-size="${size}"]`).click();
+            await zclick(fig.locator(`[data-pool="${slog}"]`));
+            await zclick(fig.locator(`[data-bias="${bias}"]`));
+            await zclick(fig.locator(`[data-size="${size}"]`));
             for (const [k, v] of [["dsync", dsync], ["direct", direct]])
-              if ((await fig.locator(`[data-flag="${k}"]`).getAttribute("aria-pressed")) !== String(v)) await fig.locator(`[data-flag="${k}"]`).click();
+              if ((await fig.locator(`[data-flag="${k}"]`).getAttribute("aria-pressed")) !== String(v)) await zclick(fig.locator(`[data-flag="${k}"]`));
             const shown = await fig.locator("[data-decision] .verdict .wr").textContent();
             const m = zilModel.empty();
             m.pool = { slog };
@@ -1033,11 +1045,18 @@ for (const lang of ["en", "fr"]) {
 {
   const { ctx, page } = await open({ ...VIEWPORTS.iphone, reducedMotion: "reduce" }, ZR.en);
   const fig = page.locator("[data-zl]");
-  await fig.locator('[data-pool="slog"]').click();
-  await fig.locator('[data-size="131072"]').click();
-  await fig.locator('[data-act="write"]').click();
+  // Each action runs one step per press (D30.1): Show every step finishes it. The first
+  // fsync() creates the log; the second one returns from the log.
+  const act = async (a) => {
+    await zclick(fig.locator(`[data-act="${a}"]`));
+    if ((await fig.locator('[data-step="skip"]').getAttribute("aria-disabled")) === "false") await zclick(fig.locator('[data-step="skip"]'));
+  };
+  await zclick(fig.locator('[data-pool="slog"]'));
+  await zclick(fig.locator('[data-size="131072"]'));
+  for (const a of PRIME) await act(a);
+  await act("write");
   const t0 = Date.now();
-  await fig.locator('[data-act="fsync"]').click();
+  await act("fsync");
   await page.waitForFunction(() => /fsync\(\) returns/.test(document.querySelector("[data-zl] [data-log]").textContent));
   report.reducedMotion.zil = { fsyncMs: Date.now() - t0, running: await page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length) };
   await page.screenshot({ path: join(out, "zil-en-iphone-reduced-motion.png"), fullPage: true });

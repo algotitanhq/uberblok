@@ -4779,6 +4779,144 @@ zil_replay_log_record(zilog_t *zilog, const lr_t *lr, void *zra,
 
 Replay runs at mount ([`module/os/linux/zfs/zfs_vfsops.c#L795-L801`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/os/linux/zfs/zfs_vfsops.c#L795-L801)); without `ZIL_REPLAY_NEEDED`, `zil_replay` only destroys the log ([`module/zfs/zil.c#L4801-L4803`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L4801-L4803)). Otherwise each record of the chain, in order, reaches this function. L4708-L4709: a record already replayed before (`zh_replay_seq`, an earlier interrupted replay) is skipped. L4711-L4712: a record whose txg is older than the claim txg is skipped: that txg synced, its change is already in the tree. Every other record is applied again through the ZPL (`zfs_replay_write` for a write); then `zil_destroy` empties the log ([`module/zfs/zil.c#L4822-L4823`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L4822-L4823)). Without a replay, `zil_destroy` is called with `keep_first`: the header is emptied, then names the chain's first block again under a new chain GUID ([`module/zfs/zil.c#L4181-L4192`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L4181-L4192)), and the next `zil_create` uses that block instead of allocating one ([`module/zfs/zil.c#L1004-L1011`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L1004-L1011), L1032).
 
+**Short excerpts for the question-first room (v1.4, ALG-199).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 11. `zfs_log_write`, the record of one write — module/zfs/zfs_log.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zfs_log.c#L677-L682
+
+```c
+		itx->itx_wr_state = wr_state;
+		lr->lr_foid = zp->z_id;
+		lr->lr_offset = off;
+		lr->lr_length = len;
+		lr->lr_blkoff = 0;
+		BP_ZERO(&lr->lr_blkptr);
+```
+
+Excerpt 4's loop, the fields of the record. L677: how the data travels (excerpt 5, then the downgrade of L645-L647). L678-L680: which file, where, how long: enough to apply the write again. L681-L682: no block pointer yet; a WR_INDIRECT record gets one when its block is written in place (`zfs_get_data`). The record is then queued under the write's txg by `zil_itx_assign` ([L693](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zfs_log.c#L693); `lrc_txg`, [zil.c L2776](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L2776)).
+
+### 12. `zil_write_state`, the data in the record or in place — module/zfs/zil.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L2227-L2245
+
+```c
+	boolean_t indirect = (size >= zfs_immediate_write_sz &&
+	    (size >= blocksize / 2 || !commit));
+
+	if (spa_has_slogs(zilog->zl_spa)) {
+		/* Dedicated slogs: never use indirect */
+		indirect = B_FALSE;
+	} else if (spa_has_special(zilog->zl_spa)) {
+		/* Special vdevs: only when beneficial */
+		boolean_t on_special = (blocksize <=
+		    zilog->zl_os->os_zpl_special_smallblock);
+		indirect &= (on_special || !zil_special_is_slog);
+	}
+
+	if (indirect)
+		return (WR_INDIRECT);
+	else if (commit)
+		return (WR_COPIED);
+	else
+		return (WR_NEED_COPY);
+```
+
+Excerpt 5 after its first test (`logbias=throughput` or Direct I/O: always WR_INDIRECT, L2216-L2217) and its comment. L2227-L2228: indirect only from `zfs_immediate_write_sz`, 32 KiB, and, for a write committed at once, from half a block. L2230-L2232: a pool with a SLOG never logs indirect (`spa_has_slogs` asks whether the log class has a device, not whether it has room). L2233-L2238: special vdevs without a SLOG. L2240-L2245: indirect, or the data copied into the record now (WR_COPIED, committed at once), or copied when the log block is filled (WR_NEED_COPY).
+
+### 13. `zil_commit_impl`, the waiter — module/zfs/zil.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L4097-L4101
+
+```c
+	zil_commit_waiter_t *zcw = zil_alloc_commit_waiter();
+	zil_commit_itx_assign(zilog, zcw);
+
+	uint64_t wtxg = zil_commit_writer(zilog, zcw);
+	zil_commit_waiter(zilog, zcw);
+```
+
+Excerpt 1 without the error path. L4097-L4098: a commit waiter is queued behind every record of the file. L4100: the records are packed into lwbs and the lwbs issued; a dataset without a log first creates one, and `zil_create` waits for a txg to sync ([L1034-L1056](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L1034-L1056)). L4101: the caller sleeps until the lwb holding the waiter is written and the disk caches flushed.
+
+### 14. `zil_lwb_write_issue`, the next block's checksum — module/zfs/zil.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L2086-L2092
+
+```c
+	if (error == 0) {
+		ASSERT3U(BP_GET_BIRTH(bp), ==, txg);
+		BP_SET_CHECKSUM(bp, (nlwb->lwb_flags & LWB_FLAG_SLIM) ?
+		    ZIO_CHECKSUM_ZILOG2 : ZIO_CHECKSUM_ZILOG);
+		bp->blk_cksum = lwb->lwb_blk.blk_cksum;
+		bp->blk_cksum.zc_word[ZIL_ZC_SEQ]++;
+	}
+```
+
+Excerpt 2's last lines. The block just allocated for the next lwb (its pointer is this block's trailer, `zc_next_blk`, L2039) is born in an open txg (L2087), and inherits this block's checksum seed with the sequence word incremented (L2090-L2091). At claim and replay, a block whose checksum does not match that expectation is not part of the chain: the block allocated but never written ends it.
+
+### 15. `zio_alloc_zil`, the log class first — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L4561-L4565
+
+```c
+	/* Try log class (dedicated slog devices) first */
+	error = metaslab_alloc_range(spa, spa_log_class(spa), min_size,
+	    max_size, new_bp, 1, txg, NULL, flags, &io_alloc_list, allocator,
+	    NULL, &alloc_size);
+	*slog = (error == 0);
+```
+
+Excerpt 3's first try. L4561-L4564: a log block is allocated from the log class, the SLOG devices, first. L4565: `slog` records whether that worked; it becomes `LWB_FLAG_SLOG` (zil.c L2118-L2119). On failure, or without a SLOG, the function tries the special embedded log, special, the embedded log reserved on normal vdevs, then normal (L4567-L4595).
+
+### 16. `zil_sync`, freeing log blocks — module/zfs/zil.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L4206-L4214
+
+```c
+	while ((lwb = list_head(&zilog->zl_lwb_list)) != NULL) {
+		zh->zh_log = lwb->lwb_blk;
+		if (lwb->lwb_state != LWB_STATE_FLUSH_DONE ||
+		    lwb->lwb_alloc_txg > txg || lwb->lwb_max_txg > txg)
+			break;
+		list_remove(&zilog->zl_lwb_list, lwb);
+		if (!BP_IS_HOLE(&lwb->lwb_blk))
+			zio_free(spa, txg, &lwb->lwb_blk);
+		zil_free_lwb(zilog, lwb);
+```
+
+Excerpt 8 without the empty-list case. L4207: `zh_log` follows the head of the list. L4208-L4210: the head lwb stays if it is not flushed, or its block or one of its records belongs to a txg later than the one syncing. L4211-L4214: otherwise it leaves the list and its block is freed.
+
+### 17. `zil_claim`, the walk at import — module/zfs/zil.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L1239-L1246
+
+```c
+	if (zh->zh_claim_txg == 0) {
+		(void) zil_parse(zilog, zil_claim_log_block,
+		    zil_claim_log_record, tx, first_txg, B_FALSE);
+		zh->zh_claim_txg = first_txg;
+		zh->zh_claim_blk_seq = zilog->zl_parse_blk_seq;
+		zh->zh_claim_lr_seq = zilog->zl_parse_lr_seq;
+		if (zilog->zl_parse_lr_count || zilog->zl_parse_blk_count > 1)
+			zh->zh_flags |= ZIL_REPLAY_NEEDED;
+```
+
+Excerpt 9's core. L1239-L1241: once per log, `zil_parse` walks the chain from `zh_log` and claims every block (and every block a WR_INDIRECT record points to), so the allocator does not hand them out. L1242: the claim txg is the pool's first txg after import (L1253). L1243-L1244: the highest block and record sequence numbers claimed. L1245-L1246: `ZIL_REPLAY_NEEDED` if a record was found or more than one block followed.
+
+### 18. `zil_replay_log_record`, what is replayed — module/zfs/zil.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zil.c#L4708-L4712
+
+```c
+	if (lr->lrc_seq <= zh->zh_replay_seq)	/* already replayed */
+		return (0);
+
+	if (lr->lrc_txg < claim_txg)		/* already committed */
+		return (0);
+```
+
+Excerpt 10's two tests. L4708-L4709: a record already replayed by an earlier, interrupted replay is skipped. L4711-L4712: a record of a txg older than the claim txg is skipped, its txg synced. Every other record is applied again (`zfs_replay_write` for a write).
+
 **What the animation shows.** (Simplifications and why they stay faithful: `DECISIONS.md` D8.2.)
 - An application writes to a file that already spans several records, so its blocks are 128 KiB (`z_blksz` = `recordsize`, zfs_vnops.c L808-L821). Each `write()` makes a record card (itx) queued in memory under the open txg, whatever the flags — `zfs_log_write` excerpt 4, `zil_itx_assign` zil.c L2714, `lrc_txg` L2776.
 - The card's state is `zil_write_state` (excerpt 5) followed by the downgrade of excerpt 4 (L645-L647), for the toggles "log device" (none, SLOG, SLOG full), `logbias` (latency, throughput), the file opened with `O_DSYNC` (`commit`) or not, `O_DIRECT` (the Direct I/O path only for the 128 KiB write, zfs_vnops.c L296-L299), and the size (4, 16, 48 or 128 KiB). A panel shows the decision and the line that makes it before the write. The pool has no special vdev, so L2233-L2238 is never taken; the model implements it and the unit tests cover it.

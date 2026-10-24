@@ -2,34 +2,27 @@
 import Base from "../../layouts/Base.astro";
 import ZilLab from "../../components/ZilLab.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
 import { room, roomUrl, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D30.1): the question, a plain
+// answer, the figure, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "en";
 const r = room("zil");
 const Z = "module/zfs/zil.c";
 const ZL = "module/zfs/zfs_log.c";
-const VN = "module/zfs/zfs_vnops.c";
 const L = {
-  fsync: gh(VN, 117, 120),
-  commitFlag: gh(VN, 756, 757),
-  writeCommit: gh(VN, 1091, 1092),
-  direct: gh(VN, 1042, 1043),
-  logWrite: gh(ZL, 627, 649),
-  downgrade: gh(ZL, 645, 647),
-  oneBlock: gh(ZL, 648, 649),
-  itxAssign: gh(Z, 2714),
-  lrcTxg: gh(Z, 2776),
+  itxAssign: gh(ZL, 693),
+  tput: gh(Z, 2216, 2217),
   immediate: gh(Z, 2191),
-  maxCopied: gh(Z, 2186),
-  specialIsSlog: gh(Z, 2199),
   hasSlogs: gh("module/zfs/spa_misc.c", 2741, 2744),
-  twice: gh(VN, 1381, 1386),
-  getData: gh(VN, 1388, 1397),
-  dmuSync: gh(VN, 1467, 1468),
-  directBp: gh(VN, 1450, 1458),
-  stateComment: gh("include/sys/zil_impl.h", 39, 82),
+  downgrade: gh(ZL, 645, 647),
+  createWait: gh(Z, 1034, 1056),
+  waiters: gh(Z, 1508, 1524),
   open: gh(Z, 1758),
   close: gh(Z, 1880),
   nextLwb: gh(Z, 1931),
@@ -37,69 +30,55 @@ const L = {
   issued: gh(Z, 2113),
   writeDone: gh(Z, 1605),
   flushDone: gh(Z, 1493),
-  waiters: gh(Z, 1508, 1524),
-  closeAtOnce: gh(Z, 3375, 3379),
-  waiterDone: gh(Z, 1340, 1349),
-  async: gh(Z, 4080),
   nextBlk: gh(Z, 2039),
   slogFlag: gh(Z, 2118, 2119),
-  create: gh(Z, 1022, 1023),
-  chainT: gh("include/sys/zil.h", 92, 97),
-  minBlk: gh("include/sys/zil.h", 99),
-  lrWrite: gh("include/sys/zil.h", 353, 362),
-  maxBlock: gh(Z, 1783),
-  maxLogData: gh(Z, 2164, 2167),
-  seq: gh(Z, 2381),
-  addTxg: gh(Z, 2387),
-  plan: gh(Z, 1789),
-  header: gh("include/sys/zil.h", 63, 71),
-  flags: gh("include/sys/zil.h", 76, 77),
+  allocRest: gh("module/zfs/zio.c", 4567, 4595),
   vdevLogMg: gh("module/zfs/vdev.c", 1571, 1578),
   clean: gh(Z, 2862),
-  spaClaim: gh("module/zfs/spa.c", 5697, 5699),
   parse: gh(Z, 499, 572),
   claimWrite: gh(Z, 634, 655),
+  spaClaim: gh("module/zfs/spa.c", 5697, 5699),
+  flags: gh("include/sys/zil.h", 76, 77),
   mount: gh("module/os/linux/zfs/zfs_vfsops.c", 795, 801),
   noReplay: gh(Z, 4801, 4803),
   destroy: gh(Z, 4822, 4823),
-  bulk: gh(Z, 145),
-  bulkUse: gh(Z, 1988, 1992),
-  fallback: gh(Z, 4104, 4117),
-  shortDirect: gh(VN, 296, 299),
-  blksz: gh(VN, 808, 821),
   keepFirst: gh(Z, 4181, 4192),
   reuse: gh(Z, 1004, 1011),
-  createWait: gh(Z, 1034, 1056),
-  createCall: gh(Z, 3157, 3164),
-  synced: gh(Z, 3209),
-  dropSynced: gh(Z, 3280, 3283),
-  keepWhy: gh(Z, 1074, 1078),
-  slogFirst: gh("module/zfs/zio.c", 4561, 4565),
 };
 ---
 
 <Base
   lang={lang}
   roomId="zil"
-  title="ZIL and SLOG · Uberblok"
-  description="How OpenZFS 2.4.4 makes fsync() return before the txg syncs: a per-dataset intent log of records, written to a chain of log blocks on a SLOG or on the pool, freed when the txg syncs and replayed after a crash. Interactive, with the code."
+  title="What does fsync() wait for? The ZIL and the SLOG · Uberblok"
+  description="fsync() on ZFS waits for a few records written to an intent log, not for the txg: the log is a chain of blocks on a SLOG or on the pool, freed once the txg syncs and replayed after a power cut. Interactive, with the OpenZFS code."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Room {roomNumber(r.id)}</p>
-      <h1>{r.title.en}</h1>
-      <div class="prose problem">
+      <p class="kicker">Room {roomNumber(r.id)} · {r.title.en}</p>
+      <h1>What does fsync() wait for?</h1>
+      <div class="prose answer">
         <p class="lead">
-          A program that calls <code>fsync()</code> asks for one promise: when the call returns, its data survives a power
-          cut. A database asks for it on every commit.
+          A program that calls fsync on a file asks for one promise: when the call returns, the data it wrote survives a
+          power cut. A database asks for it on every commit. ZFS writes changes to the pool in batches called transaction
+          groups, or txgs, and commits a txg only every few seconds, after rewriting every block on the path from the
+          change up to the root of the pool. Waiting for that on every fsync would be slow, and would write far more than
+          the program changed.
         </p>
         <p>
-          ZFS writes its changes in <a href={roomUrl(lang, "txg")}>transaction groups</a>, and a txg is synced only every few
-          seconds. Forcing a txg sync for each <code>fsync()</code> would rewrite large parts of the tree for a few bytes of
-          data, and make the caller wait for all of it. ZFS does something else. Each dataset keeps an <em>intent log</em>,
-          the ZIL: every change is noted as a small record, and on <code>fsync()</code> the records are written at once to a
-          chain of log blocks. Once the txg holding the real change has synced, they are no longer needed and are thrown away.
-          The log is read only after a crash. A separate log device, a <em>SLOG</em>, gives those blocks a home of their own.
+          So each dataset also keeps an intent log, the ZIL. Every write leaves a small record of itself in memory: which
+          file, where, how long, and often the data. When the program calls fsync, ZFS writes that file's records at once
+          to a log block on disk, waits for the disk to flush its cache, and returns. The txg still writes the change to
+          the pool later, as usual, and once it has, the log block is no longer needed and is freed. On a pool without a
+          separate log device, a large write is not copied into the log: its data is written once, in place in the pool,
+          and the record only points to it.
+        </p>
+        <p>
+          The log is read only after a crash. When the pool is imported again, ZFS walks the chain of log blocks and keeps
+          the pool from reusing them. When the dataset is mounted, it applies again every record whose txg never reached
+          the pool, so every write that fsync returned for comes back. A write that was never synced or logged is lost,
+          which is what its program accepted when it did not call fsync. A separate log device, called a SLOG, gives the
+          log blocks a device of their own; what it gains depends on how fast that device is.
         </p>
       </div>
     </header>
@@ -108,358 +87,317 @@ const L = {
       <h2 id="lab"><span class="n">1</span> Write, fsync, cut the power</h2>
       <div class="prose">
         <p>
-          Below, a fresh pool and one file, already several records long, whose blocks are 128 KiB; txg 100 is open, and the
-          dataset has no log yet. Choose a log device,
-          <code>logbias</code>, how the file is opened and a size: the first panel says what the code will decide for the
-          next <code>write()</code>, and why. <code>write()</code> leaves a record in memory; <code>fsync()</code> writes it
-          to the log, block by block, and returns once the disk has flushed. Sync the txg and the log blocks are freed. Cut
-          the power whenever you like, then import the pool and mount the dataset.
+          The figure is a new pool with one file whose blocks are 128 KiB. Txg 100 is open and the dataset has no log yet.
+          Press <code>write()</code>, then <code>fsync()</code>, then Next step until <code>fsync()</code> returns. Each press
+          shows one step: the line at the bottom of the figure says what it did, and a ring marks the part that changed.
+          This first <code>fsync()</code> creates the log, which takes a txg sync, so it logs nothing: the write is already
+          in the pool when the call returns.
         </p>
         <p>
-          The first <code>fsync()</code> creates the log, and that first commit waits for the txg to sync, so it logs
-          nothing; from the second on, records go into the log. So start with a write and <code>fsync()</code>, then try a
-          4 KiB write and <code>fsync()</code> without a SLOG, then cut the power; the same with a sync before the cut; 128 KiB
-          with and without a SLOG; <code>logbias=throughput</code>; a write without <code>fsync()</code> before the cut.
+          Then press <code>write()</code> and <code>fsync()</code> again. This time the record goes into a log block, and
+          <code>fsync()</code> returns while txg 101 is still open. Cut the power, import the pool and mount the dataset,
+          and the record is replayed. Start again, repeat both pairs of <code>write()</code> and <code>fsync()</code>, and
+          press Sync txg 101 before the power cut: the log has nothing left to replay. A <code>write()</code> made after
+          the last <code>fsync()</code> and before the cut is lost.
+        </p>
+        <p>
+          The panel at the top says what the next <code>write()</code> will put in its record. Try 128 KiB without a SLOG and
+          then with one, on a dataset that already has a log: after Start again or a replay, the next
+          <code>fsync()</code> creates the log again and logs nothing. Without a SLOG, the data is written in place and the record only points to it. With one, all the
+          data goes into the log, split across two log blocks. With <code>logbias=throughput</code> the data is always
+          written in place.
         </p>
       </div>
       <ZilLab lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">The idea, at three depths</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">In the code</h2>
+      <p class="prose">
+        The figure follows nine places in the source. Open a Source note to see the lines, taken from release zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>In one sentence</h3>
-        <p class="lead prose">
-          ZFS makes <code>fsync()</code> return early by writing at once only a record of the change, to a log kept per
-          dataset, and the change itself later with its txg; the log is thrown away once that txg has synced, and read only
-          after a crash.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>In one paragraph</h3>
+      <div class="step">
+        <h3>A record for each write</h3>
         <p class="prose">
-          Every <code>write()</code> makes an in-memory record, an <em>itx</em>, under the open txg.
-          <code>fsync()</code>, or a write to a file opened with <code>O_DSYNC</code>, commits the file’s records: they are
-          packed into <em>log write blocks</em>, lwbs, each written as one block whose trailer points to the next block, so
-          the log is a chain; the call returns when the block holding its last record is written and the disk caches are
-          flushed. How much of the data goes into the log is decided write by write: copied into the record
-          (WR_COPIED), copied when the block is written (WR_NEED_COPY), or written in place in the pool with the record
-          only pointing to it (WR_INDIRECT), so that large data is not written twice. With a SLOG, unless
-          <code>logbias=throughput</code> or Direct I/O, the data always goes into the log. The log’s blocks come from the SLOG first; a pool without one takes them from space reserved on its
-          ordinary vdevs. When a txg syncs, the log blocks whose records all belong to synced txgs are freed. After a crash,
-          importing the pool claims the chain, and mounting the dataset replays every record whose txg had not synced.
+          <code>zfs_log_write</code> runs on every write. It fills a record, an itx, with what is needed to apply the write
+          again: which file, where, how long, and how the data travels. Nothing is written to disk yet.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zfs_log_write</code>, zfs_log.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={ZL}
+            from={677}
+            to={682}
+            symbol="zfs_log_write"
+            notes={[
+              { from: 677, text: "How the data travels: copied into the record, copied into the log block later, or written in place, as the next note decides." },
+              { from: 678, to: 680, text: "The file, the offset and the length: enough to apply the write again after a crash." },
+              {
+                from: 681,
+                to: 682,
+                text: `No block pointer yet: a record whose data is written in place gets one when that block is written. The record is then <a href="${L.itxAssign}">queued under the write's txg</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>In detail</h3>
-        <div class="prose">
-          <p>
-            <strong>A record per write.</strong> In <code>zfs_write</code>, every write is logged by
-            <a href={L.logWrite}><code>zfs_log_write</code></a>, which makes an itx and <a href={L.itxAssign}>queues it</a>
-            under the write’s txg, <a href={L.lrcTxg}><code>lrc_txg</code></a>. Nothing is written yet. If the file was
-            opened with <code>O_SYNC</code> or <code>O_DSYNC</code>, or the dataset has <code>sync=always</code>, the write
-            is <a href={L.commitFlag}>committed at once</a>: <code>zfs_write</code> <a href={L.writeCommit}>calls
-            <code>zil_commit</code></a> before it returns. Otherwise the record waits for <code>fsync()</code>, which
-            <a href={L.fsync}>calls the same function</a>. What the record holds is decided first:
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={2212}
-          to={2246}
-          symbol="zil_write_state"
-          notes={[
-            {
-              from: 2216,
-              to: 2217,
-              text: `<code>logbias=throughput</code>, or a write that took the <a href="${L.direct}">Direct I/O path</a>: always indirect, SLOG or not. The log block that holds the record still <a href="${L.slogFirst}">comes from the SLOG first</a>: <code>logbias</code> decides where the data goes, not the log.`,
-            },
-            {
-              from: 2219,
-              to: 2228,
-              text: `Indirect only from <a href="${L.immediate}">32 KiB</a>, and, for a write committed at once, only from half a block, 64 KiB for the figure’s file, because, as the comment above says, the next write might rewrite the same block.`,
-            },
-            {
-              from: 2230,
-              to: 2232,
-              text: `A pool with a SLOG never logs indirect. <a href="${L.hasSlogs}"><code>spa_has_slogs</code></a> asks whether the log class has a device, not whether it has room: a full SLOG still counts.`,
-            },
-            {
-              from: 2233,
-              to: 2238,
-              text: `Special vdevs without a SLOG: indirect only when the file’s blocks go to the special class (or <a href="${L.specialIsSlog}"><code>zil_special_is_slog</code></a> is 0). The figure’s pool has no special vdev.`,
-            },
-            {
-              from: 2240,
-              to: 2245,
-              text: `Indirect: the record carries a pointer. Otherwise WR_COPIED, the data copied into the record now, when the write is committed at once; or WR_NEED_COPY, the data <a href="${L.getData}">read from the file</a> when the log block is filled.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Then <code>zfs_log_write</code> <a href={L.downgrade}>turns WR_COPIED into WR_NEED_COPY</a> when the data is over
-            <a href={L.maxCopied}>7680 bytes</a>, since a copied record must fit in one log block, and
-            <a href={L.oneBlock}>cuts an indirect write at each file block</a>. <code>O_DIRECT</code> takes the Direct I/O path only for a write of at least a file block: <a href={L.shortDirect}>a shorter one goes through the ARC</a>, so in the figure only the 128 KiB write with <code>O_DIRECT</code> is Direct I/O. For WR_INDIRECT, the comment of
-            <code>zfs_get_data</code> gives the reason: <a href={L.twice}>“for large writes it’s cheaper to sync the data and
-            get a pointer to it (indirect) so that we don’t have to write the data twice”</a>. The block is written in place
-            <a href={L.dmuSync}>by <code>dmu_sync</code></a>, or was already written by the
-            <a href={L.directBp}>Direct I/O write</a>. In the figure, the panel at the top runs this function for every
-            combination of the buttons; the badge on each write is its result.
-          </p>
-          <p><strong>Committing.</strong> <code>zil_commit_impl</code>, called by <code>fsync()</code>:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={4097}
-          to={4122}
-          symbol="zil_commit_impl"
-          notes={[
-            {
-              from: 4097,
-              to: 4098,
-              text: `A <em>commit waiter</em> is queued as a special itx, behind every record of the file (the file’s other records were <a href="${L.async}">moved to the sync list</a> just before).`,
-            },
-            { from: 4100, text: "The pending records are packed into lwbs and the lwbs issued." },
-            {
-              from: 4101,
-              text: `The caller sleeps until the lwb holding its waiter is written and flushed (<a href="${L.waiterDone}"><code>zil_commit_waiter_done</code></a>).`,
-            },
-            {
-              from: 4104,
-              to: 4117,
-              text: "On a log write error, fall back to waiting for a full txg sync: just as durable, only slower. The figure has no I/O error.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>An lwb’s life.</strong> Each lwb goes through seven states, in this order:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="include/sys/zil_impl.h"
-          from={83}
-          to={92}
-          symbol="lwb_state_t"
-          notes={[
-            { from: 84, to: 85, text: `New, then <a href="${L.open}">opened</a> on its first record.` },
-            {
-              from: 86,
-              text: `<a href="${L.close}">Closed</a> when full, or at the end of a commit, which also <a href="${L.nextLwb}">creates the next lwb</a>, still empty.`,
-            },
-            {
-              from: 87,
-              to: 88,
-              text: `<a href="${L.ready}">Ready</a> when filled with its data; <a href="${L.issued}">issued</a> once the next block is allocated.`,
-            },
-            {
-              from: 89,
-              to: 90,
-              text: `<a href="${L.writeDone}">Write done</a>, then <a href="${L.flushDone}">flush done</a> when the disk caches are flushed: the waiters on it <a href="${L.waiters}">are woken</a> and <code>fsync()</code> returns.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            The comment above the enum <a href={L.stateComment}>describes the transitions</a> and the locks they need. With
-            one writer and nothing else in flight, as in the figure, the lwb holding a commit is
-            <a href={L.closeAtOnce}>closed and issued at once</a> rather than kept open for more records. The figure draws
-            each state on each lwb, in the memory panel.
-          </p>
-          <p><strong>Packing.</strong> How records go into lwbs:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={2334}
-          to={2369}
-          symbol="zil_lwb_assign"
-          notes={[
-            {
-              from: 2334,
-              to: 2346,
-              text: "A record that does not fit closes the lwb and opens the next. The long test lets a WR_NEED_COPY record start in an almost full block only when that saves a split.",
-            },
-            { from: 2348, to: 2357, text: "A WR_COPIED record must fit whole: it is never split." },
-            {
-              from: 2359,
-              to: 2369,
-              text: "A WR_NEED_COPY record larger than the room left is split: a clone takes what fits, the rest goes on to the next block.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Each record then gets the next sequence number, <a href={L.seq}><code>lrc_seq</code></a>, and the lwb keeps
-            <a href={L.addTxg}>the highest txg of its records</a>. A write record’s header, <a href={L.lrWrite}><code>lr_write_t</code></a>,
-            is 192 bytes; a log block’s trailer, <a href={L.chainT}><code>zil_chain_t</code></a>, 184 bytes; a log block at
-            most <a href={L.maxBlock}>128 KiB</a>. So a 128 KiB block holds 130,888 bytes of records, and a 128 KiB WR_NEED_COPY write
-            is <a href={L.maxLogData}>130,696 bytes</a> in one lwb and 376 bytes in the next: the figure shows it with a SLOG.
-          </p>
-          <p><strong>The chain, and where the SLOG comes in.</strong> When an lwb is issued, it allocates the block of the <em>next</em> lwb:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={2073}
-          to={2092}
-          symbol="zil_lwb_write_issue"
-          notes={[
-            {
-              from: 2073,
-              to: 2074,
-              text: `The next block is allocated now, and its pointer goes into this block’s trailer, <a href="${L.nextBlk}"><code>zc_next_blk</code></a>: each block points to the next, from <code>zh_log</code> in the header on.`,
-            },
-            { from: 2087, text: "The new block is born in an open txg." },
-            {
-              from: 2088,
-              to: 2091,
-              text: "It inherits this block’s checksum seed, with the sequence word incremented: at replay, that is how a valid next block is told from old data.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            The first block of a chain, <a href={L.minBlk}>4 KiB</a>, comes from <a href={L.create}><code>zil_create</code></a>,
-            through the same allocator, <code>zio_alloc_zil</code>:
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/zio.c"
-          from={4561}
-          to={4595}
-          symbol="zio_alloc_zil"
-          notes={[
-            {
-              from: 4561,
-              to: 4565,
-              text: `The log class, the SLOG devices, first. Success sets <code>slog</code>, which becomes <a href="${L.slogFlag}"><code>LWB_FLAG_SLOG</code></a> on the lwb.`,
-            },
-            { from: 4567, to: 4580, text: "Then log space reserved on special vdevs, and the special class." },
-            {
-              from: 4582,
-              to: 4587,
-              text: `Then the <em>embedded log</em>: space every ordinary top-level vdev <a href="${L.vdevLogMg}">reserves for the ZIL</a>. A pool without a SLOG, or with a full one, and without special vdevs, logs there.`,
-            },
-            { from: 4589, to: 4595, text: "Last, the normal class." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>The first commit waits for a txg.</strong> <code>zil_create</code> is called by the commit
-            <a href={L.createCall}>when the dataset has no log</a>. It cannot write the new block into <code>zh_log</code>
-            itself: the header changes only in syncing context. So it allocates the block in a transaction and
-            <a href={L.createWait}>waits for that txg to sync</a>. The writes of that txg are then in the tree, so the commit
-            <a href={L.synced}>finds their txg synced</a> and <a href={L.dropSynced}>destroys their itxs</a> instead of logging
-            them; only the commit waiter goes into the first lwb. The first commit on a new log, an <code>fsync()</code> or an
-            <code>O_DSYNC</code> write, therefore costs a txg sync, and that is <a href={L.keepWhy}>why a log with nothing to replay keeps its first block</a>.
-          </p>
-          <p>
-            In the figure, every allocation lists the classes it tried. The code says where a log block goes, not how fast the
-            device is: what a SLOG buys depends on the device.
-          </p>
-          <p><strong>When the txg syncs.</strong> In syncing context, for each dataset whose log changed:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={4206}
-          to={4224}
-          symbol="zil_sync"
-          notes={[
-            { from: 4207, text: "The header’s <code>zh_log</code> follows the head of the list." },
-            {
-              from: 4208,
-              to: 4210,
-              text: "An lwb is freed once it is flushed, every record in it belongs to a synced txg, and its own block was allocated in this txg or earlier. The first that is not stops the loop.",
-            },
-            { from: 4211, to: 4214, text: "Its block goes back to the allocator." },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            The records of a synced txg that were never written to the log are simply dropped by
-            <a href={L.clean}><code>zil_clean</code></a>: the txg made them durable. In the figure, freed blocks are greyed
-            out and crossed through.
-          </p>
-          <p><strong>After a crash: claim.</strong> At import, in the pool’s <a href={L.spaClaim}>first txg</a>, for each dataset:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={1232}
-          to={1253}
-          symbol="zil_claim"
-          notes={[
-            {
-              from: 1239,
-              to: 1241,
-              text: `<a href="${L.parse}"><code>zil_parse</code></a> walks the chain from <code>zh_log</code>, claiming each block so that the allocator does not hand it out again, and <a href="${L.claimWrite}">the blocks WR_INDIRECT records point to</a>. The walk ends at the block allocated but never written: its checksum does not match.`,
-            },
-            { from: 1242, text: "The claim txg: the pool’s first txg." },
-            {
-              from: 1245,
-              to: 1246,
-              text: `<a href="${L.flags}"><code>ZIL_REPLAY_NEEDED</code></a> if a record was found, or more than one block followed. The walk counts the unwritten last block, so a log with nothing in it counts one.`,
-            },
-            { from: 1253, text: "That first txg is the last synced txg plus one." },
-          ]}
-        />
-        <div class="prose after">
-          <p><strong>Replay.</strong> At mount, <a href={L.mount}><code>zil_replay</code></a> runs each record through:</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={Z}
-          from={4696}
-          to={4712}
-          symbol="zil_replay_log_record"
-          notes={[
-            { from: 4708, to: 4709, text: "A record already replayed by an earlier, interrupted replay is skipped." },
-            {
-              from: 4711,
-              to: 4712,
-              text: "A record of a txg older than the claim txg is skipped: that txg synced, the change is already in the tree. Every other record is applied again.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Without <code>ZIL_REPLAY_NEEDED</code>, <code>zil_replay</code> <a href={L.noReplay}>only destroys the log</a>,
-            keeping its first block: the emptied header <a href={L.keepFirst}>names it again</a>, under a new chain GUID, and
-            the next commit <a href={L.reuse}>writes there</a> without allocating. Otherwise it replays, then
-            <a href={L.destroy}>destroys the log</a>. The header that holds all this,
-            <a href={L.header}><code>zil_header_t</code></a>, lives in the dataset: <code>zh_claim_txg</code>,
-            <code>zh_replay_seq</code>, <code>zh_log</code>, the claimed sequence numbers and the flags. So a crash before the
-            sync brings back every record of the unsynced txg; a crash after it finds a log with nothing to replay, and a
-            write that was never <code>fsync()</code>ed and never synced is lost, as its program allowed. After a replay the
-            whole log is destroyed, so the next commit creates a new one and waits for a txg again.
-          </p>
-        </div>
+      <div class="step">
+        <h3>In the record, or in place</h3>
+        <p class="prose">
+          <code>zil_write_state</code> decides how much of the data the record carries. A large block written once, in
+          place, costs less than the same data written to the log and then to the pool, except when the pool has a SLOG.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_write_state</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={2227}
+            to={2245}
+            symbol="zil_write_state"
+            notes={[
+              {
+                from: 2227,
+                to: 2228,
+                text: `In place only from <a href="${L.immediate}">32 KiB</a> and, for a write committed at once (<code>O_DSYNC</code>), only from half a block, since the next write might rewrite the same block. Before this test, <a href="${L.tput}"><code>logbias=throughput</code> or Direct I/O</a> always returns WR_INDIRECT.`,
+              },
+              {
+                from: 2230,
+                to: 2232,
+                text: `A pool with a SLOG never writes in place. <a href="${L.hasSlogs}"><code>spa_has_slogs</code></a> asks whether the log class has a device, not whether it has room: a full SLOG still counts.`,
+              },
+              { from: 2233, to: 2238, text: "Special vdevs without a SLOG. The figure's pool has none." },
+              {
+                from: 2240,
+                to: 2245,
+                text: `WR_INDIRECT, written in place; WR_COPIED, copied into the record now, for a write committed at once; otherwise WR_NEED_COPY, copied into the log block when it is filled. A WR_COPIED write <a href="${L.downgrade}">over 7,680 bytes</a> becomes WR_NEED_COPY, since a copied record must fit in one log block.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>fsync() waits for one log block</h3>
+        <p class="prose">
+          <code>fsync()</code> calls <code>zil_commit</code>, and <code>zil_commit_impl</code> does the work: it writes the
+          file's records and sleeps until the block that holds the last of them is on stable storage.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_commit_impl</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={4097}
+            to={4101}
+            symbol="zil_commit_impl"
+            notes={[
+              { from: 4097, to: 4098, text: "A commit waiter is queued behind every record of the file." },
+              {
+                from: 4100,
+                text: `The records are packed into lwbs, log write blocks, and the lwbs are issued. A dataset with no log creates one first, and <a href="${L.createWait}">waits for a txg to sync</a> so that the header can name its first block: the first commit on a new log costs a txg.`,
+              },
+              { from: 4101, text: `The caller sleeps until the lwb that holds its waiter is written and <a href="${L.waiters}">the disk caches are flushed</a>.` },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>The seven states of an lwb</h3>
+        <p class="prose">
+          An lwb is a log block being built in memory. The figure marks its state on each lwb, in the order of
+          <code>lwb_state_t</code>.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>lwb_state_t</code>, zil_impl.h</Fragment>
+          <Excerpt
+            lang={lang}
+            path="include/sys/zil_impl.h"
+            from={83}
+            to={92}
+            symbol="lwb_state_t"
+            notes={[
+              { from: 84, to: 85, text: `New, then <a href="${L.open}">opened</a> by its first record.` },
+              {
+                from: 86,
+                text: `<a href="${L.close}">Closed</a> when full, or at the end of a commit, which also <a href="${L.nextLwb}">creates the next lwb</a>, still empty.`,
+              },
+              {
+                from: 87,
+                to: 88,
+                text: `<a href="${L.ready}">Ready</a> once its records are filled in; <a href="${L.issued}">issued</a> once the next block is allocated.`,
+              },
+              {
+                from: 89,
+                to: 90,
+                text: `<a href="${L.writeDone}">Write done</a>, then <a href="${L.flushDone}">flush done</a> once the disk caches are flushed: the commits waiting on it return.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Each block names the next</h3>
+        <p class="prose">
+          Before an lwb is written, <code>zil_lwb_write_issue</code> allocates the block of the next lwb and puts its
+          address in this block's trailer. The log is a chain that starts at the header.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_lwb_write_issue</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={2086}
+            to={2092}
+            symbol="zil_lwb_write_issue"
+            notes={[
+              { from: 2087, text: `The next block, whose pointer <a href="${L.nextBlk}">goes into this block's trailer</a>, is born in an open txg.` },
+              {
+                from: 2088,
+                to: 2091,
+                text: "It takes this block's checksum seed, with the sequence word incremented. After a crash, the next block must match that checksum. The block that was allocated but never written does not, and ends the chain.",
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>The SLOG first</h3>
+        <p class="prose">
+          <code>zio_alloc_zil</code> allocates every log block, the first one of a chain included. It tries the SLOG first.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zio_alloc_zil</code>, zio.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path="module/zfs/zio.c"
+            from={4561}
+            to={4565}
+            symbol="zio_alloc_zil"
+            notes={[
+              { from: 4561, to: 4564, text: "The log class, the SLOG devices, first." },
+              {
+                from: 4565,
+                text: `<code>slog</code> records whether that worked; it becomes <a href="${L.slogFlag}"><code>LWB_FLAG_SLOG</code></a> on the lwb. Otherwise the function <a href="${L.allocRest}">tries, in order</a>, the log space on special vdevs, the special vdevs, the log space every normal vdev <a href="${L.vdevLogMg}">sets aside for the ZIL</a>, then the normal vdevs. <code>logbias</code> does not change this order: with <code>throughput</code> the data is written in place, but the log block still comes from the SLOG.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>When the txg syncs, the log is freed</h3>
+        <p class="prose">
+          Once a txg has synced, the records of its writes are no longer needed. <code>zil_sync</code> runs during that
+          sync and frees log blocks from the head of the chain.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_sync</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={4206}
+            to={4214}
+            symbol="zil_sync"
+            notes={[
+              { from: 4207, text: "The header's <code>zh_log</code>, where the chain starts, follows the head of the list." },
+              {
+                from: 4208,
+                to: 4210,
+                text: "An lwb stays if it is not flushed yet, or if its block or one of its records belongs to a later txg. The first one that stays stops the loop.",
+              },
+              {
+                from: 4211,
+                to: 4214,
+                text: `Otherwise its block is freed. Records of the synced txg that never reached a log block are <a href="${L.clean}">dropped from memory</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>After a power cut, the import claims the chain</h3>
+        <p class="prose">
+          At import, in the pool's first txg, <code>zil_claim</code> walks each dataset's chain. It only marks the blocks
+          and counts the records; nothing is replayed yet.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_claim</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={1239}
+            to={1246}
+            symbol="zil_claim"
+            notes={[
+              {
+                from: 1239,
+                to: 1241,
+                text: `<a href="${L.parse}"><code>zil_parse</code></a> walks the chain from <code>zh_log</code> and claims each block, so that the allocator does not hand it out again, and <a href="${L.claimWrite}">the blocks that WR_INDIRECT records point to</a>.`,
+              },
+              { from: 1242, text: `The claim txg: the pool's first txg, <a href="${L.spaClaim}">the last synced one plus one</a>.` },
+              { from: 1243, to: 1244, text: "The highest block and record numbers claimed." },
+              {
+                from: 1245,
+                to: 1246,
+                text: `<a href="${L.flags}"><code>ZIL_REPLAY_NEEDED</code></a> if a record was found, or more than one block followed. The unwritten last block counts, so a log with nothing in it counts one.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>The mount replays what the txg did not keep</h3>
+        <p class="prose">
+          When the dataset is mounted, <code>zil_replay</code> walks the chain again and passes each record to
+          <code>zil_replay_log_record</code>, which skips what is already in the pool.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>zil_replay_log_record</code>, zil.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={Z}
+            from={4708}
+            to={4712}
+            symbol="zil_replay_log_record"
+            notes={[
+              { from: 4708, to: 4709, text: `A record already replayed by an earlier, interrupted replay is skipped. The mount <a href="${L.mount}">calls <code>zil_replay</code></a>.` },
+              {
+                from: 4711,
+                to: 4712,
+                text: `A record of a txg older than the claim txg is skipped: that txg synced, so its change is in the pool. Every other record is applied again, then <a href="${L.destroy}">the log is destroyed</a>. With nothing to replay, <code>zil_replay</code> <a href="${L.noReplay}">only destroys the log</a> and <a href="${L.keepFirst}">keeps its first block</a>, which the next commit <a href="${L.reuse}">writes into</a> without waiting for a txg.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">What the figure leaves out</h2>
       <p class="prose muted">
-        The figure runs the functions above on one file of one dataset, with one writer and one txg in flight, synced at once
-        in one pass. The file already spans several records, so its blocks are 128 KiB; a file of a single block smaller
-        than <code>recordsize</code> <a href={L.blksz}>has a smaller block</a>, and the half-block rule uses it. The first block of a new chain is 4 KiB, as in the code; every later log block is
-        128 KiB, where the code chooses each block’s size from the burst of records
-        (<a href={L.plan}><code>zil_lwb_plan</code></a>). So in a real chain records split at other places, and the byte
-        counts in the figure are those of 128 KiB blocks. Each <code>write()</code> starts at the beginning of a file block.
-        There is no I/O error, so no <a href={L.fallback}>fallback to <code>txg_wait_synced</code></a>; the flush is one step
-        for the whole lwb, without the per-vdev flush tree; the commit timeout never fires, because one writer closes its lwb
-        at once. Writes over <a href={L.bulk}><code>zil_slog_bulk</code></a> per commit, 64 MiB, go to a SLOG at
-        <a href={L.bulkUse}>a lower priority</a>; the Slim ZIL layout and encryption are not drawn. None of these changes a
-        write state, a class, or which writes are replayed. When a txg syncs, see <a href={roomUrl(lang, "txg")}>Transaction groups</a>;
-        how the classes share the pool’s space, <a href={roomUrl(lang, "metaslabs")}>Metaslabs and space maps</a>.
+        The figure runs the functions above on one file of one dataset, with one writer and one txg in flight, synced at
+        once in one pass. The power is cut between two actions, never in the middle of one. The file already spans several
+        records, so its blocks are 128 KiB; a file of a single block smaller than <code>recordsize</code> has a smaller
+        block, and the half-block rule uses it. The first block of a new chain is 4 KiB, as in the code; every later log
+        block is 128 KiB, where the code sizes each block from the burst of records (<code>zil_lwb_plan</code>). So in a real
+        chain records split at other places, and the byte counts in the figure are those of 128 KiB blocks. Each
+        <code>write()</code> starts at the beginning of a file block. There is no I/O error, so the commit never falls back
+        to waiting for a txg sync; the flush is one step for the whole lwb, without the per-vdev flush tree; the commit
+        timeout never fires, because one writer closes its lwb at once. Writes of more than 64 MiB per commit
+        (<code>zil_slog_bulk</code>) go to a SLOG at a lower priority; the Slim ZIL layout and encryption are not drawn.
+        None of these changes how a write is logged, where a log block goes, or which writes are replayed.
+        <a href={roomUrl(lang, "txg")}>Transaction groups</a> explains when a txg syncs, and
+        <a href={roomUrl(lang, "metaslabs")}>Metaslabs and space maps</a> how the classes share the pool's space.
       </p>
     </section>
   </article>
@@ -474,7 +412,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -483,10 +421,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -494,8 +432,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

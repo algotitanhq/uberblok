@@ -2651,6 +2651,57 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   gains the two damage states, and the first read step says what each damaged child holds of
   the block, so damaging a parity-only or empty child explains why nothing is rebuilt.
 
+## v1.4 vdevs room (ALG-191)
+
+### D26.1 The vdevs room as a question; the figure says where each block landed
+
+- **Context.** Fourth room of the D21.1 roll-out ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 14 excerpts (411 lines of code), the most of any room, and 93 links to GitHub
+  in each language: 48 in the prose, 7 in the figure's first state (more after each action),
+  38 in the excerpts and their notes. The issue asks for a figure where the reader builds a
+  pool layout and sees where each kind of block goes.
+- **Question.** "Where does ZFS put a block in my pool?" (« Où ZFS range-t-il un bloc dans mon
+  pool ? », « ¿Dónde pone ZFS un bloque en mi pool? »). The answer goes from the layouts an
+  operator builds (data vdevs, log, special, dedup, a disk being replaced) to the two choices
+  ZFS makes for each block: a class by the kind of block, then a path down the tree, where
+  each node passes the I/O on with its own functions and a replacement is a temporary mirror.
+- **Figure.** `VdevLab` is improved, not rebuilt; the model (`src/lib/vdevs.ts`) is unchanged.
+  The line that says what the last action did moves from under the panels to right under the
+  controls, and shows from the start (the default pool's last block). The last block's panel
+  and the classes table sit beside the tree from 60rem, so a press and its effect share the
+  screen; the selected node's table and the spares go below. After a write, the top-level
+  vdevs that got a copy take a ring and their block count the accent fill (other counts are
+  outlined), and the class row of the block is marked in the table, until the next action.
+  These are classes, not animations, so they read the same under reduced motion. A key under
+  the tree lists every look from the start. The narration says "copies" where it said DVAs
+  and names no function (the class steps say "The special class: it is full", not
+  `metaslab_alloc` and `ENOSPC`); the walk down the tree keeps the `io_start` of each node,
+  which is the room's point. The list of reasons why buttons are disabled goes: a disabled
+  button says its reason on its press, as in the tree room (D22.1). No code links in the
+  figure (D21.1). Without script, the first state and the text version show as before.
+- **Code.** Nine Source notes, 99 lines (`ANALYSIS.md` vdevs room, excerpts 18 to 26, all
+  short cuts of excerpts 2, 4, 5, 8, 9, 10 to 13 and 16, checked against `zfs-2.4.4`): the
+  ops table, the mirror's `io_start`, `spa_preferred_class`, the class fallback, the next
+  copy on the next vdev, the replacing table, `vdev_add_parent`, the end of the resilver and
+  the dRAID column placement. The "three depths" section is gone, as in the other rooms. Left
+  out of the notes: `struct vdev`, `vdev_metaslab_group_create` and the embedded log classes,
+  `spa_vdev_attach`, the dRAID permutation generator (each is linked from a note, or stays in
+  `ANALYSIS.md`).
+- **Rejected.** Dropping the function names from the walk down the tree: "each node passes it
+  on with its own function" is what the room teaches, and the names are the evidence. A
+  sticky bar for phones as in the TXG room (D24.1): here the line under the controls already
+  says the effect in words; left to the design review. Rebuilding the figure around one pool
+  layout builder: the issue asks to improve the existing figure.
+- **Design review** ([ALG-191](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-191)). After a press, the ring and the
+  class row were 400 to 1,050 px below the fold. The tree is capped at 24rem, near its natural
+  width (12 px labels instead of 17); the classes table now comes before the last block's panel
+  beside the tree; after a write or a read, the first vdev it reached is scrolled into view by the
+  least amount if it is off screen (instant under reduced motion, as in the RAID-Z room); and the
+  line under the controls puts the class's swatch before its name, for phones, where the table is
+  below the tree. The answer's second paragraph keeps only the class rules (123 words in EN,
+  from 192); the fallback, the spread within a class and the second copy move to what to try,
+  where the figure shows each. The fill buttons get their own labelled group.
+
 ## v1.4 ARC room (ALG-193)
 
 ### D25.1 The ARC room as a question, and a figure that reads one block per press
@@ -2762,6 +2813,59 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   the offset field is named in the reader's language (« décalage », « desplazamiento »), as the
   sentence under it; the "what to try" text of section 1 is three short paragraphs, and says that
   rewrite db stops by itself when the test says yes.
+
+## v1.4 send / receive room (ALG-201)
+
+### D29.1 The send / receive room as a question; one press of Next step, one outlined effect
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 8 excerpts (186 lines of code) and 48 links to GitHub in each language, 24 of
+  them in the prose, plus a "code" link after every line the figure narrated (10 targets). The
+  issue asks for a figure where the reader sends a full then an incremental stream and sees
+  which blocks travel.
+- **Question.** "How does ZFS send only what changed?" (« Comment ZFS n’envoie-t-il que ce qui a
+  changé ? », « ¿Cómo envía ZFS solo lo que cambió? »). The answer goes from the cost of
+  comparing files (rsync) to the birth txg in every block pointer, the subtree skipped whole
+  because copy-on-write rewrites every block above a change, then the stream: records, a running
+  checksum the receiver checks before it applies a record, and the from-snapshot named by GUID.
+- **Figure.** `SendLab` is improved, not rebuilt; the model (`src/lib/send.ts`) is unchanged.
+  Next step is the primary button and sits under the three panels with the line that says what
+  the step did; the bar sticks to the bottom of the screen while the figure is in view, on every
+  width, since the full stream makes the figure taller than a laptop screen too. Each press
+  outlines, in the ink colour, what it did: the block pointer or dnode it tested, the records it
+  wrote (`justWritten()` in `send-view.ts`), then on the receiving side the record checked and
+  the blocks it changed, or the header refused. The outline is a class, not an animation, so it
+  reads under reduced motion; nothing is outlined before the first press, nor without script.
+  After a press the outlined part is scrolled into view above the bar if it is not visible. The
+  tree's key gains the outline, the stream gets a key (the checksum value, applied, refused).
+  The narration is plain: no code links (D21.1) and no function names (`send_cb`, `dump_dnode`,
+  `td_min_txg`, `drr_checksum`, the receive functions); record types stay, since the stream
+  shows them. "What to try" asks for a full stream first, then from `@s3`, with the numbers the
+  table shows (21 records and 11,672 bytes, then 7 and 2,184). Without script the figure shows
+  the finished stream from `@s2` and its text version, as before.
+- **Code.** Six Source notes, 44 lines, all new short cuts in `ANALYSIS.md` (send / receive room,
+  13 to 18), checked against `zfs-2.4.4`: the bound (`send_traverse_thread`), the skip
+  (`traverse_visitbp`), data or hole (`send_cb`), the running checksum (`dump_record`), the check
+  (`receive_read_payload_and_next_header`) and the from-snapshot found by GUID
+  (`recv_begin_check_existing_impl`, which the room did not show before). The "three depths"
+  section is gone; `traverse_dnode` and `receive_process_record` are named in a note and in
+  "What the figure leaves out" instead of shown.
+- **Rejected.** Starting the figure empty, at BEGIN: without script it would show nothing, and
+  the finished stream is the figure's summary; the first press starts the send from BEGIN.
+  Taking snapshots in the figure: the four snapshots are the history the model and its tests are
+  hand-checked against; choosing the from-snapshot shows the same full-then-incremental sequence.
+  A sticky bar on phones only, as in the TXG room: at 1280×900 the outlined record of a full
+  stream was under the fold while Next step was in view.
+- **After the Design/UX review.** On a phone the panels stack, so a step's records and the
+  part it tested were rarely on screen together. When the outlined records would sit off
+  screen, the step bar repeats them on one line above its text (a copy, `inert` and hidden from
+  assistive technology, since the stream and the line already say it), and under the
+  three-column width the line goes under the button at full width. A FREEOBJECTS that deletes a
+  file draws it once more on the receiving side, dashed and marked deleted, then drops it on
+  the next frame: the deletion is an absence and otherwise outlines nothing. The key item for
+  the outline is shown by the script only, and the checksum key reads as one sentence.
+  Rejected: scrolling to the records instead of the pointer (the reader loses the cause), and
+  a second scroll after the first (the page jumps twice per press).
 
 ## v1.4 ZIL room (ALG-199)
 

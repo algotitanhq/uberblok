@@ -1214,8 +1214,12 @@ for (const lang of ["en", "fr"])
     records: document.querySelectorAll("[data-send] [data-strip] .rec").length,
     verdict: document.querySelector("[data-send] .verdict")?.textContent,
     barHidden: document.querySelector(".sr-bar").hidden,
+    stepbarHidden: getComputedStyle(document.querySelector("[data-send] .sr-stepbar")).display === "none",
+    outlined: document.querySelectorAll("[data-send] .rec.just").length,
     tableRows: document.querySelectorAll("[data-send] .cmp-table tbody tr").length,
   }));
+  // Without script Next step and its line stay hidden, and nothing is outlined (D29.1).
+  if (!report.send.noJs.stepbarHidden || report.send.noJs.outlined) report.send.mismatches.push({ where: "noJs", noJs: report.send.noJs });
   await page.screenshot({ path: join(out, "send-en-iphone-nojs.png"), fullPage: true });
   report.captures.push("send-en-iphone-nojs.png");
   await ctx.close();

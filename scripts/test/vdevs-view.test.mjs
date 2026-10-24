@@ -122,7 +122,7 @@ test("the drawing agrees with the model", () => {
   for (const leaf of M.leavesOf(r.trace)) assert.match(walk, new RegExp(`<code>${leaf}</code>`));
   assert.match(walk, /vdev_disk_io_start/);
   // The announcement names the class, the DVAs and the disks.
-  assert.equal(text(V.dropLine(S, p, r.block, r.trace)), "A metadata block (dnode): the special class, 2 DVAs on mirror-4, written to 2 disks.");
+  assert.equal(text(V.dropLine(S, p, r.block, r.trace)), "A metadata block (dnode) goes to the special class: 2 copies on mirror-4, written to 2 disks.");
   // The ops panel of a replacing node shows the mirror's functions.
   const rep = M.replace(p, "sdd", "new");
   const ops = V.opsHtml(S, rep.pool, rep.node);
@@ -134,12 +134,32 @@ test("the drawing agrees with the model", () => {
   // And in Spanish.
   const es = strings("es");
   assert.equal(text(V.readLine(es, p, r.block, M.ioTrace(p, r.block, "read"))), "Releído: DVA 0 en mirror-4, desde sdm.");
-  assert.equal(text(V.dropLine(es, p, r.block, r.trace)), "Un bloque de metadatos (dnode): la clase special, 2 DVA en mirror-4, escrito en 2 discos.");
+  assert.equal(text(V.dropLine(es, p, r.block, r.trace)), "Un bloque de metadatos (dnode) va a la clase special: 2 copias en mirror-4, escrito en 2 discos.");
   // A read of a block with one DVA says so, and one with two picks one.
   const big = M.writeBlock(p, "large");
   const head = (S, b, pool) => text(V.walkHtml(S, pool, b.block, M.ioTrace(pool, b.block, "read"), "read").match(/<p class="walk-head">(.*?)<\/p>/)[1]);
-  assert.match(head(S, big, big.pool), /reads its only DVA\./);
-  assert.match(head(fr, big, big.pool), /lit son seul DVA\./);
-  assert.match(head(es, big, big.pool), /lee su único DVA\./);
-  assert.match(head(S, r, p), /reads one of its 2 DVAs\./);
+  assert.match(head(S, big, big.pool), /A read of the only copy:/);
+  assert.match(head(fr, big, big.pool), /Une lecture de la seule copie\s:/);
+  assert.match(head(es, big, big.pool), /Una lectura de la única copia:/);
+  assert.match(head(S, r, p), /needs only one of the 2 copies:/);
+});
+
+test("the last block's vdevs and class are marked, and the figure carries no code link", () => {
+  const S = { ...strings("en"), refs: {} };
+  const r = M.writeBlock(M.createPool(M.DEFAULT_OPTIONS), "meta");
+  const svg = V.treeSvg(S, r.pool, r.trace, "sdd", V.topsOf(r.block));
+  const hit = [...svg.matchAll(/<g class="n [^"]*\bhit\b[^"]*" data-node="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(hit.map((id) => r.pool.vdevs[id].name), ["mirror-4"]);
+  assert.match(svg, /<g class="landed last">/);
+  // The ring comes after the box: the box stays the node's first rect, which the class, lit and selected looks style.
+  for (const g of svg.match(/<g class="n [^"]*\bhit\b[^>]*>.*?<\/g>/g)) assert.doesNotMatch(g, /^<g[^>]*><rect class="ring"/);
+  const cls = V.classesHtml(S, r.pool, r.block.cls);
+  assert.deepEqual([...cls.matchAll(/<tr class="cl-(\w+)[^"]*\bhit\b/g)].map((m) => m[1]), ["special"]);
+  // Nothing is marked before a write.
+  assert.doesNotMatch(V.treeSvg(S, r.pool, null, "sdd"), /\bhit\b|landed last/);
+  // The key lists every look from the start.
+  assert.equal((V.legendHtml(S).match(/<li>/g) ?? []).length, 6);
+  // With no refs (the component passes none, D26.1), no line carries a link.
+  const html = V.lastHtml(S, r.pool, { block: r.block, trace: r.trace, type: "write" }) + V.auxHtml(S, r.pool) + V.opsHtml(S, r.pool, "sdd");
+  assert.doesNotMatch(html, /<a /);
 });

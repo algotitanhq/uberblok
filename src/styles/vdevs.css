@@ -55,9 +55,16 @@
 }
 @media (min-width: 60rem) {
   .vd .vd-grid {
-    grid-template-columns: minmax(0, 1fr) 16rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: start;
   }
+}
+/* The classes, then the last block, beside the tree, so a press and its effect
+   share the screen on a desktop (D26.1). */
+.vd .vd-side {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
 }
 .vd .vd-stage {
   border: 1px solid var(--line);
@@ -73,7 +80,9 @@
 .vd-tree {
   display: block;
   width: 100%;
-  max-width: 34rem;
+  /* Near its natural width (360 units): a taller drawing would push the ring
+     and the class row below the fold after a press (Design/UX, ALG-191). */
+  max-width: 24rem;
   height: auto;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -88,6 +97,8 @@
   stroke-width: 2;
 }
 .vd-tree .n {
+  /* Room around a node brought on screen after a press. */
+  scroll-margin: var(--space-6);
   cursor: pointer;
 }
 .vd-tree .n rect {
@@ -129,8 +140,20 @@
   fill: var(--accent);
 }
 .vd-tree .landed rect {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.2;
+}
+.vd-tree .landed.last rect {
   fill: var(--accent);
   stroke: none;
+}
+/* The ring of a top-level vdev that holds a copy of the last block: a class,
+   not an animation, so it reads the same under reduced motion. */
+.vd-tree .n .ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
 }
 .vd-tree .landed text {
   fill: var(--fg);
@@ -208,11 +231,6 @@
   min-height: 44px;
   max-width: 100%;
 }
-.vd .vd-why {
-  font-size: var(--step--1);
-  margin: 0;
-  min-height: 1.4em;
-}
 .vd .vd-panels {
   display: grid;
   gap: var(--space-4);
@@ -221,10 +239,8 @@
 }
 @media (min-width: 60rem) {
   .vd .vd-panels {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  }
-  .vd .vd-panels > :first-child {
-    grid-row: span 2;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
   }
 }
 .vd .path {
@@ -295,6 +311,14 @@
 .vd .classes tr.empty {
   color: var(--fg-faint);
 }
+.vd .classes tr.hit th,
+.vd .classes tr.hit td {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.vd .classes tr.hit th {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .vd .sw {
   display: inline-block;
   width: 0.7em;
@@ -308,7 +332,7 @@
 .vd .sw-special_embedded_log { background: var(--c-special); }
 .vd .sw-dedup { background: var(--c-dedup); }
 .vd .vd-now {
-  margin: var(--space-4) 0 0;
+  margin: 0 0 var(--space-4);
   font-size: var(--step--1);
   max-width: 52rem;
   min-height: 3em;
@@ -328,3 +352,49 @@
 .vd .classes td:last-child {
   white-space: nowrap;
 }
+/* The key under the tree: every look, from the start. */
+.vd .vd-key {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  font-size: var(--step--1);
+  color: var(--fg-muted);
+}
+.vd .lg-title {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+.vd .vd-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+}
+.vd .lg-sw {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.4em;
+  vertical-align: -0.1em;
+  border-radius: 3px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+}
+.vd .lg-bias {
+  width: 0.35em;
+  margin-left: 0.5em;
+  border: none;
+  border-radius: 1px;
+}
+.vd .lg-path { border: 2px solid var(--accent); background: var(--accent-soft); }
+.vd .lg-hit { border: 2px solid var(--accent); background: none; border-radius: 5px; }
+.vd .lg-count { width: 0.7em; height: 0.7em; border: 1.2px solid var(--fg-muted); background: none; border-radius: 2px; }
+.vd .lg-sel { border: 2px dashed var(--fg); }
+.vd .lg-rep { border: 1px solid var(--bad); }
+.vd .lg-sw.lg-bias { background: var(--c-normal); }
+.vd .lg-sw.lg-bias.sw-log { background: var(--c-log); }
+.vd .lg-sw.lg-bias.sw-special { background: var(--c-special); }
+.vd .lg-sw.lg-bias.sw-dedup { background: var(--c-dedup); }
+.vd .lg-item { white-space: nowrap; }

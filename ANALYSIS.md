@@ -2354,6 +2354,188 @@ https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/mod
 
 L8280-L8285: a spare (hot or distributed) is refused with `ENOTSUP` when the disk it would replace sits under a top-level vdev with a bias (special, dedup) or a log: spares stand in for normal vdevs only; a plain `zpool replace` with a new disk is allowed everywhere. L8287-L8292: a distributed spare can only replace a child of its own dRAID.
 
+**Short excerpts for the question-first room (v1.4, ALG-191).** The room shows only the lines that carry the idea; the longer excerpts above stay as the analysis.
+
+### 18. `vdev_ops_t`, the functions every vdev type fills in — include/sys/vdev_impl.h
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/vdev_impl.h#L104-L113
+
+```c
+	vdev_open_func_t		*vdev_op_open;
+	vdev_close_func_t		*vdev_op_close;
+	vdev_asize_func_t		*vdev_op_psize_to_asize;
+	vdev_asize_func_t		*vdev_op_asize_to_psize;
+	vdev_min_asize_func_t		*vdev_op_min_asize;
+	vdev_min_alloc_func_t		*vdev_op_min_alloc;
+	vdev_io_start_func_t		*vdev_op_io_start;
+	vdev_io_done_func_t		*vdev_op_io_done;
+	vdev_state_change_func_t	*vdev_op_state_change;
+	vdev_need_resilver_func_t	*vdev_op_need_resilver;
+```
+
+Excerpt 2, cut to the slots the room talks about. L104-L105: open and close. L106-L109: size translation (a raidz turns a block's size into a larger allocated size). L110-L111: `vdev_op_io_start` and `vdev_op_io_done`, how an I/O goes on to the children and how their results come back. L113: `vdev_op_need_resilver`, whether a block touches a child that missed writes. A vdev's type is nothing but the table it points to (`vdev_ops`, excerpt 1, L241); the I/O path calls `vd->vdev_ops->vdev_op_io_start(zio)` ([zio.c L4831](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L4831)).
+
+### 19. `vdev_mirror_io_start`, one child for a read, all for a write — module/zfs/vdev_mirror.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_mirror.c#L656-L669
+
+```c
+		/*
+		 * For normal reads just pick one child.
+		 */
+		c = vdev_mirror_child_select(zio);
+		children = (c >= 0);
+	} else {
+		ASSERT(zio->io_type == ZIO_TYPE_WRITE);
+
+		/*
+		 * Writes go to all children.
+		 */
+		c = 0;
+		children = mm->mm_children;
+	}
+```
+
+Excerpt 4 up to the choice of children. L656-L660: a normal read picks one child (`vdev_mirror_child_select`, which skips a child missing the block's txg). L662-L668: a write goes to every child; the loop that follows issues one child zio per child (excerpt 4, L689-L692). The replacing and spare tables use this function (excerpt 22).
+
+### 20. `spa_preferred_class`, the choice of class — module/zfs/spa_misc.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/spa_misc.c#L2149-L2178
+
+```c
+	if (DMU_OT_IS_DDT(objtype)) {
+		if (spa_has_dedup(spa) && !tried_dedup && !tried_special)
+			return (spa_dedup_class(spa));
+		else if (spa_special_has_ddt(spa) && !tried_special)
+			return (spa_special_class(spa));
+		else
+			return (spa_normal_class(spa));
+	}
+
+	if (!spa_has_special(spa) || tried_special)
+		return (spa_normal_class(spa));
+
+	if (DMU_OT_IS_METADATA(objtype) ||
+	    (zfs_user_indirect_is_special && zp->zp_level > 0))
+		return (spa_special_class(spa));
+
+	/*
+	 * Allow small blocks in special class.  However, leave a reserve of
+	 * zfs_special_class_metadata_reserve_pct exclusively for metadata.
+	 */
+	if (zio->io_size <= zp->zp_zpl_smallblk) {
+		metaslab_class_t *special = spa_special_class(spa);
+		uint64_t limit = metaslab_class_get_space(special) *
+		    (100 - zfs_special_class_metadata_reserve_pct) / 100;
+
+		if (metaslab_class_get_alloc(special) < limit)
+			return (special);
+	}
+
+	return (spa_normal_class(spa));
+```
+
+Excerpts 10 and 11 without the preamble. L2149-L2156: a DDT block goes to dedup if the pool has one, else to special if the pool keeps the DDT there, else to normal; a class already tried is skipped. L2158-L2159: no special vdev, or special already tried: normal. L2161-L2163: metadata, and the indirect blocks of files, go to special. L2169-L2176: a block no larger than `special_small_blocks` (`zp_zpl_smallblk`) goes to special while special has allocated less than 75% of its space (`zfs_special_class_metadata_reserve_pct` = 25, [spa_misc.c L448](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/spa_misc.c#L448)). L2178: the rest to normal. ZIL blocks never come here (L2147).
+
+### 21. `zio_dva_allocate`, a full class — module/zfs/zio.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L4404-L4407
+
+```c
+	/*
+	 * Fall back to some other class when this one is full.
+	 */
+	if (error == ENOSPC && (newmc = spa_preferred_class(spa, zio)) != mc) {
+```
+
+Excerpt 12's last lines. When the class answers `ENOSPC`, `spa_preferred_class` is asked again; it now knows which class was tried, so it returns the next one, and the allocation starts over there ([L4430-L4444](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/zio.c#L4430-L4444)).
+
+### 22. `metaslab_alloc_dva_range`, the next copy on the next vdev — module/zfs/metaslab.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/metaslab.c#L5420-L5427
+
+```c
+	if (mg == NULL && d != 0) {
+		vd = vdev_lookup_top(spa, DVA_GET_VDEV(&dva[d - 1]));
+		mg = vdev_get_mg(vd, mc)->mg_next;
+	}
+	if (mg == NULL || mg->mg_class != mc || mg->mg_activation_count <= 0) {
+		ASSERT(mca->mca_rotor != NULL);
+		mg = mca->mca_rotor;
+	}
+```
+
+Excerpt 13 without its comment and the gang hint. L5420-L5423: DVA `d` starts at the metaslab group after the one of DVA `d - 1`, the next top-level vdev of the class (the groups of a class form a ring). L5424-L5427: the first DVA, or a group that is not usable, starts at the class's rotor, which moves on by load and free space (the metaslabs room). A class of one vdev puts every copy on it.
+
+### 23. `vdev_replacing_ops`, the mirror's functions — module/zfs/vdev_mirror.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_mirror.c#L1000-L1007
+
+```c
+	.vdev_op_open = vdev_mirror_open,
+	.vdev_op_close = vdev_mirror_close,
+	.vdev_op_psize_to_asize = vdev_default_asize,
+	.vdev_op_asize_to_psize = vdev_default_psize,
+	.vdev_op_min_asize = vdev_default_min_asize,
+	.vdev_op_min_alloc = NULL,
+	.vdev_op_io_start = vdev_mirror_io_start,
+	.vdev_op_io_done = vdev_mirror_io_done,
+```
+
+Excerpt 5, the slots that matter. L1000-L1001: the mirror's open and close. L1002-L1004: default size translation, as a mirror. L1006-L1007: the mirror's `io_start` and `io_done`: a write to a replacing node goes to the old disk and the new one, a read to one of them. `vdev_spare_ops` fills the same slots ([L1023-L1047](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_mirror.c#L1023-L1047)).
+
+### 24. `vdev_add_parent`, the new node in the old disk's place — module/zfs/vdev.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev.c#L1439-L1446
+
+```c
+	vdev_remove_child(pvd, cvd);
+	vdev_add_child(pvd, mvd);
+	cvd->vdev_id = mvd->vdev_children;
+	vdev_add_child(mvd, cvd);
+	vdev_top_update(cvd->vdev_top, cvd->vdev_top);
+
+	if (mvd == mvd->vdev_top)
+		vdev_top_transfer(cvd, mvd);
+```
+
+Excerpt 8, the tree surgery. L1439-L1440: the old disk leaves its parent and the new node takes its place (with its `vdev_id`, L1426). L1441-L1442: the old disk becomes the new node's child 0; `spa_vdev_attach` then adds the new disk after it ([spa.c L8449-L8454](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/spa.c#L8449-L8454)). L1445-L1446: if the old disk was a top-level vdev, the new node becomes the top-level vdev and takes over its metaslabs, group and bias.
+
+### 25. `spa_vdev_resilver_done_hunt`, the end of a replacement — module/zfs/spa.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/spa.c#L9446-L9455
+
+```c
+	if (vd->vdev_ops == &vdev_replacing_ops) {
+		ASSERT(vd->vdev_children > 1);
+
+		newvd = vd->vdev_child[vd->vdev_children - 1];
+		oldvd = vd->vdev_child[0];
+
+		if (vdev_dtl_empty(newvd, DTL_MISSING) &&
+		    vdev_dtl_empty(newvd, DTL_OUTAGE) &&
+		    !vdev_dtl_required(oldvd))
+			return (oldvd);
+```
+
+Excerpt 9 without the comment. L9449-L9450: the newest disk is the last child, the oldest the first. L9452-L9455: when the new disk misses no txg and the old one is not needed, the old disk is returned to be detached; the replacing node, left with one child, is removed (`vdev_remove_parent`). A spare node is not collapsed here (it is handled below, L9462-L9480).
+
+### 26. `vdev_draid_map_alloc_row`, the child of each column — module/zfs/vdev_draid.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/vdev_draid.c#L1047-L1053
+
+```c
+		uint64_t c = (groupstart + i) % ndisks;
+
+		/* increment the offset if we wrap to the next row */
+		if (i == wrap)
+			physical_offset += VDEV_DRAID_ROWHEIGHT;
+
+		rc->rc_devidx = vdev_draid_permute_id(vdc, base, iter, c);
+```
+
+Excerpt 16, the placement. L1047: column `i` of a group is position `(groupstart + i) mod ndisks` in the row. L1049-L1051: a group that runs past the end of a row goes on in the next one. L1053: the child is the permutation's entry at that position (`vdev_draid_permute_id`), so each row of the table puts the group on a different set of children.
+
 **What the animation shows.** (Simplifications and why they stay faithful: `DECISIONS.md` D11.2.)
 
 - (2D, and 3D when WebGL is available) The pool as a tree from `spa_root_vdev` ([`spa_impl.h#L265`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/spa_impl.h#L265)): the root, the top-level vdevs (a mirror, a raidz1 of three disks, a draid1:2d:5c:1s of five, and, at the visitor's choice, a mirror as log, a mirror as special, a disk as dedup), and the leaves. Each node shows its `vdev_op_type`, and its ops table on demand: `vdev_op_io_start`, `vdev_op_io_done`, `vdev_op_psize_to_asize`, `vdev_op_need_resilver`, `vdev_op_leaf` — excerpts 1 and 2, the tables of excerpt 2's notes, excerpt 5. "Log", "special" and "dedup" are not types: they are the bias of a top-level vdev, which picks its class — excerpt 3.
@@ -5131,6 +5313,104 @@ The receiver keeps its own running checksum, which starts over the whole BEGIN r
 - *From `@s2`* (F = 20): a's indirect block (20 ≤ 20) is skipped, its four blocks never read. 12 visited, 3 skipped, 4 below them. 15 records: those of `@s1` without the WRITE of a.
 - *From `@s3`* (F = 30): dnode block 1 (30) is skipped with d's subtree; in dnode block 0 (40), a's and b's indirect blocks (20, 30) are skipped. 3 visited (objset, meta-dnode indirect block, dnode block 0), 3 skipped, 13 below them. 7 records: BEGIN, OBJECT 1, FREE 1 from 2048, OBJECT 2, FREE 2 from 2048, FREEOBJECTS 3, END. a and b are sent as OBJECT records, without data, because they share a dnode block with c, whose removal rewrote it.
 - *A flipped bit* in the payload of the first WRITE of the full stream (record 3): the receiver fails with `ECKSUM` when it checks record 4's header. BEGIN, OBJECT 1 and FREE 1 were applied; the WRITE never is, and the receive is undone.
+
+### 13. `send_traverse_thread`, the bound — module/zfs/dmu_send.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1211-L1213
+
+```c
+	err = traverse_dataset_resume(st_arg->os->os_dsl_dataset,
+	    st_arg->fromtxg, &st_arg->resume,
+	    st_arg->flags | TRAVERSE_LOGICAL, send_cb, st_arg);
+```
+
+Excerpt 4 cut to the call. L1211-L1212: the snapshot being sent is traversed from `fromtxg`, the from-snapshot's creation txg ([`module/zfs/dmu_send.c#L2370`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L2370)), 0 for a full stream; inside the traversal it becomes `td_min_txg` ([`module/zfs/dmu_traverse.c#L653`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L653)). L1213: `TRAVERSE_LOGICAL` is added to the send's flags ([`module/zfs/dmu_send.c#L2088`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L2088)), so births are compared by their logical txg, and every visited block goes to `send_cb`.
+
+### 14. `traverse_visitbp`, the skip — module/zfs/dmu_traverse.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L277-L279
+
+```c
+	} else if (get_birth_time(td, bp) <= td->td_min_txg) {
+		return (0);
+	}
+```
+
+Excerpt 2 cut to the rule. A block pointer born at or before `td_min_txg` is in the from-snapshot: the function returns before reading the block or calling the callback, so nothing below it is reached. `get_birth_time` returns the logical birth under `TRAVERSE_LOGICAL` ([`module/zfs/dmu_traverse.c#L78-L84`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L78-L84)); the comment that defines the two births ([`include/sys/spa.h#L483-L488`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/include/sys/spa.h#L483-L488)) says the logical one is the one for incremental replication. Holes of birth 0 take the branch above (excerpt 2, L249-L276) and are visited, since `send_holes_without_birth_time` is 1 by default ([`module/zfs/dmu_traverse.c#L44`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_traverse.c#L44)).
+
+### 15. `send_cb`, data or hole — module/zfs/dmu_send.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1140-L1146
+
+```c
+	enum type record_type = DATA;
+	if (BP_IS_HOLE(bp))
+		record_type = HOLE;
+	else if (BP_IS_REDACTED(bp))
+		record_type = REDACT;
+	else
+		record_type = DATA;
+```
+
+Excerpt 7 cut to the choice. A visited level-0 block becomes a DATA range, which `do_dump` writes as a WRITE with the block's data, or a HOLE range, written as a FREE of its range ([`module/zfs/dmu_send.c#L1018-L1034`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1018-L1034)); among the dnode blocks a hole frees objects ([`module/zfs/dmu_send.c#L1012-L1017`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L1012-L1017)). REDACT belongs to redacted sends. A dnode becomes an OBJECT range a few lines above (excerpt 6, L1098-L1108), and every dnode of a visited dnode block reaches the callback, changed or not (excerpt 5, L534-L543).
+
+### 16. `dump_record`, the running checksum — module/zfs/dmu_send.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L268-L283
+
+```c
+	(void) fletcher_4_incremental_native(dscp->dsc_drr,
+	    offsetof(dmu_replay_record_t, drr_u.drr_checksum.drr_checksum),
+	    &dscp->dsc_zc);
+	if (dscp->dsc_drr->drr_type == DRR_BEGIN) {
+		dscp->dsc_sent_begin = B_TRUE;
+	} else {
+		ASSERT(ZIO_CHECKSUM_IS_ZERO(&dscp->dsc_drr->drr_u.
+		    drr_checksum.drr_checksum));
+		dscp->dsc_drr->drr_u.drr_checksum.drr_checksum = dscp->dsc_zc;
+	}
+	if (dscp->dsc_drr->drr_type == DRR_END) {
+		dscp->dsc_sent_end = B_TRUE;
+	}
+	(void) fletcher_4_incremental_native(&dscp->dsc_drr->
+	    drr_u.drr_checksum.drr_checksum,
+	    sizeof (zio_cksum_t), &dscp->dsc_zc);
+```
+
+Excerpt 10 cut to the checksum. L268-L270: the running fletcher-4 sum `dsc_zc` is carried on over the record's header, up to its last 32 bytes. L271-L277: except for BEGIN, that value is stored in those 32 bytes, `drr_checksum`. L281-L283: the 32 bytes are then summed too. So each record's `drr_checksum` is the fletcher-4 of every byte of the stream before it, its own header up to the checksum included; the payload after the header is summed below (excerpt 10, L295-L298).
+
+### 17. `receive_read_payload_and_next_header`, the check — module/zfs/dmu_recv.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L2861-L2868
+
+```c
+	if ((!ZIO_CHECKSUM_IS_ZERO(cksump)) &&
+	    !ZIO_CHECKSUM_EQUAL(drc->drc_cksum, *cksump)) {
+		kmem_free(drc->drc_next_rrd, sizeof (*drc->drc_next_rrd));
+		drc->drc_next_rrd = NULL;
+		return (SET_ERROR(ECKSUM));
+	}
+
+	receive_cksum(drc, sizeof (cksum_orig), &cksum_orig);
+```
+
+Excerpt 12 cut to the test. L2861-L2866: the receiver's own running sum `drc_cksum` (over the next header up to its checksum, excerpt 12, L2849-L2851) is compared with the header's `drr_checksum`; a mismatch stops the receive with `ECKSUM`. A checksum of all zeros is not checked. L2868: the stored value is then summed, as the sender did. This runs before the previous record is queued for the writer ([`module/zfs/dmu_recv.c#L3500-L3513`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L3500-L3513)), so a damaged record is never applied; END is checked once more against the sum before it ([`module/zfs/dmu_recv.c#L3000-L3007`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L3000-L3007)), and on an error the receive is undone ([`module/zfs/dmu_recv.c#L3582-L3588`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L3582-L3588)).
+
+### 18. `recv_begin_check_existing_impl`, the from-snapshot — module/zfs/dmu_recv.c
+
+https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L473-L479
+
+```c
+			if (dsl_dataset_phys(snap)->ds_guid == fromguid)
+				break;
+			obj = dsl_dataset_phys(snap)->ds_prev_snap_obj;
+			dsl_dataset_rele(snap, FTAG);
+		}
+		if (obj == 0)
+			return (SET_ERROR(ENODEV));
+```
+
+The end of the loop that looks, among the receiving filesystem's snapshots, newest first, for the one whose GUID is the stream's `drr_fromguid` (the loop starts at [`module/zfs/dmu_recv.c#L463-L464`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_recv.c#L463-L464)). Found: the incremental stream applies on top of it. Not found: `ENODEV`, and nothing is received. The sender writes the two GUIDs in BEGIN ([`module/zfs/dmu_send.c#L2049-L2050`](https://github.com/openzfs/zfs/blob/71a9f9578616a90c3c14bb59629fb4d31bfd68d1/module/zfs/dmu_send.c#L2049-L2050)).
 
 ## Room: Compression, dedup, encryption
 

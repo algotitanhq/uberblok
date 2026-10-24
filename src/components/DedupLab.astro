@@ -4,11 +4,12 @@
 // over its quota; each write goes through zio_ddt_write's lookup and takes
 // its miss, hit or over-quota path. src/lib/transforms.ts decides every
 // outcome, src/lib/transforms-view.ts draws it. Shown without JavaScript:
-// A, B, then A again. Refs: ANALYSIS.md, room "Compression, dedup,
+// A, B, then A again. Each action outlines what it changed (the entry, the
+// block pointer, the block on disk, the counters, the quota), and the line
+// under the buttons says it in plain words, with no code links (D31.1). Refs: ANALYSIS.md, room "Compression, dedup,
 // encryption", excerpts 2, 6 to 10; simplifications: DECISIONS.md D10.2.
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { dedupStart, dedupWrite, CONTENTS } from "../lib/transforms";
 import { dedupView, dedupDescribe, type TrStrings } from "../lib/transforms-view";
@@ -19,15 +20,7 @@ interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const Z = "module/zfs/zio.c";
-const refs = {
-  lookup: gh(Z, 3816, 3823),
-  quota: gh("module/zfs/ddt.c", 1374, 1387),
-  hit: gh(Z, 3958, 3987),
-  miss: gh(Z, 4156, 4167),
-  overquota: gh(Z, 3824, 3832),
-};
-const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs, lang } as unknown as TrStrings;
+const S = { ...Object.fromEntries(Object.entries(TRANSFORMS_STRINGS[lang]).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), lang } as unknown as TrStrings;
 const t = UI[lang];
 const s0 = ["A", "B", "A"].reduce((s, c) => dedupWrite(s, c, false), dedupStart());
 const label: Record<string, string> = { A: S.writeA, B: S.writeB, C: S.writeC };
@@ -44,8 +37,8 @@ const label: Record<string, string> = { A: S.writeA, B: S.writeB, C: S.writeC };
       <button class="btn" type="button" data-act="restart">{S.restart}</button>
     </div>
   </div>
-  <div data-view set:html={dedupView(S, s0)} />
   <p class="tr-now" data-now aria-hidden="true" hidden></p>
+  <div data-view set:html={dedupView(S, s0)} />
   <p class="visually-hidden" data-live aria-live="polite"></p>
   <noscript><p class="muted">{S.dNoScript}</p></noscript>
   <details class="text-version">
@@ -57,7 +50,7 @@ const label: Record<string, string> = { A: S.writeA, B: S.writeB, C: S.writeC };
 <script>
   import { strings, reducedMotion } from "../lib/svg";
   import { dedupStart, dedupWrite } from "../lib/transforms";
-  import { dedupView, dedupDescribe, dedupLine, spoken, type TrStrings } from "../lib/transforms-view";
+  import { dedupView, dedupDescribe, dedupLine, dedupChanges, spoken, NO_DEDUP_CHANGES, type DedupChanges, type TrStrings } from "../lib/transforms-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-dedup]")) {
     const S = strings<TrStrings>(root);
@@ -65,11 +58,12 @@ const label: Record<string, string> = { A: S.writeA, B: S.writeB, C: S.writeC };
     const start = () => ["A", "B", "A"].reduce((s, c) => dedupWrite(s, c, false), dedupStart());
     let s = start();
     let quota = false;
+    let brief = false;
 
     /**
      * The visible line, and one announcement per action: the live region is
      * emptied, then filled on the next frame, so that the same text twice is
-     * announced twice; it reads the line without its code links.
+     * announced twice; it reads the line without its tags.
      */
     function say(html: string) {
       const el = q("[data-now]");
@@ -80,12 +74,15 @@ const label: Record<string, string> = { A: S.writeA, B: S.writeB, C: S.writeC };
       requestAnimationFrame(() => (live.textContent = spoken(html)));
     }
 
-    function render() {
-      q("[data-view]").innerHTML = dedupView(S, s);
-      q("[data-describe]").innerHTML = dedupDescribe(S, s);
+    // What the last action changed: outlined in the drawing until the next action.
+    function render(c: DedupChanges = NO_DEDUP_CHANGES, wrote = false) {
+      // While the line under the buttons says what the last write did, the figure keeps its first words.
+      q("[data-view]").innerHTML = dedupView(S, s, quota, c, brief);
+      q("[data-describe]").innerHTML = dedupDescribe(S, s, quota);
       q("[data-quota]").setAttribute("aria-pressed", String(quota));
       if (!reducedMotion()) {
-        for (const el of root.querySelectorAll<HTMLElement>("[data-view] .cur, [data-view] .path li"))
+        // The steps of the last write replay only after a write, not after a change of quota.
+        for (const el of root.querySelectorAll<HTMLElement>(wrote ? "[data-view] .chg, [data-view] .path li" : "[data-view] .chg"))
           el.animate([{ opacity: 0.2, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], { duration: 300, delay: el.matches(".path li") ? Number([...el.parentElement!.children].indexOf(el)) * 180 : 360, fill: "backwards", easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
       }
     }
@@ -93,17 +90,23 @@ const label: Record<string, string> = { A: S.writeA, B: S.writeB, C: S.writeC };
     root.addEventListener("click", (e) => {
       const el = (e.target as Element).closest<HTMLElement>("button");
       if (!el || !root.contains(el)) return;
+      const s0 = s;
+      const q0 = quota;
       if (el.dataset.write) {
         s = dedupWrite(s, el.dataset.write, quota);
-        render();
+        brief = true;
+        render(dedupChanges(s0, s, q0, quota), true);
         say(dedupLine(S, s.steps[s.steps.length - 1]));
       } else if (el.hasAttribute("data-quota")) {
         quota = !quota;
-        render();
+        // The line under the buttons now speaks of the quota: the figure says the last write in full again.
+        brief = false;
+        render(dedupChanges(s0, s, q0, quota));
         say(quota ? S.quotaOnLine : S.quotaOffLine);
       } else if (el.dataset.act === "restart") {
         s = dedupStart();
         quota = false;
+        brief = false;
         render();
         say(S.restartLine);
       }

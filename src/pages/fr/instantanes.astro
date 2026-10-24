@@ -2,400 +2,256 @@
 import Base from "../../layouts/Base.astro";
 import SnapshotLab from "../../components/SnapshotLab.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
-import { room, roomUrl, roomNumber } from "../../lib/rooms";
+import { room, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D28.1): the question, a plain
+// answer, the figure, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "fr";
 const r = room("snapshots");
 const DS = "module/zfs/dsl_dataset.c";
 const DL = "module/zfs/dsl_deadlist.c";
 const DD = "module/zfs/dsl_destroy.c";
 const L = {
-  birthMacro: gh("include/sys/spa.h", 505, 507),
-  logical: gh("include/sys/spa.h", 483, 492),
-  words: gh("include/sys/spa.h", 147, 149),
   alloc: gh("module/zfs/metaslab.c", 6061),
-  allocTxg: gh("module/zfs/zio.c", 4380, 4382),
-  dbufDone: gh("module/zfs/dbuf.c", 5149, 5155),
-  objsetDone: gh("module/zfs/dmu_objset.c", 1535, 1543),
-  freeBlocks: gh("module/zfs/dnode_sync.c", 147),
-  pending: gh(DS, 333, 342),
-  syncDone: gh(DS, 2292, 2293),
-  prevTxg: gh("include/sys/dsl_dataset.h", 142, 143),
+  free: gh(DS, 312, 315),
+  elseBranch: gh(DS, 332),
+  insert: gh(DS, 344),
+  order: gh("module/zfs/dsl_pool.c", 747, 753),
+  crtxg: gh(DS, 1775),
+  handOff: gh(DS, 1776),
+  newDl: gh(DS, 1830, 1839),
   setPrev: gh(DS, 1881, 1884),
-  dlClone: gh(DL, 727, 737),
-  notInclusive: gh(DL, 521, 524),
-  zapKey: gh(DL, 544, 545),
   eagain: gh(DS, 1534, 1539),
-  tasks: gh("module/zfs/dsl_pool.c", 845, 854),
-  originNull: gh(DS, 1186, 1187),
-  originTxg: gh(DS, 1752, 1758),
-  createOrigin: gh("module/zfs/dsl_pool.c", 1179, 1183),
-  numChildren: gh(DS, 1243, 1244),
-  cloneDl: gh(DS, 1246, 1251),
-  originObj: gh(DS, 1264, 1265),
-  ddOriginTxg: gh("module/zfs/dsl_dir.c", 269, 270),
+  zapKey: gh(DL, 544, 545),
+  notInclusive: gh(DL, 521, 524),
   moveBpobj: gh(DL, 930, 952),
   freeBpobj: gh("module/zfs/dsl_scan.c", 3828, 3835),
   insertBpobj: gh(DL, 829, 834),
-  dlFree: gh(DD, 434, 437),
   removeKey: gh(DL, 549, 577),
-  clonesKey: gh(DD, 441, 445),
-  clonesKeyTest: gh(DD, 230, 232),
   headKey: gh(DD, 475, 479),
+  numChildren: gh(DS, 1243, 1244),
   branch: gh(DD, 83, 87),
-  oldFmt: gh(DD, 129, 151),
-  livelist: gh(DS, 285, 292),
-  promote: gh(DS, 3713, 3721),
-  numChildrenField: gh("include/sys/dsl_dataset.h", 146),
 };
 ---
-
 <Base
   lang={lang}
   roomId="snapshots"
-  title="Instantanés et clones · Uberblok"
-  description="Comment un instantané ZFS coûte un seul pointeur de bloc, et comment une comparaison de txg de naissance décide si un bloc mort est libéré ou gardé dans une deadlist : interactif, avec le code d’OpenZFS."
+  title="Pourquoi supprimer un fichier ne me rend-il pas de place ? Instantanés et clones · Uberblok"
+  description="Un instantané ZFS copie un seul pointeur de bloc, et une comparaison de txg de naissance décide si un bloc abandonné par le système de fichiers est libéré ou gardé pour un instantané. En interactif, avec le code d’OpenZFS."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Salle {roomNumber(r.id)}</p>
-      <h1>{r.title.fr}</h1>
-      <div class="prose problem">
+      <p class="kicker">Salle {roomNumber(r.id)} · {r.title.fr}</p>
+      <h1>Pourquoi supprimer un fichier ne me rend-il pas de place ?</h1>
+      <div class="prose answer">
         <p class="lead">
-          Un instantané doit figer d’un coup tout un système de fichiers, un téraoctet aussi bien qu’un kilooctet, sans
-          ralentir les écritures qui suivent. Le prendre est la moitié facile. La moitié difficile vient à chaque réécriture
-          et à chaque suppression qui suivent dans le système de fichiers vivant : l’ancien bloc sert-il encore à un
-          instantané, ou sa place peut-elle être réutilisée ? Interroger chaque instantané voudrait dire les parcourir. Un
-          compteur de références par bloc voudrait dire mettre à jour un compteur pour chaque bloc à chaque instantané.
+          Un instantané garde tous les blocs qui existaient au moment où il a été pris. Si le fichier était
+          déjà là à votre dernier instantané, le supprimer ne fait que le retirer du système de fichiers vivant : ses
+          blocs restent sur le disque pour l’instantané, et la place revient quand le dernier instantané qui les détient
+          est détruit. Prendre un instantané ne coûte presque rien, parce que ZFS ne modifie jamais un bloc sur place.
         </p>
         <p>
-          ZFS ne fait ni l’un ni l’autre. Chaque pointeur de bloc enregistre le txg où le bloc est <em>né</em>. Le système
-          de fichiers vivant retient le txg de son dernier instantané. Un bloc né après cet instantané ne peut appartenir à
-          aucun instantané : il est libéré ; un bloc né avant ou pendant peut y appartenir : il est gardé, dans une
-          <em>deadlist</em>. Une seule comparaison de deux nombres.
+          ZFS écrit par lots appelés groupes de transactions, ou txg, numérotés dans l’ordre, et chaque bloc garde le
+          txg où il a été écrit, son txg de naissance. Quand le système de fichiers abandonne un bloc, ZFS compare cette
+          naissance au txg de son dernier instantané. Un bloc né après n’est dans aucun instantané et il est libéré. Les
+          autres vont dans la deadlist du système de fichiers, la liste des blocs dont il ne se sert plus mais qu’un
+          instantané détient encore.
+        </p>
+        <p>
+          La deadlist est découpée selon les txg des instantanés : en détruire un libère d’un coup les parties que lui
+          seul détenait, sans examiner les blocs un par un. Un clone, un système de fichiers modifiable créé à partir
+          d’un instantané, partage d’abord tous ses blocs avec lui et applique la même comparaison à ce qu’il écrit
+          ensuite. L’instantané ne peut pas être détruit tant que le clone existe.
         </p>
       </div>
     </header>
 
     <section class="section" aria-labelledby="lab">
-      <h2 id="lab"><span class="n">1</span> Écrire, prendre un instantané, synchroniser</h2>
+      <h2 id="lab"><span class="n">1</span> Prendre un instantané, modifier des blocs, le détruire</h2>
       <div class="prose">
         <p>
-          <code>fs</code> est un système de fichiers de quatre blocs de données, A à D, sous un bloc racine, l’objset sur
-          lequel pointe son <code>ds_bp</code>. Chaque bloc affiche son txg de naissance : A<sub>8</sub> est né au txg 8.
-          La figure s’ouvre après trois txg : A, B et C écrits au txg 8, l’instantané <code>fs@s1</code> pris au txg 9, A
-          réécrit au txg 10. Préparez des modifications dans le txg ouvert, prenez un instantané, clonez-en un ou
-          détruisez-en un, puis synchronisez : chaque bloc que la synchronisation abandonne montre la comparaison et
-          l’endroit où il va. Sélectionnez n’importe quel bloc pour voir quels instantanés le détiennent.
+          Sélectionnez B dans <code>fs</code>, réécrivez-le et synchronisez. La ligne sous les boutons dit quels anciens
+          blocs ont été libérés et lesquels ont été gardés pour un instantané, et un anneau les marque sur le plateau.
+          Prenez un instantané et réécrivez B encore une fois : la même chose se produit, cette fois par rapport au nouvel
+          instantané. Chaque instantané dit ce que sa destruction libérerait : détruisez-en un, synchronisez, et ces
+          blocs s’en vont. Clonez un instantané et réécrivez un bloc dans le clone : l’ancien bloc reste, parce que
+          l’instantané le détient encore.
+        </p>
+        <p>
+          <code>fs</code> a de la place pour quatre blocs de données, A à D, sous un bloc racine. Le petit nombre sur
+          chaque bloc est son txg de naissance : A<sub>8</sub> est né au txg 8. Sélectionnez n’importe quel bloc pour
+          voir quels instantanés le détiennent. Sous la figure, chaque synchronisation est détaillée étape par étape,
+          avec les deux nombres comparés.
         </p>
       </div>
       <SnapshotLab lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">L’idée, à trois profondeurs</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">Dans le code</h2>
+      <p class="prose">
+        La figure suit cinq endroits du code des datasets et des deadlists. Ouvrez une note Source pour voir les lignes,
+        tirées de la version zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>En une phrase</h3>
-        <p class="lead prose">
-          Chaque bloc porte le txg de sa naissance : quand le système de fichiers vivant abandonne un bloc, une seule
-          comparaison avec le txg de son dernier instantané décide de le libérer, ou de le garder dans une deadlist pour les
-          instantanés qui le détiennent encore.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>En un paragraphe</h3>
+      <div class="step">
+        <h3>Le libérer, ou le garder pour un instantané</h3>
         <p class="prose">
-          Un instantané est un nouvel enregistrement de dataset qui copie un seul pointeur de bloc, <code>ds_bp</code>, la
-          racine de l’arbre du système de fichiers, et rien d’autre : tous les blocs en dessous sont désormais partagés. La
-          <a href={roomUrl(lang, "copy-on-write")}>copie sur écriture</a> ne modifie plus jamais ces blocs ; elle en écrit de nouveaux, nés dans des txg ultérieurs, et
-          « tue » les anciens. <code>dsl_dataset_block_kill</code> compare la naissance de l’ancien bloc au
-          <code>ds_prev_snap_txg</code> du système de fichiers, le txg de son dernier instantané. Né après, le bloc
-          n’appartient qu’au système de fichiers vivant : il est libéré. Né avant ou pendant, le dernier instantané le
-          détient : il va dans la deadlist. La deadlist est découpée en entrées par les txg des instantanés précédents :
-          elle dit entre quels instantanés successifs chaque bloc mort est né. C’est ce qui rend la destruction d’un instantané
-          peu coûteuse : les blocs que lui seul détenait sont des entrées entières de la deadlist du dataset suivant,
-          libérées sans lire un seul pointeur de bloc. Un clone est un dataset modifiable qui part du <code>ds_bp</code>
-          d’un instantané, avec le txg de cet instantané comme <code>ds_prev_snap_txg</code> : la même comparaison garde
-          les blocs qu’il partage avec son origine et libère les siens.
+          Chaque bloc qu’un système de fichiers abandonne passe par <code>dsl_dataset_block_kill</code>, dans le txg en
+          cours d’écriture. Un seul test décide de tout : la naissance du bloc face à
+          <code>ds_prev_snap_txg</code>, le txg du dernier instantané du système de fichiers.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_dataset_block_kill</code>, dsl_dataset.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DS}
+            from={294}
+            to={294}
+            symbol="dsl_dataset_block_kill"
+            notes={[
+              {
+                from: 294,
+                text: `Né après le dernier instantané : <a href="${L.free}">libéré</a> dans ce txg. Sinon, <a href="${L.elseBranch}">le <code>else</code></a> <a href="${L.insert}">le met dans la deadlist</a>. La naissance a été fixée <a href="${L.alloc}">à l’allocation du bloc</a>. Le test est strict : un bloc né dans le txg d’un instantané est dans cet instantané, parce qu’<a href="${L.order}">un txg écrit ses données avant de prendre ses instantanés</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>En détail</h3>
-        <div class="prose">
-          <p>
-            <strong>La naissance.</strong> Le txg de naissance d’un bloc est fixé à son allocation :
-            <code>metaslab_alloc</code> se termine par <a href={L.alloc}><code>BP_SET_BIRTH(bp, txg, 0)</code></a>, et
-            l’écriture lui passe <a href={L.allocTxg}>le txg auquel elle appartient</a>. Un pointeur de bloc a
-            <a href={L.words}>deux mots de naissance</a>, logique et physique ; ils ne diffèrent que pour
-            <a href={L.logical}>la déduplication, le clonage de blocs et les blocs réécrits</a>, et la valeur comparée
-            ci-dessous est <a href={L.birthMacro}><code>BP_GET_BIRTH</code></a>, la naissance logique pour un bloc
-            ordinaire.
-          </p>
-          <p><strong>Libérer tout de suite, ou la deadlist.</strong> Voici toute la décision.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={294}
-          to={316}
-          symbol="dsl_dataset_block_kill"
-          notes={[
-            {
-              from: 294,
-              text: "La comparaison. <code>ds_prev_snap_txg</code> est le txg du dernier instantané du dataset. Le test est strict : un bloc né dans ce txg même est détenu par cet instantané.",
-            },
-            {
-              from: 304,
-              to: 311,
-              text: "Les blocs gang, dédupliqués ou peut-être clonés sont mis dans la liste à libérer du pool au lieu d’être libérés sur place, parce que les libérer coûte des entrées-sorties. Le résultat est le même : aucun instantané ne les détient.",
-            },
-            {
-              from: 312,
-              to: 315,
-              text: "Le cas ordinaire : <code>dsl_free</code>, dans ce txg. La figure grise le bloc sous « Libérés ».",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Sinon, dans la branche <code>else</code>, le bloc <a href={L.pending}>va dans la deadlist</a>. Trois appelants
-            tuent des blocs, tous pendant la synchronisation d’un txg : <a href={L.dbufDone}><code>dbuf_write_done</code></a>
-            quand un bloc de données ou un bloc indirect a été réécrit,
-            <a href={L.objsetDone}><code>dmu_objset_write_done</code></a> pour le bloc d’objset sur lequel pointe
-            <code>ds_bp</code>, réécrit à chaque txg où le dataset change, et
-            <a href={L.freeBlocks}><code>free_blocks</code></a> pour une suppression ou une troncature. La figure dessine
-            cet objset et les blocs indirects comme une seule racine, tuée selon la même règle. Les deux rappels d’écriture
-            mettent un bloc destiné à la deadlist dans une liste en attente que
-            <a href={L.syncDone}><code>dsl_dataset_sync_done</code></a> vide avant les tâches de synchronisation du txg :
-            même résultat, quelques lignes plus loin.
-          </p>
-          <p><strong>Un instantané copie un pointeur de bloc.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={1760}
-          to={1785}
-          symbol="dsl_dataset_snapshot_sync_impl"
-          notes={[
-            {
-              from: 1760,
-              to: 1761,
-              text: "Un nouvel objet dans le MOS, les métadonnées propres du pool : l’enregistrement de dataset de l’instantané.",
-            },
-            {
-              from: 1770,
-              to: 1773,
-              text: "Il prend le lien de la tête vers l’instantané précédent et son <code>ds_prev_snap_txg</code>, pointe vers la tête, et commence avec un enfant, son successeur.",
-            },
-            {
-              from: 1775,
-              text: "Son txg de création est le txg en cours de synchronisation.",
-            },
-            {
-              from: 1776,
-              text: "La deadlist de la tête devient celle de l’instantané, telle quelle.",
-            },
-            {
-              from: 1783,
-              text: "Le pointeur de bloc racine est copié. Cette seule copie fait que l’instantané partage tous ses blocs avec la tête. Rien n’est lu ni écrit dans l’arbre : la figure ne montre aucun nouveau bloc pour un instantané.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>La nouvelle deadlist de la tête.</strong> Plus bas dans la même fonction, la tête reçoit une deadlist
-            à elle.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={1830}
-          to={1839}
-          symbol="dsl_dataset_snapshot_sync_impl"
-          notes={[
-            {
-              from: 1831,
-              to: 1833,
-              text: `<code>dsl_deadlist_clone</code> sans limite : <a href="${L.dlClone}">une entrée vide pour chaque clé</a> de la deadlist que l’instantané vient de prendre.`,
-            },
-            {
-              from: 1837,
-              to: 1838,
-              text: `Plus une clé : le <code>ds_prev_snap_txg</code> de la tête, qui vaut encore ici le txg de l’instantané <em>précédent</em>. Il ne prend le txg de cet instantané <a href="${L.setPrev}">qu’ensuite</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Ainsi, après des instantanés aux txg t1 &lt; t2 &lt; … &lt; tn, la deadlist de la tête a ses clés de départ plus
-            t1 à t(n−1), et son <a href={L.prevTxg}><code>ds_prev_snap_txg</code></a> vaut tn. Chaque instantané garde la
-            deadlist que la tête avait jusqu’à lui : les blocs tués entre l’instantané précédent et celui-ci. Autrement dit,
-            des blocs que l’instantané <em>précédent</em> détient et que celui-ci ne détient pas ; la deadlist d’un
-            instantané n’est pas « les blocs qui n’appartiennent qu’à lui ».
-          </p>
-          <p><strong>Où va un bloc mort.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DL}
-          from={487}
-          to={501}
-          symbol="dsl_deadlist_insert"
-          notes={[
-            {
-              from: 487,
-              to: 492,
-              text: `Une deadlist est un arbre d’entrées, chacune une liste de pointeurs de bloc <a href="${L.zapKey}">rangée sous une clé</a>, un txg qui <a href="${L.notInclusive}">« n’est pas inclus »</a>. On cherche la naissance : si elle tombe exactement sur une clé, on prend l’entrée d’avant, sinon l’entrée la plus proche avant. Dans les deux cas, l’entrée dont la clé est la plus grande strictement en dessous de la naissance.`,
-            },
-            {
-              from: 494,
-              to: 498,
-              text: "Une naissance inférieure ou égale à toutes les clés ne peut pas arriver sur un pool sain : elle est signalée, et le bloc va dans la première entrée.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>D’où partent les clés.</strong> Un système de fichiers est créé <a href={L.originNull}>à partir de
-            l’instantané <code>$ORIGIN</code> du pool</a>, créé <a href={L.createOrigin}>à partir d’un dataset vide</a>
-            avec <a href={L.originTxg}>le txg de création 1</a>. En suivant les extraits, un nouveau système de fichiers
-            part avec un <code>ds_prev_snap_txg</code> de 1 et une deadlist à une clé, 0, et son premier instantané ajoute la
-            clé 1. Tout bloc écrit par un utilisateur naît après le txg 1 : l’entrée 0 reste vide, l’entrée 1 recueille ce
-            qui est né avant le premier instantané. Ce sont les entrées <code>&gt; 0</code> et <code>&gt; 1</code> de la
-            figure.
-          </p>
-          <p>
-            <strong>Le même txg.</strong> Un instantané est une tâche de synchronisation, et le txg écrit d’abord ses
-            données.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/dsl_pool.c"
-          from={747}
-          to={760}
-          symbol="dsl_pool_sync"
-          notes={[
-            {
-              from: 747,
-              to: 753,
-              text: `Chaque dataset modifié est écrit avant que les tâches de synchronisation ne s’exécutent, pour ne pas se tromper sur les blocs qui font partie de l’instantané (<q lang="en">we won’t get confused about which blocks are part of the snapshot</q>). Les tâches s’exécutent <a href="${L.tasks}">à la fin</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Deux conséquences, toutes deux dans la figure. Un bloc écrit dans le même txg qu’un instantané est dans cet
-            instantané : né au txg T, détenu par l’instantané du txg T, d’où le test strict. Et un bloc tué dans le txg d’un
-            instantané n’y est pas : sa mort a été décidée par rapport à l’instantané précédent. Un seul instantané d’un
-            dataset par txg : un second <a href={L.eagain}>est refusé, <code>EAGAIN</code></a>.
-          </p>
-          <p><strong>Un clone part du pointeur de bloc d’un instantané.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={1213}
-          to={1227}
-          symbol="dsl_dataset_create_sync_dd"
-          notes={[
-            {
-              from: 1216,
-              to: 1218,
-              text: "L’instantané précédent du clone est son origine, et son <code>ds_prev_snap_txg</code> le txg de création de l’origine.",
-            },
-            {
-              from: 1225,
-              to: 1227,
-              text: "Son <code>ds_bp</code> est celui de l’origine : comme un instantané, un clone commence par un pointeur de bloc copié.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Ensuite l’origine <a href={L.numChildren}>gagne un enfant</a>, la deadlist du clone
-            <a href={L.cloneDl}>commence avec les clés inférieures au txg de l’origine</a>, et l’origine est enregistrée
-            <a href={L.originObj}>dans le répertoire du clone</a> (en mémoire, <a href={L.ddOriginTxg}><code>dd_origin_txg</code></a>).
-            Une écriture dans le clone passe par le même <code>dsl_dataset_block_kill</code>, avec le
-            <code>ds_prev_snap_txg</code> du clone : un bloc écrit par le clone est né après l’origine et libéré quand le
-            clone l’abandonne ; un bloc né avant l’origine ou pendant est partagé avec elle et va dans la deadlist du clone.
-            Le clone diverge par txg de naissance, et rien n’est copié.
-          </p>
-          <p><strong>Détruire un instantané.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DD}
-          from={387}
-          to={424}
-          symbol="dsl_destroy_snapshot_sync_impl"
-          notes={[
-            {
-              from: 387,
-              to: 391,
-              text: "Le dataset suivant, l’instantané suivant ou la tête, hérite de l’instantané précédent et du <code>ds_prev_snap_txg</code> de l’instantané détruit.",
-            },
-            {
-              from: 395,
-              to: 397,
-              text: `Les pools d’avant les deadlists à clés <a href="${L.oldFmt}">appliquent le même test à chaque bloc</a>. La figure suit le chemin à clés.`,
-            },
-            {
-              from: 399,
-              to: 413,
-              text: "Comptabilité de l’espace, non dessinée.",
-            },
-            {
-              from: 415,
-              to: 418,
-              text: `Chaque entrée de la deadlist suivante <a href="${L.moveBpobj}">à partir</a> du <code>ds_prev_snap_txg</code> de l’instantané part dans la liste à libérer du pool. Ces blocs sont nés après l’instantané d’avant et ont été tués avant le suivant : cet instantané était le seul à les détenir. Les clés suffisent à le dire. Le thread de synchronisation <a href="${L.freeBpobj}">libère cette liste</a> dans les txg suivants ; la figure les libère tout de suite.`,
-            },
-            {
-              from: 422,
-              to: 424,
-              text: `La deadlist de l’instantané lui-même, des blocs que l’instantané d’avant détient encore, rejoint la suivante <a href="${L.insertBpobj}">entrée par entrée</a>, puis elle est <a href="${L.dlFree}">libérée</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Enfin, la clé du txg de l’instantané <a href={L.removeKey}>est retirée, son entrée fusionnée avec la
-            précédente</a> : dans la tête <a href={L.headKey}>quand le dataset suivant est un instantané</a>, et dans chaque
-            clone <a href={L.clonesKeyTest}>dont l’origine est plus récente que l’instantané</a>, par
-            <a href={L.clonesKey}><code>dsl_dir_remove_clones_key</code></a>. Un instantané
-            qui a un clone a <a href={L.numChildrenField}>plus d’un enfant</a> et <a href={L.branch}>ne peut pas être
-            détruit, <code>EEXIST</code></a> : on ne détruit pas un point de branchement (<q lang="en">Can’t delete a branch point</q>).
-          </p>
-          <p>
-            <strong>À quel instantané appartient ce bloc.</strong> Rien dans ZFS ne stocke cette réponse : elle découle des
-            txg de naissance. Un bloc de <code>fs</code> né au txg B et tué au txg K est détenu par les instantanés de
-            <code>fs</code> pris du txg B au txg K − 1 : ceux d’avant B ont été figés avant qu’il existe, ceux de K ou après,
-            une fois qu’il avait disparu. Un bloc encore vivant est détenu par tous les instantanés pris depuis B. La figure
-            calcule cet intervalle à partir des nombres, et ses tests le comparent à l’arbre de dataset qui contient
-            réellement le bloc, sur des milliers de séquences aléatoires.
-          </p>
-        </div>
+      <div class="step">
+        <h3>Un instantané copie un seul pointeur de bloc</h3>
+        <p class="prose">
+          <code>dsl_dataset_snapshot_sync_impl</code> crée l’instantané à la fin d’un txg. Il lui écrit un nouvel
+          enregistrement, et la seule chose qu’il prend dans l’arbre des blocs est le pointeur vers sa racine.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_dataset_snapshot_sync_impl</code>, dsl_dataset.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DS}
+            from={1782}
+            to={1784}
+            symbol="dsl_dataset_snapshot_sync_impl"
+            notes={[
+              {
+                from: 1783,
+                text: `Le <code>ds_bp</code> de l’instantané, le pointeur vers la racine de l’arbre, est celui du système de fichiers. Rien en dessous n’est lu ni écrit. L’instantané reçoit aussi <a href="${L.crtxg}">ce txg comme txg de création</a> et <a href="${L.handOff}">la deadlist du système de fichiers telle quelle</a>. Le système de fichiers commence <a href="${L.newDl}">une nouvelle deadlist vide, avec une clé de plus</a>, et <a href="${L.setPrev}">retient ce txg comme son dernier instantané</a>. Un second instantané dans le même txg <a href="${L.eagain}">est refusé</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Où va un bloc gardé</h3>
+        <p class="prose">
+          Une deadlist est découpée en entrées, chacune avec pour clé le txg d’un instantané.
+          <code>dsl_deadlist_insert</code> range un bloc dans l’entrée dont la clé est la plus grande strictement inférieure à sa naissance :
+          l’entrée dit entre quels instantanés successifs le bloc est né.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_deadlist_insert</code>, dsl_deadlist.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DL}
+            from={487}
+            to={492}
+            symbol="dsl_deadlist_insert"
+            notes={[
+              {
+                from: 487,
+                to: 488,
+                text: `La naissance du bloc est cherchée parmi les clés, qui sont <a href="${L.zapKey}">rangées sur le disque</a>. Une clé est une borne exclue (<a href="${L.notInclusive}">« not inclusive »</a>, dit le code) : l’entrée &gt;&#8239;9 contient les blocs nés après le txg 9.`,
+              },
+              { from: 489, to: 492, text: "Sans clé exacte, il prend la plus proche en dessous. Avec une clé exacte, il prend celle d’avant. Dans les deux cas, c’est la plus grande clé strictement inférieure à la naissance." },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Détruire un instantané</h3>
+        <p class="prose">
+          <code>dsl_destroy_snapshot_sync_impl</code> se sert de ces clés. Les blocs que seul l’instantané détruit
+          détenait sont nés après l’instantané précédent et ont été abandonnés avant la prise du suivant : ils remplissent des entrées
+          entières de la deadlist du dataset suivant.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_destroy_snapshot_sync_impl</code>, dsl_destroy.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DD}
+            from={415}
+            to={424}
+            symbol="dsl_destroy_snapshot_sync_impl"
+            notes={[
+              {
+                from: 415,
+                to: 418,
+                text: `Chaque entrée de la deadlist suivante <a href="${L.moveBpobj}">à partir</a> du <code>ds_prev_snap_txg</code> de l’instantané passe dans la liste des blocs à libérer du pool, qui <a href="${L.freeBpobj}">est vidée dans les txg suivants</a>. Aucun pointeur de bloc n’est lu pour en décider. La figure libère ces blocs tout de suite.`,
+              },
+              { from: 419, to: 420, text: "Comptabilité de l’espace, non dessinée." },
+              {
+                from: 422,
+                to: 424,
+                text: `La deadlist de l’instantané lui-même, des blocs que l’instantané précédent détient encore, <a href="${L.insertBpobj}">rejoint la suivante, entrée par entrée</a>. Puis son txg de création <a href="${L.removeKey}">est retiré des clés</a> de la deadlist du système de fichiers, <a href="${L.headKey}">quand le dataset suivant est un instantané</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Un clone part d’un instantané</h3>
+        <p class="prose">
+          <code>dsl_dataset_create_sync_dd</code>, avec un instantané d’origine, crée un clone comme on crée un
+          instantané : en copiant un seul pointeur de bloc. Il donne aussi au clone l’origine comme dernier instantané,
+          si bien que le même test que plus haut garde ce que le clone partage et libère ce qu’il a écrit.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_dataset_create_sync_dd</code>, dsl_dataset.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DS}
+            from={1213}
+            to={1227}
+            symbol="dsl_dataset_create_sync_dd"
+            notes={[
+              {
+                from: 1216,
+                to: 1218,
+                text: "Le dernier instantané du clone est son origine, avec le txg de création de l’origine. Un bloc né dans ce txg ou avant est partagé avec l’origine et va dans la deadlist du clone ; un bloc écrit par le clone est libéré.",
+              },
+              {
+                from: 1225,
+                to: 1227,
+                text: `Son <code>ds_bp</code> est celui de l’origine. L’origine <a href="${L.numChildren}">gagne un enfant</a>. Avec le dataset qui la suit, cela fait deux, et un instantané qui a plus d’un enfant <a href="${L.branch}">ne peut pas être détruit</a>, <code>EEXIST</code>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">Ce que la figure laisse de côté</h2>
       <p class="prose muted">
-        La figure exécute les fonctions ci-dessus sur un système de fichiers de quatre blocs de données et jusqu’à quatre
-        instantanés, et un clone qui ne peut lui-même être ni pris en instantané ni détruit. L’objset, les dnodes et les
-        blocs indirects forment un seul bloc racine. Les libérations différées des blocs gang, dédupliqués et clonés, la
-        comptabilité de l’espace et la <a href={L.livelist}>livelist</a> du clone sont laissées de côté ; aucune ne change
-        le fait qu’un bloc soit libéré ou gardé. Les blocs de la liste à libérer du pool sont dessinés libérés tout de
-        suite. Les holds, la destruction différée et les deadlists à l’ancien format ne sont pas montrés. Les signets
-        (<code>dsl_bookmark.c</code>) et <code>zfs promote</code>, qui <a href={L.promote}>échange un clone et le système de
-        fichiers de son origine</a>, relèvent d’autres salles.
+        La figure fait tourner les fonctions ci-dessus sur un système de fichiers qui a de la place pour quatre blocs de données, avec
+        jusqu’à quatre instantanés et un clone dont on ne peut ni prendre d’instantané ni demander la destruction. Le bloc racine
+        tient lieu de l’objset, des dnodes et des blocs indirects, abandonnés selon la même règle. Les blocs gang, les blocs dédupliqués
+        et ceux partagés par le clonage de blocs, que ZFS libère plus tard plutôt que tout de suite, sont libérés tout de suite ici, comme les blocs
+        d’un instantané détruit. La comptabilité de l’espace (tailles utilisée et référencée) n’est pas dessinée, ni la
+        livelist du clone, une liste des blocs qu’il a écrits qui accélère sa destruction ; ni l’une ni l’autre ne
+        change le sort d’un bloc. Les holds, la destruction différée, les pools antérieurs aux deadlists à clés, les
+        signets (bookmarks) et <code>zfs promote</code>, qui échange un clone avec le système de fichiers de son
+        origine, sont laissés de côté.
       </p>
     </section>
   </article>
@@ -410,7 +266,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -419,10 +275,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -430,8 +286,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

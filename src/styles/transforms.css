@@ -60,13 +60,9 @@
 :is(.dd, .cr) .path li.taken {
   font-weight: 600;
 }
-:is(.cl, .dd, .cr) a.see {
-  font-size: 0.85em;
-  color: var(--fg-muted);
-  font-weight: 400;
-}
+/* The line that says what the last action did sits just under the buttons. */
 :is(.dd, .cr) .tr-now {
-  margin: var(--space-4) 0 0;
+  margin: 0 0 var(--space-4);
   font-size: var(--step--1);
   max-width: 52rem;
   min-height: 3em;
@@ -112,14 +108,18 @@
 :is(.cl, .dd, .cr) td.num {
   text-align: right;
 }
-:is(.cl, .dd, .cr) tr.cur th,
-:is(.cl, .dd, .cr) tr.cur td {
+.cl tr.cur th,
+.cl tr.cur td {
   color: var(--accent);
   font-weight: 600;
 }
 /* The DDT scrolls inside its own region on a narrow phone, never the page. */
 .dd .ddt-scroll {
   overflow-x: auto;
+}
+/* Room for the outline of a changed row, inside the table's first column. */
+.dd .ddt :is(th, td):first-child {
+  padding-left: 0.4em;
 }
 .cl .cmp-table {
   max-width: 40rem;
@@ -163,6 +163,60 @@
   font-weight: 600;
 }
 
+/* What the last action changed: a dashed ink outline (focus rings are solid),
+   static, so it reads the same under reduced motion (D31.1, as D27.1). Rows and
+   list items are outlined inside their own box, so two neighbours do not draw
+   double lines. */
+:is(.cl, .dd, .cr) .chg {
+  outline: 2px dashed var(--fg);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+:is(.cl, .dd, .cr) :is(li, tr).chg {
+  outline-offset: -2px;
+}
+/* In the compression figure the bar rows and the branches get a little room of
+   their own, so the outline wraps the label and the step number, never cuts
+   through them. The numbers are drawn inside each branch's box for that. */
+.cl .bars .row {
+  padding: 4px 6px;
+  margin-inline: -6px;
+}
+.cl .path {
+  list-style: none;
+  padding-left: 0;
+  counter-reset: step;
+}
+.cl .path li {
+  counter-increment: step;
+  position: relative;
+  padding: 2px 4px 2px 1.8em;
+}
+.cl .path li::before {
+  content: counter(step) "." / "";
+  position: absolute;
+  left: 0.4em;
+  font-variant-numeric: tabular-nums;
+}
+.cl .path li.taken::before {
+  color: var(--accent);
+}
+.cl :is(.row, li).chg {
+  outline-offset: 0;
+}
+.cl .outcome.chg {
+  outline-offset: 4px;
+}
+/* The read that failed, marked on its block; a failed checksum the scrub found. */
+.cr .rd.bad {
+  color: var(--bad);
+  font-weight: 600;
+}
+.cr .sc.bad.chg,
+.cr .rd.chg {
+  outline-width: 3px;
+  padding: 0 0.2em;
+}
 /* Dedup. */
 .dd .counters {
   display: flex;
@@ -175,6 +229,13 @@
 }
 .dd .counters b {
   color: var(--fg);
+}
+/* A counter the last action changed is outlined inside the figure's edge. */
+.dd .counters span {
+  padding: 0 0.3em;
+}
+.dd .counters .chg {
+  outline-offset: 0;
 }
 .dd .dd-grid {
   display: grid;
@@ -218,9 +279,6 @@
   border-radius: 4px;
   padding: 0.2em 0.5em;
 }
-.dd :is(.bps, .disk) li.cur {
-  border-color: var(--accent);
-}
 .dd .bpn {
   font-family: var(--font-mono);
   color: var(--fg-muted);
@@ -239,6 +297,11 @@
 }
 .dd .arrow {
   color: var(--fg-faint);
+}
+.dd .quota-note {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-left: 3px solid var(--bad);
 }
 
 /* Encryption. */
@@ -319,6 +382,18 @@
 .cr .readout.bad {
   background: var(--bad-soft);
   border-left: 3px solid var(--bad);
+}
+/* On a phone each group's label takes its own line, above its buttons, and the
+   DDT drops the physical birth: the block pointers show it. */
+@media (max-width: 30rem) {
+  :is(.cl, .dd, .cr) .buttons > .glabel {
+    flex-basis: 100%;
+    min-width: 0;
+    margin-right: 0;
+  }
+  .dd .ddt .birth {
+    display: none;
+  }
 }
 @media (max-width: 48rem) {
   .dd .dd-grid {

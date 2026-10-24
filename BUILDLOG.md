@@ -2271,6 +2271,17 @@ narration stay in a bar at the bottom while the figure is in view. The model is 
 short excerpts are new in `ANALYSIS.md` (ARC room, 10 to 17). No shared code changed; the other
 rooms are unchanged, except the Engine room's computed excerpt count (127 → 135).
 
+## v1.4 snapshots room (ALG-195): a question, and a figure that says what each sync freed and kept
+
+**What changed.** The snapshots and clones room, in EN, FR and ES, asks one question ("Why
+doesn't deleting a file give me my space back?"), answers it in three plain paragraphs, keeps
+its figure with what to try, then shows the code in five Source notes (D21.1, D28.1). In the
+figure, a line says what each sync did, a ring marks the blocks it touched, blocks kept only for
+snapshots are hatched, and each snapshot says what destroying it would free. Four short excerpts
+are new in `ANALYSIS.md` (snapshots room, 9 to 12). The other rooms are unchanged, except the
+Engine room's computed excerpt count (141 → 145) and, in `scripts/verify.mjs`, the French label
+of the snapshot button ("Prendre un instantané de fs", a verb like the other languages).
+
 **Measures** (built pages, `<article>` only; the same in EN, FR and ES):
 
 | | `main` | this branch |
@@ -2317,6 +2328,14 @@ in three. `npm test` 245 pass, `verify-arc.mjs` 35 captures, 0 problems.
 
 **Debts.** None new. `scripts/verify.mjs` still checks this room in EN and FR only;
 `verify-arc.mjs` covers ES.
+
+**Design review pass (D28.2).** All seven items of the Design/UX review fixed in one pass: the
+owner panel's prediction is one sentence again (B1); the plain answer opens with the answer, about
+70 words a paragraph, in the three languages (S1); Overwrite, Delete and Cancel for the selected
+block sit in a row under the board, sticky on a phone, focused after a keyboard selection (S2);
+the pending tags do not wrap, the empty log says so, "what to try" starts with "Select B in fs",
+and selected looks different from focused and is in the legend (N1–N4). Merged `main` (ALG-201).
+Evidence: 267 tests pass; audit 42 pages, 0 problems; full verify 488 captures, 0 errors.
 
 ## v1.4 metaslabs room (ALG-197): a question, a figure that outlines what each action changed
 
@@ -2520,3 +2539,34 @@ its page, its three figures and `transforms.css`.
 
 Not taken: a "(changed)" text on the read mark (its own text says it), and a comment on exact
 seven-eighths values (block sizes are powers of two).
+
+| GitHub links in the article | 44 | 24 |
+| of them in the prose | 27 | 0 |
+| in excerpts and Source notes | 17 | 24 |
+| "code" links narrated by the figure (script strings) | 10 | 0 |
+| Code excerpts | 7 | 5 |
+| Lines of code shown | 141 | 35 |
+
+**Proof.** `npm run build` (typography check: 14 files, 0 failures), `npm test` (251 pass;
+new: the "destroying it frees" prediction matches the destroy over random sequences, with and
+without changes waiting in the same txg; the hatched blocks against the deadlists; the opening
+state; `scripts/test/snapshots-view.test.mjs`, 3 tests on the ring, the hatching and the summary
+line), `check-permalinks` (ANALYSIS.md 145
+excerpts, 954 line references; built site 1899 references), `check-sources` (156 references,
+44 pages) and `check-csp` (44 pages, no new hash): all pass. Captures in Chromium at 1440 and
+390 px in EN, FR and ES (not committed, `shots/`): the opening state, an overwrite, a snapshot,
+a destroy, a Source note in the side panel; 0 console errors.
+
+**Reviews.** `technical-writer` on the three languages and the figure's strings: four claims
+made precise (a snapshot with more than one child cannot be destroyed, not "with a child", since
+its next dataset counts as one; D starts empty; the key removed on a destroy is the snapshot's
+creation txg, from the head's deadlist; "cloned blocks" in what is left out means block
+cloning), the counter argument softened, "The work comes later." folded into the next sentence,
+glosses made explicit, fragments in two notes made sentences, calques in FR and ES ("lâcher",
+"soltar", "quels deux", "né au plus tard avec"), a French button with no verb, a Spanish verb
+agreement. Not taken: none of substance. `code-reviewer` on the diff: the "destroying it frees"
+line ignored overwrites waiting in the same txg, whose kills run before the destroy (now
+predicted by running the destroy on a copy); selecting a block during a sync cut its log short
+(now only other actions stop the replay, and they write the rest of the log at once); the
+moving animation took the "frees" chips for where a block lives; the text version lacked what a
+destroy would free; a test of the hatching restated the code. All fixed, and view tests added.

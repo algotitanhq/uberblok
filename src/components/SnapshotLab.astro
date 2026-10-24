@@ -7,34 +7,22 @@
 // sync functions) decides every outcome, and src/lib/snapshots-view.ts draws
 // it, at build time for the opening state (readable without JavaScript) and in
 // the browser after. Refs: ANALYSIS.md, room "Snapshots and clones";
-// simplifications: DECISIONS.md D5.2.
+// simplifications: DECISIONS.md D5.2. After each sync a line says what it did, the
+// blocks it changed carry a ring, and blocks kept only for snapshots are hatched
+// (D28.1).
 import type { Lang } from "../lib/rooms";
 import { UI } from "../lib/ui";
-import { gh } from "../lib/openzfs";
 import { fr } from "../lib/fr";
 import { opening } from "../lib/snapshots";
-import { board, describe, summary, waiting, ownerPanel, type SnStrings } from "../lib/snapshots-view";
+import { board, describe, summary, waiting, ownerPanel, quickRow, type SnStrings } from "../lib/snapshots-view";
 
 interface Props {
   lang: Lang;
 }
 const { lang } = Astro.props;
-const DS = "module/zfs/dsl_dataset.c";
-const refs = {
-  birth: gh("module/zfs/metaslab.c", 6061),
-  kill: gh(DS, 294),
-  free: gh(DS, 312, 315),
-  insert: gh("module/zfs/dsl_deadlist.c", 487, 501),
-  snapshot: gh(DS, 1830, 1839),
-  clone: gh(DS, 1213, 1227),
-  destroy: gh("module/zfs/dsl_destroy.c", 415, 424),
-  eexist: gh("module/zfs/dsl_destroy.c", 83, 86),
-  eagain: gh(DS, 1534, 1539),
-  order: gh("module/zfs/dsl_pool.c", 747, 753),
-};
 const S0 = {
   en: {
-    figure: "fs, its snapshots and a clone: each one a ds_bp over a root block and four data blocks, with its deadlist",
+    figure: "fs, its snapshots and a clone: each one a root block over four data blocks, with its deadlist, the blocks it let go of that a snapshot still holds",
     openTxg: "Open txg",
     sync: "Sync txg {txg}",
     snapshot: "Snapshot fs",
@@ -66,41 +54,40 @@ const S0 = {
     overwrite: "Overwrite in {ds}",
     delete: "Delete in {ds}",
     freedIn: "Freed in txg {txg}:",
-    see: "code",
     and: "and",
     aBlock: "{slot}{birth}, born in txg {birth}",
     aRoot: "R{birth}, the root, born in txg {birth}",
     aOfClone: "(written by the clone)",
     eBorn: "{ds} writes {b}, born in txg {txg}.",
-    eRoot: "{ds} writes a new root, {b}, born in txg {txg}: its ds_bp points there now.",
-    eFree: "{ds} kills {b}: born {birth} &gt; ds_prev_snap_txg {prev}, no snapshot can hold it. Freed.",
-    eDead: "{ds} kills {b}: born {birth} &gt; {prev} is false, a snapshot holds it. Onto the deadlist of {ds}, entry &gt; {key}.",
-    eSnap: "{snap} is created in txg {txg}. Its ds_bp is {root}, the head’s, and nothing else is copied. It takes fs’s deadlist as it was; fs gets empty entries with the keys {keys}, and its ds_prev_snap_txg goes from {old} to {txg}.",
-    eClone: "The clone is created from {origin}. Its ds_bp is {root}, its ds_prev_snap_txg is {txg}, and its deadlist starts with the keys {keys}, empty.",
-    eDestroy: "{snap} is destroyed. The entries of {next}’s deadlist from key {prev} up hold blocks born after txg {prev} and killed after {snap} was taken: only {snap} held them. Freed: {freed}. {merged}{from}",
-    eMerged: "Its own deadlist moves into the next one: {list}. ",
+    eRoot: "{ds} writes a new root, {b}, born in txg {txg}, and now points to it.",
+    eFree: "{ds} lets go of {b}. It was born in txg {birth}, after the latest snapshot (txg {prev}), so no snapshot holds it, and it is freed.",
+    eDead: "{ds} lets go of {b}. It was born in txg {birth}, in or before the txg of the latest snapshot (txg {prev}), so a snapshot holds it: kept on the deadlist of {ds}, entry &gt; {key}.",
+    eSnap: "{snap} is taken in txg {txg}. It points to {root}, the root fs points to, and nothing else is copied. It takes fs’s deadlist as it was, and fs starts an empty one with the keys {keys}. The latest snapshot of fs goes from txg {old} to txg {txg}.",
+    eClone: "The clone is made from {origin}. It points to {root}, its latest snapshot is {origin}, from txg {txg}, and its deadlist starts empty, with the keys {keys}.",
+    eDestroy: "{snap} is destroyed. The entries of {next}’s deadlist from key {prev} up hold blocks born after txg {prev} and let go of by {next} after {snap} was taken: only {snap} held them. Freed: {freed}. {merged}{from}",
+    eMerged: "Its own deadlist joins the next one: {list}. ",
     eRemoved: "Key {key} is removed from {list}; its entry joins the one below.",
     nothingFreed: "nothing",
     eEagain: "Refused: a second snapshot of fs in the same txg (EAGAIN).",
     eexist: "Origin of the clone: cannot be destroyed (EEXIST).",
     eEnoent: "Refused: no such snapshot (ENOENT).",
     eSynced: "Txg {txg} is synced.",
-    pick: "Select a block to see its birth txg and who holds it.",
+    pick: "Select a block to see when it was born and who holds it.",
     oBlock: "Block {name}, born in txg {birth}",
     oRoot: "Root block {name}, born in txg {birth}",
     oFreed: "Freed in txg {txg}: no dataset references it any more.",
-    oRefs: "Referenced by {list}.",
-    oOnDl: "On the deadlist of {ds}, entry &gt; {key} (killed by {killer} in txg {txg}).",
+    oRefs: "Used by {list}.",
+    oOnDl: "On the deadlist of {ds}, entry &gt; {key} ({killer} let go of it in txg {txg}).",
     oRangeOpen: "taken in or after txg {birth}, its birth",
-    oRangeKilled: "taken from txg {birth}, its birth, to txg {last} (fs killed it in txg {k}, before that txg’s sync tasks)",
-    oRangeOne: "taken in txg {birth}, its birth (fs killed it in txg {k}, before that txg’s sync tasks)",
+    oRangeKilled: "taken from txg {birth}, its birth, to txg {last} (fs let go of it in txg {k}, before that txg’s snapshot)",
+    oRangeOne: "taken in txg {birth}, its birth (fs let go of it in txg {k}, before that txg’s snapshot)",
     oSnaps: "Held by the snapshots {range}: {list}.",
     oNoSnap: "No snapshot holds it: none was {range}.",
-    oCloneOwn: "Written by the clone after its origin: only the clone holds it, and no snapshot.",
-    oWouldFree: "If {ds} killed it now: {birth} &gt; {prev}, freed.",
-    oWouldDead: "If {ds} killed it now: {birth} &gt; {prev} is false, onto the deadlist of {ds}, entry &gt; {key}.",
+    oCloneOwn: "Written by the clone after its origin: only the clone holds it; no snapshot does.",
+    oWouldFree: "If {ds} let go of it now: born in txg {birth}, after the latest snapshot (txg {prev}), so freed.",
+    oWouldDead: "If {ds} let go of it now: born in txg {birth}, in or before the txg of the latest snapshot (txg {prev}), so kept on the deadlist of {ds}, entry &gt; {key}.",
     tIntro: "The open txg is {txg}. The datasets, in order:",
-    tDataset: "{name}, {kind}: ds_prev_snap_txg {prev}; ds_bp points to the {root}; data blocks: {blocks}. Deadlist: {dl}.",
+    tDataset: "{name}, {kind}: {prev}; it points to the {root}; data blocks: {blocks}. Deadlist: {dl}.",
     tEntry: "entry &gt; {key}: {list}",
     tFreed: "Freed so far: {list}.",
     tFreedOne: "{b} (in txg {txg})",
@@ -111,17 +98,43 @@ const S0 = {
     summaryClone: "; a clone of {origin}",
     noSnapshots: "none",
     logLabel: "What the sync did",
-    ownerLabel: "Which snapshot owns this block?",
+    ownerLabel: "Which snapshots hold this block?",
     legendBirth: "block A, born in txg 8",
-    legendRoot: "root block (the objset ds_bp points to)",
+    legendRoot: "root block, the top of the tree",
     legendClone: "written by the clone",
     legendFreed: "freed",
+    aPinned: "kept only for snapshots",
+    mLatest: "latest snapshot: {name}, txg {txg}",
+    mBefore: "snapshot before it: {name}, txg {txg}",
+    mOrigin: "made from {name}, txg {txg}",
+    mStart: "the pool’s start",
+    onlyHolds: "Destroying it frees these blocks ({n}):",
+    onlyNone: "Destroying it frees nothing: every block it holds is still used by fs or another snapshot.",
+    dSynced: "Txg {txg} is synced.",
+    dSnap: "{snap} now holds the tree as it was.",
+    dClone: "The clone shares every block of {origin}.",
+    dDestroy: "{snap} is gone.",
+    dKept: "Kept for a snapshot: {list}.",
+    dFreed: "Freed: {list}.",
+    dKept1: "Kept for a snapshot: {list}.",
+    dFreed1: "Freed: {list}.",
+    dNothing: "Nothing changed.",
+    didOpening: "fs@s1 was taken in txg 9, then A was overwritten in txg 10. The old A<sub>8</sub> and the old root R<sub>8</sub> are hatched: fs no longer uses them, but fs@s1 does, so they are kept.",
+    legendPin: "kept only for snapshots",
+    legendHit: "changed by the last sync",
+    legendSel: "selected",
+    qPick: "Select a block on the board to overwrite or delete it.",
+    qSel: "{name} selected:",
+    qNone: "{name} selected. Neither fs nor the clone uses it now; only snapshots hold it, so there is nothing to change.",
+    qRoot: "{name} selected. A root is rewritten by itself when a block under it changes.",
+    qFreed: "{name} selected. It was freed in txg {txg}.",
+    logEmpty: "Nothing synced yet: press Sync txg {txg}.",
   },
   fr: {
-    figure: "fs, ses instantanés et un clone : chacun un ds_bp au-dessus d’un bloc racine et de quatre blocs de données, avec sa deadlist",
+    figure: "fs, ses instantanés et un clone : chacun un bloc racine au-dessus de quatre blocs de données, avec sa deadlist, les blocs qu’il a abandonnés et qu’un instantané détient encore",
     openTxg: "Txg ouvert",
     sync: "Synchroniser le txg {txg}",
-    snapshot: "Instantané de fs",
+    snapshot: "Prendre un instantané de fs",
     reset: "Recommencer",
     snapEagain: "Un instantané de fs par txg (EAGAIN) : synchronisez d’abord.",
     snapLimit: "La figure garde quatre instantanés au plus : détruisez-en un d’abord.",
@@ -150,41 +163,40 @@ const S0 = {
     overwrite: "Réécrire dans {ds}",
     delete: "Supprimer dans {ds}",
     freedIn: "Libérés au txg {txg} :",
-    see: "code",
     and: "et",
     aBlock: "{slot}{birth}, né au txg {birth}",
     aRoot: "R{birth}, la racine, née au txg {birth}",
     aOfClone: "(écrit par le clone)",
     eBorn: "{ds} écrit {b}, né au txg {txg}.",
-    eRoot: "{ds} écrit une nouvelle racine, {b}, née au txg {txg} : son ds_bp pointe désormais sur elle.",
-    eFree: "{ds} tue {b} : né au txg {birth} &gt; ds_prev_snap_txg {prev}, aucun instantané ne peut le détenir. Libéré.",
-    eDead: "{ds} tue {b} : {birth} &gt; {prev} est faux, un instantané le détient. Dans la deadlist de {ds}, entrée &gt; {key}.",
-    eSnap: "{snap} est créé au txg {txg}. Son ds_bp est {root}, celui de la tête, et rien d’autre n’est copié. Il prend la deadlist de fs telle quelle ; fs reçoit des entrées vides aux clés {keys}, et son ds_prev_snap_txg passe de {old} à {txg}.",
-    eClone: "Le clone est créé à partir de {origin}. Son ds_bp est {root}, son ds_prev_snap_txg vaut {txg}, et sa deadlist commence avec les clés {keys}, vides.",
-    eDestroy: "{snap} est détruit. Les entrées de la deadlist de {next} à partir de la clé {prev} contiennent des blocs nés après le txg {prev} et tués après la prise de {snap} : seul {snap} les détenait. Libérés : {freed}. {merged}{from}",
-    eMerged: "Sa propre deadlist passe dans la suivante : {list}. ",
+    eRoot: "{ds} écrit une nouvelle racine, {b}, née au txg {txg}, et pointe désormais sur elle.",
+    eFree: "{ds} abandonne {b}. Il est né au txg {birth}, après le dernier instantané (txg {prev}) : aucun instantané ne le détient, il est libéré.",
+    eDead: "{ds} abandonne {b}. Il est né au txg {birth}, dans le txg du dernier instantané ou avant (txg {prev}) : un instantané le détient, il est gardé dans la deadlist de {ds}, entrée &gt; {key}.",
+    eSnap: "{snap} est pris au txg {txg}. Il pointe sur {root}, la racine de fs, et rien d’autre n’est copié. Il reprend la deadlist de fs telle quelle, et fs en commence une vide, avec les clés {keys}. Le dernier instantané de fs passe du txg {old} au txg {txg}.",
+    eClone: "Le clone est créé à partir de {origin}. Il pointe sur {root}, son dernier instantané est {origin}, du txg {txg}, et sa deadlist commence vide, avec les clés {keys}.",
+    eDestroy: "{snap} est détruit. Les entrées de la deadlist de {next} à partir de la clé {prev} contiennent des blocs nés après le txg {prev} et abandonnés par {next} après la prise de {snap} : seul {snap} les détenait. Libérés : {freed}. {merged}{from}",
+    eMerged: "Sa propre deadlist rejoint la suivante : {list}. ",
     eRemoved: "La clé {key} est retirée de {list} ; son entrée rejoint celle du dessous.",
     nothingFreed: "rien",
     eEagain: "Refusé : un second instantané de fs dans le même txg (EAGAIN).",
     eexist: "Origine du clone : ne peut pas être détruit (EEXIST).",
     eEnoent: "Refusé : cet instantané n’existe pas (ENOENT).",
     eSynced: "Le txg {txg} est synchronisé.",
-    pick: "Sélectionnez un bloc pour voir son txg de naissance et qui le détient.",
+    pick: "Sélectionnez un bloc pour voir quand il est né et qui le détient.",
     oBlock: "Bloc {name}, né au txg {birth}",
     oRoot: "Bloc racine {name}, né au txg {birth}",
     oFreed: "Libéré au txg {txg} : plus aucun dataset ne le référence.",
-    oRefs: "Référencé par {list}.",
-    oOnDl: "Dans la deadlist de {ds}, entrée &gt; {key} (tué par {killer} au txg {txg}).",
+    oRefs: "Utilisé par {list}.",
+    oOnDl: "Dans la deadlist de {ds}, entrée &gt; {key} ({killer} l’a abandonné au txg {txg}).",
     oRangeOpen: "pris au txg {birth}, celui de sa naissance, ou après",
-    oRangeKilled: "pris du txg {birth}, celui de sa naissance, au txg {last} (fs l’a tué au txg {k}, avant les tâches de synchronisation de ce txg)",
-    oRangeOne: "pris au txg {birth}, celui de sa naissance (fs l’a tué au txg {k}, avant les tâches de synchronisation de ce txg)",
+    oRangeKilled: "pris du txg {birth}, celui de sa naissance, au txg {last} (fs l’a abandonné au txg {k}, avant l’instantané de ce txg)",
+    oRangeOne: "pris au txg {birth}, celui de sa naissance (fs l’a abandonné au txg {k}, avant l’instantané de ce txg)",
     oSnaps: "Détenu par les instantanés {range} : {list}.",
     oNoSnap: "Aucun instantané ne le détient : aucun n’a été {range}.",
-    oCloneOwn: "Écrit par le clone après son origine : seul le clone le détient, et aucun instantané.",
-    oWouldFree: "Si {ds} le tuait maintenant : {birth} &gt; {prev}, libéré.",
-    oWouldDead: "Si {ds} le tuait maintenant : {birth} &gt; {prev} est faux, dans la deadlist de {ds}, entrée &gt; {key}.",
+    oCloneOwn: "Écrit par le clone après son origine : seul le clone le détient, aucun instantané.",
+    oWouldFree: "Si {ds} le abandonnait maintenant : né au txg {birth}, après le dernier instantané (txg {prev}), il serait libéré.",
+    oWouldDead: "Si {ds} l’abandonnait maintenant : né au txg {birth}, dans le txg du dernier instantané ou avant (txg {prev}), il serait gardé dans la deadlist de {ds}, entrée &gt; {key}.",
     tIntro: "Le txg ouvert est le {txg}. Les datasets, dans l’ordre :",
-    tDataset: "{name}, {kind} : ds_prev_snap_txg {prev} ; ds_bp pointe sur la {root} ; blocs de données : {blocks}. Deadlist : {dl}.",
+    tDataset: "{name}, {kind} : {prev} ; il pointe sur la {root} ; blocs de données : {blocks}. Deadlist : {dl}.",
     tEntry: "entrée &gt; {key} : {list}",
     tFreed: "Libérés jusqu’ici : {list}.",
     tFreedOne: "{b} (au txg {txg})",
@@ -195,14 +207,40 @@ const S0 = {
     summaryClone: " ; un clone de {origin}",
     noSnapshots: "aucun",
     logLabel: "Ce que la synchronisation a fait",
-    ownerLabel: "À quel instantané appartient ce bloc ?",
+    ownerLabel: "Quels instantanés détiennent ce bloc ?",
     legendBirth: "bloc A, né au txg 8",
-    legendRoot: "bloc racine (l’objset sur lequel pointe ds_bp)",
+    legendRoot: "bloc racine, le haut de l’arbre",
     legendClone: "écrit par le clone",
     legendFreed: "libéré",
+    aPinned: "gardé seulement pour des instantanés",
+    mLatest: "dernier instantané : {name}, txg {txg}",
+    mBefore: "instantané précédent : {name}, txg {txg}",
+    mOrigin: "créé à partir de {name}, txg {txg}",
+    mStart: "le début du pool",
+    onlyHolds: "Le détruire libère ces blocs ({n}) :",
+    onlyNone: "Le détruire ne libère rien : fs ou un autre instantané utilise encore chacun de ses blocs.",
+    dSynced: "Le txg {txg} est synchronisé.",
+    dSnap: "{snap} garde l’arbre tel qu’il était.",
+    dClone: "Le clone partage tous les blocs de {origin}.",
+    dDestroy: "{snap} n’existe plus.",
+    dKept: "Gardés pour un instantané : {list}.",
+    dFreed: "Libérés : {list}.",
+    dKept1: "Gardé pour un instantané : {list}.",
+    dFreed1: "Libéré : {list}.",
+    dNothing: "Rien n’a changé.",
+    didOpening: "fs@s1 a été pris au txg 9, puis A a été réécrit au txg 10. L’ancien A<sub>8</sub> et l’ancienne racine R<sub>8</sub> sont hachurés : fs ne s’en sert plus, mais fs@s1 si, donc ils sont gardés.",
+    legendPin: "gardé seulement pour des instantanés",
+    legendHit: "changé par la dernière synchronisation",
+    legendSel: "sélectionné",
+    qPick: "Sélectionnez un bloc sur le plateau pour le réécrire ou le supprimer.",
+    qSel: "{name} sélectionné :",
+    qNone: "{name} sélectionné. Ni fs ni le clone ne s’en servent maintenant ; seuls des instantanés le détiennent, il n’y a donc rien à modifier.",
+    qRoot: "{name} sélectionné. Une racine est réécrite d’elle-même quand un bloc en dessous change.",
+    qFreed: "{name} sélectionné. Il a été libéré au txg {txg}.",
+    logEmpty: "Rien n’est encore synchronisé : appuyez sur Synchroniser le txg {txg}.",
   },
   es: {
-    figure: "fs, sus instantáneas y un clon: cada uno un ds_bp sobre un bloque raíz y cuatro bloques de datos, con su deadlist",
+    figure: "fs, sus instantáneas y un clon: cada uno un bloque raíz sobre cuatro bloques de datos, con su deadlist, los bloques que descartó y que una instantánea aún retiene",
     openTxg: "Txg abierto",
     sync: "Sincronizar el txg {txg}",
     snapshot: "Tomar una instantánea de fs",
@@ -234,41 +272,40 @@ const S0 = {
     overwrite: "Sobrescribir en {ds}",
     delete: "Borrar en {ds}",
     freedIn: "Liberados en el txg {txg}:",
-    see: "código",
     and: "y",
     aBlock: "{slot}{birth}, nacido en el txg {birth}",
     aRoot: "R{birth}, la raíz, nacida en el txg {birth}",
     aOfClone: "(escrito por el clon)",
     eBorn: "{ds} escribe {b}, nacido en el txg {txg}.",
-    eRoot: "{ds} escribe una raíz nueva, {b}, nacida en el txg {txg}: ahora su ds_bp apunta a ella.",
-    eFree: "{ds} mata {b}: nacido en el txg {birth} &gt; ds_prev_snap_txg {prev}, ninguna instantánea puede retenerlo. Liberado.",
-    eDead: "{ds} mata {b}: {birth} &gt; {prev} es falso, una instantánea lo retiene. A la deadlist de {ds}, entrada &gt; {key}.",
-    eSnap: "{snap} se crea en el txg {txg}. Su ds_bp es {root}, el de la cabeza, y no se copia nada más. Toma la deadlist de fs tal como estaba; fs recibe entradas vacías con las claves {keys}, y su ds_prev_snap_txg pasa de {old} a {txg}.",
-    eClone: "El clon se crea a partir de {origin}. Su ds_bp es {root}, su ds_prev_snap_txg es {txg}, y su deadlist empieza con las claves {keys}, vacías.",
-    eDestroy: "{snap} se destruye. Las entradas de la deadlist de {next} a partir de la clave {prev} contienen bloques nacidos después del txg {prev} y matados después de tomarse {snap}: solo {snap} los retenía. Liberados: {freed}. {merged}{from}",
-    eMerged: "Su propia deadlist pasa a la siguiente: {list}. ",
+    eRoot: "{ds} escribe una raíz nueva, {b}, nacida en el txg {txg}, y ahora apunta a ella.",
+    eFree: "{ds} descarta {b}. Nació en el txg {birth}, después de la última instantánea (txg {prev}): ninguna instantánea lo retiene, así que se libera.",
+    eDead: "{ds} descarta {b}. Nació en el txg {birth}, en el txg de la última instantánea o antes (txg {prev}): una instantánea lo retiene, así que se guarda en la deadlist de {ds}, entrada &gt; {key}.",
+    eSnap: "{snap} se toma en el txg {txg}. Apunta a {root}, la raíz de fs, y no se copia nada más. Se queda con la deadlist de fs tal como estaba, y fs empieza una vacía, con las claves {keys}. La última instantánea de fs pasa del txg {old} al txg {txg}.",
+    eClone: "El clon se crea a partir de {origin}. Apunta a {root}, su última instantánea es {origin}, del txg {txg}, y su deadlist empieza vacía, con las claves {keys}.",
+    eDestroy: "{snap} se destruye. Las entradas de la deadlist de {next} a partir de la clave {prev} contienen bloques nacidos después del txg {prev} y descartados por {next} después de tomarse {snap}: solo {snap} los retenía. Liberados: {freed}. {merged}{from}",
+    eMerged: "Su propia deadlist se une a la siguiente: {list}. ",
     eRemoved: "La clave {key} se elimina de {list}; su entrada se une a la de debajo.",
     nothingFreed: "nada",
     eEagain: "Rechazado: una segunda instantánea de fs en el mismo txg (EAGAIN).",
     eexist: "Origen del clon: no se puede destruir (EEXIST).",
     eEnoent: "Rechazado: esa instantánea no existe (ENOENT).",
     eSynced: "El txg {txg} está sincronizado.",
-    pick: "Selecciona un bloque para ver su txg de nacimiento y quién lo retiene.",
+    pick: "Selecciona un bloque para ver cuándo nació y quién lo retiene.",
     oBlock: "Bloque {name}, nacido en el txg {birth}",
     oRoot: "Bloque raíz {name}, nacido en el txg {birth}",
     oFreed: "Liberado en el txg {txg}: ya ningún dataset lo referencia.",
-    oRefs: "Referenciado por {list}.",
-    oOnDl: "En la deadlist de {ds}, entrada &gt; {key} (matado por {killer} en el txg {txg}).",
+    oRefs: "Usado por {list}.",
+    oOnDl: "En la deadlist de {ds}, entrada &gt; {key} ({killer} lo descartó en el txg {txg}).",
     oRangeOpen: "tomadas en el txg {birth}, el de su nacimiento, o después",
-    oRangeKilled: "tomadas desde el txg {birth}, el de su nacimiento, hasta el txg {last} (fs lo mató en el txg {k}, antes de las tareas de sincronización de ese txg)",
-    oRangeOne: "tomadas en el txg {birth}, el de su nacimiento (fs lo mató en el txg {k}, antes de las tareas de sincronización de ese txg)",
+    oRangeKilled: "tomadas desde el txg {birth}, el de su nacimiento, hasta el txg {last} (fs lo descartó en el txg {k}, antes de la instantánea de ese txg)",
+    oRangeOne: "tomadas en el txg {birth}, el de su nacimiento (fs lo descartó en el txg {k}, antes de la instantánea de ese txg)",
     oSnaps: "Lo retienen las instantáneas {range}: {list}.",
     oNoSnap: "Ninguna instantánea lo retiene: no hay instantáneas {range}.",
-    oCloneOwn: "Escrito por el clon después de su origen: solo lo retiene el clon, y ninguna instantánea.",
-    oWouldFree: "Si {ds} lo matara ahora: {birth} &gt; {prev}, liberado.",
-    oWouldDead: "Si {ds} lo matara ahora: {birth} &gt; {prev} es falso, a la deadlist de {ds}, entrada &gt; {key}.",
+    oCloneOwn: "Escrito por el clon después de su origen: solo lo retiene el clon; ninguna instantánea lo retiene.",
+    oWouldFree: "Si {ds} lo descartara ahora: nacido en el txg {birth}, después de la última instantánea (txg {prev}), se liberaría.",
+    oWouldDead: "Si {ds} lo descartara ahora: nacido en el txg {birth}, en el txg de la última instantánea o antes (txg {prev}), se guardaría en la deadlist de {ds}, entrada &gt; {key}.",
     tIntro: "El txg abierto es el {txg}. Los datasets, por orden:",
-    tDataset: "{name}, {kind}: ds_prev_snap_txg {prev}; ds_bp apunta a {root}; bloques de datos: {blocks}. Deadlist: {dl}.",
+    tDataset: "{name}, {kind}: {prev}; apunta a {root}; bloques de datos: {blocks}. Deadlist: {dl}.",
     tEntry: "entrada &gt; {key}: {list}",
     tFreed: "Liberados hasta ahora: {list}.",
     tFreedOne: "{b} (en el txg {txg})",
@@ -279,14 +316,40 @@ const S0 = {
     summaryClone: "; un clon de {origin}",
     noSnapshots: "ninguna",
     logLabel: "Lo que ha hecho la sincronización",
-    ownerLabel: "¿Qué instantánea es dueña de este bloque?",
+    ownerLabel: "¿Qué instantáneas retienen este bloque?",
     legendBirth: "bloque A, nacido en el txg 8",
-    legendRoot: "bloque raíz (el objset al que apunta ds_bp)",
+    legendRoot: "bloque raíz, la cima del árbol",
     legendClone: "escrito por el clon",
     legendFreed: "liberado",
+    aPinned: "guardado solo para instantáneas",
+    mLatest: "última instantánea: {name}, txg {txg}",
+    mBefore: "instantánea anterior: {name}, txg {txg}",
+    mOrigin: "creado a partir de {name}, txg {txg}",
+    mStart: "el inicio del pool",
+    onlyHolds: "Destruirla libera estos bloques ({n}):",
+    onlyNone: "Destruirla no libera nada: fs u otra instantánea sigue usando cada bloque que retiene.",
+    dSynced: "El txg {txg} está sincronizado.",
+    dSnap: "{snap} conserva el árbol tal como estaba.",
+    dClone: "El clon comparte todos los bloques de {origin}.",
+    dDestroy: "{snap} ya no existe.",
+    dKept: "Guardados para una instantánea: {list}.",
+    dFreed: "Liberados: {list}.",
+    dKept1: "Guardado para una instantánea: {list}.",
+    dFreed1: "Liberado: {list}.",
+    dNothing: "No ha cambiado nada.",
+    didOpening: "fs@s1 se tomó en el txg 9 y luego A se sobrescribió en el txg 10. El antiguo A<sub>8</sub> y la antigua raíz R<sub>8</sub> están rayados: fs ya no los usa, pero fs@s1 sí, así que se guardan.",
+    legendPin: "guardado solo para instantáneas",
+    legendHit: "cambiado por la última sincronización",
+    legendSel: "seleccionado",
+    qPick: "Selecciona un bloque del tablero para sobrescribirlo o borrarlo.",
+    qSel: "{name} seleccionado:",
+    qNone: "{name} seleccionado. Ni fs ni el clon lo usan ahora; solo lo retienen instantáneas, así que no hay nada que cambiar.",
+    qRoot: "{name} seleccionado. Una raíz se reescribe sola cuando cambia un bloque debajo de ella.",
+    qFreed: "{name} seleccionado. Se liberó en el txg {txg}.",
+    logEmpty: "Todavía no se ha sincronizado nada: pulsa Sincronizar el txg {txg}.",
   },
 }[lang];
-const S = { ...Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])), refs } as unknown as SnStrings;
+const S = Object.fromEntries(Object.entries(S0).map(([k, v]) => [k, lang === "fr" ? fr(v) : v])) as SnStrings;
 const t = UI[lang];
 const s0 = opening();
 const sum = summary(s0, S);
@@ -302,13 +365,18 @@ const sum = summary(s0, S);
     </div>
     <p class="sn-waiting muted" data-waiting set:html={waiting(s0, S)} />
   </div>
+  <p class="sn-did" data-did set:html={S.didOpening} />
   <p class="visually-hidden" data-summary>{sum}</p>
   <p class="visually-hidden" data-say aria-live="polite"></p>
   <div class="sn-board" data-board set:html={board(s0, S, false)} />
+  <div class="sn-quick" data-quick role="group" hidden set:html={quickRow(s0, S, null)} />
   <ul class="sn-legend" aria-hidden="true">
     <li><span class="chip">A<sub>8</sub></span>{S.legendBirth}</li>
     <li><span class="chip root">R<sub>8</sub></span>{S.legendRoot}</li>
     <li><span class="chip c">A<sub>12</sub></span>{S.legendClone}</li>
+    <li><span class="chip pin">A<sub>8</sub></span>{S.legendPin}</li>
+    <li><span class="chip hit">A<sub>8</sub></span>{S.legendHit}</li>
+    <li><span class="chip sel">A<sub>8</sub></span>{S.legendSel}</li>
     <li><span class="chip gone">A<sub>8</sub></span>{S.legendFreed}</li>
   </ul>
   <noscript><p class="muted">{t.noScript}</p></noscript>
@@ -319,6 +387,7 @@ const sum = summary(s0, S);
     </section>
     <section class="sn-log" aria-labelledby={`sn-log-${lang}`}>
       <h3 id={`sn-log-${lang}`}>{S.logLabel}</h3>
+      <p class="muted" data-log-empty>{S.logEmpty.replace("{txg}", String(s0.txg))}</p>
       <ol data-log></ol>
     </section>
   </div>
@@ -331,13 +400,14 @@ const sum = summary(s0, S);
 <script>
   import { strings, fill, wait, reducedMotion } from "../lib/svg";
   import { opening, sync, change, cancelChange, ask, cancelTask, taskRefusal, type State, type Change, type Dir } from "../lib/snapshots";
-  import { board, describe, summary, waiting, ownerPanel, eventLine, type SnStrings } from "../lib/snapshots-view";
+  import { board, describe, summary, waiting, ownerPanel, quickRow, eventLine, didLine, touched, type SnStrings } from "../lib/snapshots-view";
 
   for (const root of document.querySelectorAll<HTMLElement>("[data-snaps]")) {
     const S = strings<SnStrings>(root);
     const q = <E extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as E;
     const boardEl = q("[data-board]");
     const ownerEl = q("[data-owner]");
+    const quickEl = q("[data-quick]");
     const logEl = q("[data-log]");
     // One live region, one announcement per action: what the action did, in one text.
     const say = (text: string) => (q("[data-say]").textContent = text.replace(/\s+/g, " ").trim());
@@ -346,6 +416,8 @@ const sum = summary(s0, S);
     let s: State = opening();
     let selected: number | null = null;
     let freedLast: number[] = [];
+    // The blocks the last sync changed, ringed until the next action.
+    let last = new Set<number>();
     let run = 0;
 
     // Keep focus on the same control across a re-render.
@@ -357,7 +429,7 @@ const sum = summary(s0, S);
     };
 
     function render(focusKey: string | null = keyOf(document.activeElement)) {
-      boardEl.innerHTML = board(s, S, true, freedLast);
+      boardEl.innerHTML = board(s, S, true, freedLast, last);
       if (selected !== null && s.blocks[selected]?.freed !== undefined && !freedLast.includes(selected)) selected = null;
       for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) {
         const on = Number(c.dataset.b) === selected;
@@ -365,6 +437,12 @@ const sum = summary(s0, S);
         if (c.tagName === "BUTTON") c.setAttribute("aria-pressed", String(on));
       }
       ownerEl.innerHTML = ownerPanel(s, S, selected, true);
+      quickEl.innerHTML = quickRow(s, S, selected);
+      // Landing on an action reads which block it acts on: "B8 selected:, group".
+      quickEl.setAttribute("aria-label", (quickEl.querySelector(".q-name")?.textContent ?? quickEl.textContent ?? "").trim());
+      const emptyLog = q("[data-log-empty]");
+      emptyLog.hidden = logEl.childElementCount > 0;
+      emptyLog.textContent = fill(S.logEmpty, { txg: s.txg });
       q("[data-txg]").textContent = String(s.txg);
       syncBtn.textContent = fill(S.sync, { txg: s.txg });
       const why = taskRefusal(s, { kind: "snapshot" });
@@ -376,14 +454,21 @@ const sum = summary(s0, S);
       if (focusKey) {
         const el = root.querySelector<HTMLElement>(focusKey);
         if (el) el.focus({ preventScroll: true });
-        else if (focusKey.startsWith("[data-change") || focusKey.startsWith("[data-cancel=")) ownerEl.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+        else {
+          // The control was replaced: a change by its Cancel, a Cancel by the Overwrite of the
+          // same dataset and slot, an empty slot's Write by the Sync button.
+          const m = focusKey.match(/^\[data-(change|cancel)="(\w+):(\d+)/);
+          const alt = m ? (m[1] === "change" ? `[data-cancel="${m[2]}:${m[3]}"]` : `[data-change="${m[2]}:${m[3]}:write"]`) : focusKey.startsWith("[data-write") ? "[data-act=sync]" : null;
+          if (alt) (root.querySelector<HTMLElement>(alt) ?? quickEl.querySelector<HTMLElement>("button"))?.focus({ preventScroll: true });
+        }
       }
     }
 
     // FLIP: each chip that moved (tree -> deadlist, or into a new row) slides from where it was.
     function rects() {
       const m = new Map<string, DOMRect>();
-      for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) m.set(`${c.dataset.b}|${c.dataset.at}`, c.getBoundingClientRect());
+      // The copies in a snapshot's "destroying it frees" line are not where a block lives.
+      for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]:not([data-at^='only:'])")) m.set(`${c.dataset.b}|${c.dataset.at}`, c.getBoundingClientRect());
       const byBlock = new Map<string, DOMRect>();
       for (const [k, r] of m) byBlock.set(k.split("|")[0], r);
       return { m, byBlock };
@@ -394,10 +479,13 @@ const sum = summary(s0, S);
       const before = rects();
       const ev = sync(s);
       freedLast = ev.flatMap((e) => (e.k === "kill" && e.freed ? [e.block] : e.k === "destroy" ? e.freed : []));
+      last = touched(ev);
+      q("[data-did]").innerHTML = didLine(s, S, ev);
       render();
       logEl.replaceChildren();
+      q("[data-log-empty]").hidden = true;
       if (!reducedMotion()) {
-        for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]")) {
+        for (const c of boardEl.querySelectorAll<HTMLElement>("[data-b]:not([data-at^='only:'])")) {
           const k = `${c.dataset.b}|${c.dataset.at}`;
           if (before.m.has(k)) continue;
           const from = before.byBlock.get(c.dataset.b!);
@@ -410,15 +498,16 @@ const sum = summary(s0, S);
         }
         for (const c of boardEl.querySelectorAll<HTMLElement>(".freed .chip")) c.animate([{ opacity: 1 }, { opacity: 0.45 }], { duration: 900, fill: "none" });
       }
+      // Another action during the replay writes the rest of the log at once.
       for (const e of ev) {
         const li = document.createElement("li");
         li.className = e.k === "kill" ? (e.freed ? "free" : "dead") : e.k;
         li.innerHTML = eventLine(s, S, e);
         logEl.append(li);
-        await wait(e.k === "born" ? 60 : 140);
-        if (me !== run) return;
+        if (me === run) await wait(e.k === "born" ? 60 : 140);
       }
-      say(ev.length ? [...logEl.children].slice(-ev.length).map((li) => li.textContent).join(" ") : (q("[data-summary]").textContent ?? ""));
+      // The summary only; the steps stay in the log below, for whoever wants them.
+      if (me === run) say(q("[data-did]").textContent ?? "");
     }
 
     root.addEventListener("click", (e) => {
@@ -426,13 +515,19 @@ const sum = summary(s0, S);
       if (!el || !root.contains(el)) return;
       const d = el.dataset;
       if (d.act === "sync") return void doSync();
-      run++;
+      // Selecting a block lets a sync's log finish and keeps its ring; any other action
+      // stops the log and clears the ring.
+      if (d.b === undefined) {
+        run++;
+        last = new Set();
+      }
       if (d.act === "snapshot") ask(s, { kind: "snapshot" });
       else if (d.act === "reset") {
         s = opening();
         selected = null;
         freedLast = [];
         logEl.replaceChildren();
+        q("[data-did]").innerHTML = S.didOpening;
       } else if (d.b !== undefined) {
         selected = Number(d.b);
       } else if (d.write) {
@@ -450,12 +545,16 @@ const sum = summary(s0, S);
       } else if (d.cancelTask !== undefined) cancelTask(s, Number(d.cancelTask));
       else return;
       render();
+      // The actions for the selected block sit right under the board: from the keyboard, focus
+      // the first one (a pointer click, e.detail > 0, leaves focus where it is).
+      if (d.b !== undefined && (e as MouseEvent).detail === 0) quickEl.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
       say((d.b !== undefined ? ownerEl : d.act === "reset" ? q("[data-summary]") : q("[data-waiting]")).textContent ?? "");
     });
 
     render(null);
     q(".sn-bar").hidden = false;
     q(".sn-panels").hidden = false;
+    quickEl.hidden = false;
   }
 </script>
 
@@ -487,6 +586,14 @@ const sum = summary(s0, S);
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
+  }
+  .sn-did {
+    max-width: 48rem;
+    min-height: 3em;
+    margin-bottom: var(--space-4);
+  }
+  .sn-did :global(sub) {
+    font-size: 0.72em;
   }
   .sn-waiting {
     flex-basis: 100%;
@@ -676,10 +783,52 @@ const sum = summary(s0, S);
     color: var(--fg-faint);
     text-decoration: line-through;
   }
+  /* Kept only for snapshots: hatched, the space the head no longer uses. */
+  .chip.pin,
+  .sn-board :global(.chip.pin) {
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0 5px,
+      color-mix(in srgb, var(--fg-faint) 45%, transparent) 5px 6.5px
+    );
+  }
+  /* What the last sync changed (D24.1): a static ring, so it reads under reduced
+     motion too; it fades in only when motion is allowed. */
+  .chip.hit,
+  .sn-board :global(.chip.hit) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .sn-board :global(.chip.hit:not(.sel)) {
+      animation: hit var(--dur-2) var(--ease);
+    }
+  }
+  @keyframes hit {
+    from {
+      outline-color: transparent;
+      outline-offset: 6px;
+    }
+  }
+  .sn-board :global(.only) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--step--1);
+    color: var(--fg-muted);
+  }
+  .sn-board :global(.only .chip) {
+    min-height: 1.9rem;
+    min-width: 2.4rem;
+    font-size: 0.78rem;
+  }
+  /* Selected: a thick inner ring and a tinted fill, so it never reads as the
+     keyboard focus ring (an outline outside the chip). */
+  .chip.sel,
   .sn-board :global(.chip.sel) {
-    outline: 2px solid var(--fg);
-    outline-offset: 1px;
-    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 3px var(--fg);
+    background-color: var(--accent-soft);
   }
   .sn-board :global(.pending .chip) {
     opacity: 0.55;
@@ -693,12 +842,16 @@ const sum = summary(s0, S);
   .sn-board :global(.tag.delete) {
     color: var(--bad);
   }
+  .sn-board :global(.tag.task) {
+    font-size: var(--step--1);
+    white-space: nowrap;
+    max-width: none;
+  }
   .sn-board :global(.refuse) {
     font-size: var(--step--1);
     color: var(--fg-muted);
   }
-  .sn-board :global(.btn.sm),
-  .sn-owner :global(.btn.sm) {
+  .sn-board :global(.btn.sm) {
     padding: 0.35em 0.9em;
   }
   .sn-board :global(.freed) {
@@ -707,6 +860,44 @@ const sum = summary(s0, S);
     gap: var(--space-2);
     align-items: center;
     margin-top: var(--space-3);
+  }
+  .sn-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+    min-height: 44px;
+    margin-top: var(--space-3);
+    font-size: var(--step--1);
+    /* On a long board (a phone) the row stays on screen while the board is. */
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    padding: var(--space-2) 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+  /* The sticky row must not cover the chip that has focus. */
+  :global(html:has([data-snaps])) {
+    scroll-padding-bottom: 7rem;
+  }
+  .sn-quick[hidden] {
+    display: none;
+  }
+  .sn-quick :global(sub) {
+    font-size: 0.72em;
+  }
+  .sn-quick :global(.q-name) {
+    font-weight: 600;
+  }
+  .sn-quick :global(.btn.sm) {
+    padding: 0.35em 0.9em;
+  }
+  .sn-quick :global(.tag) {
+    color: var(--accent);
+  }
+  .sn-quick :global(.tag.delete) {
+    color: var(--bad);
   }
   .sn-legend {
     list-style: none;
@@ -756,21 +947,6 @@ const sum = summary(s0, S);
     margin-top: var(--space-2);
     max-width: 40rem;
   }
-  .sn-owner :global(.would) {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    align-items: center;
-  }
-  .sn-owner :global(.acts) {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-  .sn-owner :global(.tag) {
-    font-size: 0.75rem;
-    color: var(--accent);
-  }
   .sn-log ol {
     margin: 0;
     padding-left: 1.6em;
@@ -792,10 +968,6 @@ const sum = summary(s0, S);
   }
   .sn-log :global(li.refused) {
     color: var(--bad);
-  }
-  .sn :global(a.see) {
-    font-size: 0.85em;
-    color: var(--fg-muted);
   }
   .text-version {
     margin-top: var(--space-5);

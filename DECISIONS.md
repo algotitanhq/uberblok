@@ -2922,3 +2922,70 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   a drag, or after a quota change in `DedupLab`, the figure says it in full. The limit label names
   the seven eighths, and keys the dashed line, only when they differ. A scrub that finds damage
   outlines only the failed checksum. The branch panel is as tall as the result beside it.
+
+## v1.4 snapshots room (ALG-195)
+
+### D28.1 The snapshots room as a question; a figure that says what each sync did and what a destroy would free
+
+- **Context.** The roll-out of D21.1 ([ALG-182](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-182)).
+  The room had 7 excerpts (141 lines of code) and 44 links to GitHub in each language, 27 of
+  them in the prose, plus a "code" link after every line the figure narrated (10 targets). The
+  issue asks for a figure where the reader takes a snapshot, changes blocks, deletes the
+  snapshot, and sees which blocks it pins and which are freed.
+- **Question.** "Why doesn't deleting a file give me my space back?" (« Pourquoi supprimer un
+  fichier ne me rend-il pas de place ? », « ¿Por qué borrar un archivo no me devuelve
+  espacio? »). It is the question operators ask about snapshots. The answer goes from the
+  problem (a snapshot is instant, the cost comes when blocks are let go of) to the birth txg
+  compared with the latest snapshot, the deadlist, the space coming back when the last snapshot
+  holding a block is destroyed, and clones. txg, birth txg, deadlist and clone are glossed once.
+- **Figure.** `SnapshotLab` is improved, not rebuilt; the model's outcomes are unchanged. A line
+  under the controls says what the last sync did, in plain words ("Txg 11 is synced. Kept for a
+  snapshot: B8. Freed: R10."), and is there from the start, where it explains the opening state.
+  The blocks a sync touched (born, kept, freed) carry a ring until the next action other than a
+  selection: a static outline, faded in only when motion is allowed. A block kept only for
+  snapshots (on disk, in no head's tree) is hatched wherever it is drawn. Each snapshot row says
+  what destroying it at the end of the open txg would free, with the blocks. `destroyFrees`
+  runs the destroy on a copy of the state, after whatever else waits in the txg: the kills of
+  waiting overwrites come first and can add blocks, which a prediction from the references alone
+  (`heldOnlyBy`) missed in about half of the random cases (found by the code review). The tests
+  check over random sequences that the prediction matches the destroy, with and without waiting
+  changes, and that it equals the blocks only that snapshot holds when nothing else waits. The legend lists every look from the start. The narration and the owner panel
+  say "lets go of" and "latest snapshot: fs@s1, txg 9" rather than `kill` and `ds_prev_snap_txg`,
+  and carry no code links (D21.1); the live region reads the summary line once per sync. Without
+  script the board, the opening line and the text version show, as before.
+- **Code.** Five Source notes, 35 lines: four new short cuts in `ANALYSIS.md` (snapshots room,
+  excerpts 9 to 12: the test of `dsl_dataset_block_kill`, the copied `ds_bp`, the entry lookup
+  of `dsl_deadlist_insert`, the free and merge of a destroy), checked against `zfs-2.4.4`, and
+  the clone excerpt (6) as it was. The "three depths" section is gone: its sentence and
+  paragraph repeated the answer, and its detail now lives in the notes. The `dsl_pool_sync`
+  ordering and the `$ORIGIN` keys are links inside the notes.
+- **Rejected.** A per-block "destroy frees" preview on hover: hover does not exist on a phone or
+  for a keyboard, and the row already says it. Animating the sync's kills one by one on the
+  board: the log already steps through them, and a timer cannot be read at the reader's pace.
+  "lâcher" and "soltar" for "let go of" (the writing review called them calques): the French and
+  Spanish say "abandonner" and "descartar", in the prose and the figure alike.
+
+### D28.2 Snapshots room, design review: the answer first, the actions under the board
+
+- **Context.** The Design/UX review of PR #15 ([ALG-195](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-195)):
+  one blocker, two shoulds, four nits, all fixed in this PR (one pass, [ALG-215](https://paperclip.cloudfrancois.ovh/ALG/issues/ALG-215)).
+- **The plain answer opens with the answer.** "A snapshot keeps every block that existed when it
+  was taken": deleting a file you had at your last snapshot frees nothing until the last
+  snapshot holding its blocks is destroyed. Then the birth txg against the latest snapshot and
+  the deadlist, then destroy and clones. The setup (why ZFS cannot search every snapshot or
+  count references) is dropped from the answer; the Source notes carry it. About 70 words a
+  paragraph, in EN, FR and ES.
+- **Actions under the board.** Overwrite, Delete and Cancel for the selected block moved from the
+  "Which snapshots hold this block?" panel to one row right under the board ("B8 selected:
+  [Overwrite in fs] [Delete in fs]"), sticky at the bottom of the screen while the board is in
+  view, so on a phone the row is on screen when the reader taps a block. Focus goes to the first
+  action after a selection. The panel keeps the explanation only, so its prediction ("If fs let
+  go of it now: …") is one sentence again (it had been split by a flex container). Rejected:
+  actions inside the selected dataset's card, since a block shared by fs and the clone sits in
+  several cards and the row would jump between them.
+- **Selected and focused look different.** Selection is an inner 3 px ring and a tinted fill;
+  keyboard focus stays the outline outside the chip. The legend gains "selected".
+- **Smaller fixes.** The pending destroy and clone tags are `--step--1` and do not wrap; "What
+  the sync did" says "Nothing synced yet: press Sync txg 11." until the first sync; the first
+  "what to try" paragraph starts with "Select B in fs…", and the opening state is told only by
+  the line under the buttons.

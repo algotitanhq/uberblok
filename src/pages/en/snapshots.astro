@@ -2,388 +2,253 @@
 import Base from "../../layouts/Base.astro";
 import SnapshotLab from "../../components/SnapshotLab.astro";
 import Excerpt from "../../components/Excerpt.astro";
+import SourceNote from "../../components/SourceNote.astro";
+import SourcePanel from "../../components/SourcePanel.astro";
 import RoomNav from "../../components/RoomNav.astro";
 import { gh } from "../../lib/openzfs";
-import { room, roomUrl, roomNumber } from "../../lib/rooms";
+import { room, roomNumber } from "../../lib/rooms";
 
+// The question-first format (DECISIONS.md D21.1, D28.1): the question, a plain
+// answer, the figure, then the code in Source notes. Links to the code live in
+// the notes only.
 const lang = "en";
 const r = room("snapshots");
 const DS = "module/zfs/dsl_dataset.c";
 const DL = "module/zfs/dsl_deadlist.c";
 const DD = "module/zfs/dsl_destroy.c";
 const L = {
-  birthMacro: gh("include/sys/spa.h", 505, 507),
-  logical: gh("include/sys/spa.h", 483, 492),
-  words: gh("include/sys/spa.h", 147, 149),
   alloc: gh("module/zfs/metaslab.c", 6061),
-  allocTxg: gh("module/zfs/zio.c", 4380, 4382),
-  dbufDone: gh("module/zfs/dbuf.c", 5149, 5155),
-  objsetDone: gh("module/zfs/dmu_objset.c", 1535, 1543),
-  freeBlocks: gh("module/zfs/dnode_sync.c", 147),
-  pending: gh(DS, 333, 342),
-  syncDone: gh(DS, 2292, 2293),
-  prevTxg: gh("include/sys/dsl_dataset.h", 142, 143),
+  free: gh(DS, 312, 315),
+  elseBranch: gh(DS, 332),
+  insert: gh(DS, 344),
+  order: gh("module/zfs/dsl_pool.c", 747, 753),
+  crtxg: gh(DS, 1775),
+  handOff: gh(DS, 1776),
+  newDl: gh(DS, 1830, 1839),
   setPrev: gh(DS, 1881, 1884),
-  dlClone: gh(DL, 727, 737),
-  notInclusive: gh(DL, 521, 524),
-  zapKey: gh(DL, 544, 545),
   eagain: gh(DS, 1534, 1539),
-  tasks: gh("module/zfs/dsl_pool.c", 845, 854),
-  originNull: gh(DS, 1186, 1187),
-  originTxg: gh(DS, 1752, 1758),
-  createOrigin: gh("module/zfs/dsl_pool.c", 1179, 1183),
-  numChildren: gh(DS, 1243, 1244),
-  cloneDl: gh(DS, 1246, 1251),
-  originObj: gh(DS, 1264, 1265),
-  ddOriginTxg: gh("module/zfs/dsl_dir.c", 269, 270),
+  zapKey: gh(DL, 544, 545),
+  notInclusive: gh(DL, 521, 524),
   moveBpobj: gh(DL, 930, 952),
   freeBpobj: gh("module/zfs/dsl_scan.c", 3828, 3835),
   insertBpobj: gh(DL, 829, 834),
-  dlFree: gh(DD, 434, 437),
   removeKey: gh(DL, 549, 577),
-  clonesKey: gh(DD, 441, 445),
-  clonesKeyTest: gh(DD, 230, 232),
   headKey: gh(DD, 475, 479),
+  numChildren: gh(DS, 1243, 1244),
   branch: gh(DD, 83, 87),
-  oldFmt: gh(DD, 129, 151),
-  livelist: gh(DS, 285, 292),
-  promote: gh(DS, 3713, 3721),
-  numChildrenField: gh("include/sys/dsl_dataset.h", 146),
 };
 ---
 
 <Base
   lang={lang}
   roomId="snapshots"
-  title="Snapshots and clones · Uberblok"
-  description="How a ZFS snapshot costs one block pointer, and how one comparison of birth txgs decides whether a dead block is freed or kept on a deadlist: interactive, with the OpenZFS code."
+  title="Why doesn’t deleting a file give me my space back? Snapshots and clones · Uberblok"
+  description="A ZFS snapshot copies one block pointer, and one comparison of birth txgs decides whether a block the filesystem lets go of is freed or kept for a snapshot. Interactive, with the OpenZFS code."
 >
   <article class="wrap">
     <header class="room-head">
-      <p class="kicker">Room {roomNumber(r.id)}</p>
-      <h1>{r.title.en}</h1>
-      <div class="prose problem">
+      <p class="kicker">Room {roomNumber(r.id)} · {r.title.en}</p>
+      <h1>Why doesn’t deleting a file give me my space back?</h1>
+      <div class="prose answer">
         <p class="lead">
-          A snapshot has to freeze a whole filesystem at once, a terabyte as easily as a kilobyte, and must not slow the
-          writes that follow. Taking it is the easy half. The hard half comes at every later overwrite and every delete in
-          the live filesystem: is the old block still needed by a snapshot, or can its space be reused? Asking every
-          snapshot would mean scanning them. A reference count on every block would mean updating counters for every
-          block at every snapshot.
+          A snapshot keeps every block that existed when it was taken. If the file was already there at your
+          last snapshot, deleting it only takes it out of the live filesystem: its blocks stay on disk for the snapshot,
+          and the space comes back when the last snapshot that holds them is destroyed. Taking a snapshot costs almost
+          nothing, because ZFS never changes a block in place.
         </p>
         <p>
-          ZFS does neither. Every block pointer records the txg in which the block was <em>born</em>. The live filesystem
-          remembers the txg of its latest snapshot. A block born after that snapshot cannot be in any snapshot, so it is
-          freed; a block born at or before it may be, so it is kept, on a <em>deadlist</em>. One comparison of two
-          numbers.
+          ZFS writes in batches called transaction groups, or txgs, numbered in order, and every block records the txg
+          it was written in, its birth txg. When the filesystem lets go of a block, ZFS compares that birth with the txg
+          of its latest snapshot. A block born after it is in no snapshot and is freed. Any other block goes on the
+          filesystem's deadlist, the list of blocks it no longer uses but a snapshot still holds.
+        </p>
+        <p>
+          The deadlist is split by the txgs of the snapshots, so destroying one frees whole the parts only it held,
+          without checking the blocks one by one. A clone, a writable filesystem made from a snapshot, shares every
+          block with that snapshot at first and uses the same comparison for what it writes later. The snapshot cannot
+          be destroyed while the clone exists.
         </p>
       </div>
     </header>
 
     <section class="section" aria-labelledby="lab">
-      <h2 id="lab"><span class="n">1</span> Write, snapshot, sync</h2>
+      <h2 id="lab"><span class="n">1</span> Take a snapshot, change blocks, destroy it</h2>
       <div class="prose">
         <p>
-          <code>fs</code> is a filesystem of four data blocks, A to D, under one root block, the objset its
-          <code>ds_bp</code> points to. Each block shows its birth txg: A<sub>8</sub> was born in txg 8. The figure opens
-          after three txgs: A, B and C written in txg 8, the snapshot <code>fs@s1</code> taken in txg 9, A overwritten in
-          txg 10. Queue changes in the open txg, take a snapshot, clone one or destroy one, then sync: every block the
-          sync lets go of shows the comparison and where it goes. Select any block to see which snapshots hold it.
+          Select B in <code>fs</code>, overwrite it and sync. The line under the buttons says which old blocks were freed
+          and which were kept for a snapshot, and a ring marks them on the board. Take a snapshot and overwrite B again to
+          see the same comparison, this time with the new snapshot. Each snapshot says what destroying it would free: destroy
+          one, sync, and those blocks go. Clone a snapshot and overwrite a block in the clone: the old block stays,
+          because the snapshot still holds it.
+        </p>
+        <p>
+          <code>fs</code> has room for four data blocks, A to D, under one root block. The small number on each block is
+          its birth txg: A<sub>8</sub> was born in txg 8. Select any block to see which snapshots hold it. Under the
+          figure, each sync is listed step by step, with the two numbers it compared.
         </p>
       </div>
       <SnapshotLab lang={lang} />
     </section>
 
-    <section class="section" aria-labelledby="depths">
-      <h2 id="depths">The idea, at three depths</h2>
+    <section class="section" aria-labelledby="code">
+      <h2 id="code">In the code</h2>
+      <p class="prose">
+        The figure follows five places in the code of datasets and deadlists. Open a Source note to see the lines,
+        taken from release zfs-2.4.4.
+      </p>
 
-      <div class="depth">
-        <h3>In one sentence</h3>
-        <p class="lead prose">
-          Every block carries the txg of its birth, so when the live filesystem lets go of a block, one comparison with
-          the txg of its latest snapshot decides: free it, or keep it on a deadlist for the snapshots that still hold it.
-        </p>
-      </div>
-
-      <div class="depth">
-        <h3>In one paragraph</h3>
+      <div class="step">
+        <h3>Free it, or keep it for a snapshot</h3>
         <p class="prose">
-          A snapshot is a new dataset record that copies one block pointer, <code>ds_bp</code>, the root of the
-          filesystem’s tree, and nothing else: every block below is now shared. <a href={roomUrl(lang, "copy-on-write")}>Copy-on-write</a> never modifies those
-          blocks again; it writes new ones, born in later txgs, and <em>kills</em> the old ones.
-          <code>dsl_dataset_block_kill</code> compares the old block’s birth with the filesystem’s
-          <code>ds_prev_snap_txg</code>, the txg of its latest snapshot. Born later, the block belongs to the live
-          filesystem alone and is freed. Born at or before, the latest snapshot holds it, and it goes on the deadlist. The
-          deadlist is cut into entries by the txgs of earlier snapshots, so it says between which two snapshots each dead
-          block was born. That makes destroying a snapshot cheap: the blocks only it held are whole entries of the next
-          dataset’s deadlist, freed without reading one block pointer. A clone is a writable dataset that starts from a
-          snapshot’s <code>ds_bp</code>, with that snapshot’s txg as its own <code>ds_prev_snap_txg</code>: the same
-          comparison keeps the blocks it shares with its origin and frees its own.
+          Every block a filesystem lets go of goes through <code>dsl_dataset_block_kill</code>, in the txg being
+          written. One test makes the whole decision: the block's birth against <code>ds_prev_snap_txg</code>, the
+          txg of the filesystem's latest snapshot.
         </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_dataset_block_kill</code>, dsl_dataset.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DS}
+            from={294}
+            to={294}
+            symbol="dsl_dataset_block_kill"
+            notes={[
+              {
+                from: 294,
+                text: `Born after the latest snapshot: <a href="${L.free}">freed</a> in this txg. Otherwise <a href="${L.elseBranch}">the <code>else</code></a> <a href="${L.insert}">puts it on the deadlist</a>. The birth was set <a href="${L.alloc}">when the block was allocated</a>. The test is strict: a block born in the txg of a snapshot is in that snapshot, because <a href="${L.order}">a txg writes its data before it takes its snapshots</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
 
-      <div class="depth">
-        <h3>In detail</h3>
-        <div class="prose">
-          <p>
-            <strong>Birth.</strong> A block’s birth txg is set when it is allocated: <code>metaslab_alloc</code> ends with
-            <a href={L.alloc}><code>BP_SET_BIRTH(bp, txg, 0)</code></a>, and the write passes it
-            <a href={L.allocTxg}>the txg it belongs to</a>. A block pointer has <a href={L.words}>two birth words</a>,
-            logical and physical; they differ only for <a href={L.logical}>dedup, block cloning and rewritten blocks</a>,
-            and the value compared below is <a href={L.birthMacro}><code>BP_GET_BIRTH</code></a>, the logical birth for
-            an ordinary block.
-          </p>
-          <p><strong>Free now, or deadlist.</strong> Here is the whole decision.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={294}
-          to={316}
-          symbol="dsl_dataset_block_kill"
-          notes={[
-            {
-              from: 294,
-              text: "The comparison. <code>ds_prev_snap_txg</code> is the txg of the dataset’s latest snapshot. The test is strict: a block born in that very txg is held by that snapshot.",
-            },
-            {
-              from: 304,
-              to: 311,
-              text: "Gang, dedup and possibly cloned blocks are queued on the pool’s free list instead of being freed inline, because freeing them costs I/O. The outcome is the same: no snapshot holds them.",
-            },
-            {
-              from: 312,
-              to: 315,
-              text: "The ordinary case: <code>dsl_free</code>, in this txg. The figure greys the block out under “Freed”.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Otherwise, in the <code>else</code> branch, the block <a href={L.pending}>goes onto the deadlist</a>. Three
-            callers kill blocks, all while a txg syncs: <a href={L.dbufDone}><code>dbuf_write_done</code></a> when a data or
-            indirect block was rewritten, <a href={L.objsetDone}><code>dmu_objset_write_done</code></a> for the objset block
-            that <code>ds_bp</code> points to, rewritten in every txg in which the dataset changes, and
-            <a href={L.freeBlocks}><code>free_blocks</code></a> for a delete or a truncation. The figure draws that objset
-            and the indirect blocks as one root, killed by the same rule. The two write callbacks park a deadlist-bound
-            block on a pending list that <a href={L.syncDone}><code>dsl_dataset_sync_done</code></a> empties before the
-            txg’s sync tasks: same outcome, a few lines later.
-          </p>
-          <p><strong>A snapshot copies one block pointer.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={1760}
-          to={1785}
-          symbol="dsl_dataset_snapshot_sync_impl"
-          notes={[
-            {
-              from: 1760,
-              to: 1761,
-              text: "One new object in the MOS, the pool’s own metadata: the snapshot’s dataset record.",
-            },
-            {
-              from: 1770,
-              to: 1773,
-              text: "It takes the head’s link to the previous snapshot and its <code>ds_prev_snap_txg</code>, points forward to the head, and starts with one child, its successor.",
-            },
-            {
-              from: 1775,
-              text: "Its creation txg is the txg being synced.",
-            },
-            {
-              from: 1776,
-              text: "The head’s deadlist becomes the snapshot’s, as it is.",
-            },
-            {
-              from: 1783,
-              text: "The root block pointer is copied. That one copy is what makes the snapshot share every block with the head. Nothing in the tree is read or written: the figure shows no new block for a snapshot.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>The head’s new deadlist.</strong> Further down the same function, the head gets a deadlist of its
-            own.
-          </p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={1830}
-          to={1839}
-          symbol="dsl_dataset_snapshot_sync_impl"
-          notes={[
-            {
-              from: 1831,
-              to: 1833,
-              text: `<code>dsl_deadlist_clone</code> with no limit: <a href="${L.dlClone}">one empty entry for every key</a> of the deadlist the snapshot just took.`,
-            },
-            {
-              from: 1837,
-              to: 1838,
-              text: `Plus one key: the head’s <code>ds_prev_snap_txg</code>, which here is still the txg of the <em>previous</em> snapshot. It is set to this snapshot’s txg <a href="${L.setPrev}">only afterwards</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            So after snapshots in txgs t1 &lt; t2 &lt; … &lt; tn, the head’s deadlist has its starting keys plus t1 to
-            t(n−1), and its <a href={L.prevTxg}><code>ds_prev_snap_txg</code></a> is tn. Each snapshot keeps the deadlist the
-            head had until it was taken: the blocks killed between the previous snapshot and this one. That is, blocks the
-            <em>previous</em> snapshot holds and this one does not; a snapshot’s deadlist is not “the blocks only it owns”.
-          </p>
-          <p><strong>Where a dead block goes.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DL}
-          from={487}
-          to={501}
-          symbol="dsl_deadlist_insert"
-          notes={[
-            {
-              from: 487,
-              to: 492,
-              text: `A deadlist is a tree of entries, each a list of block pointers <a href="${L.zapKey}">stored under a key</a>, a txg that <a href="${L.notInclusive}">“is not inclusive”</a>. Look the birth up: on an exact match take the entry before it, otherwise the nearest entry before. Either way, the entry with the largest key strictly below the birth.`,
-            },
-            {
-              from: 494,
-              to: 498,
-              text: "A birth at or below every key cannot happen on a sound pool: it is reported, and the block goes to the first entry.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            <strong>Where the keys start.</strong> A filesystem is made <a href={L.originNull}>from the pool’s
-            <code>$ORIGIN</code> snapshot</a>, created <a href={L.createOrigin}>from an empty dataset</a> with
-            <a href={L.originTxg}>creation txg 1</a>. Traced through the excerpts, a new filesystem starts with
-            <code>ds_prev_snap_txg</code> 1 and a deadlist with one key, 0, and its first snapshot adds key 1. Every
-            block a user writes is born after txg 1: entry 0 stays empty, entry 1 collects what was born before the first
-            snapshot. These are the <code>&gt; 0</code> and <code>&gt; 1</code> entries of the figure.
-          </p>
-          <p><strong>The same txg.</strong> A snapshot is a sync task, and the txg writes its data first.</p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path="module/zfs/dsl_pool.c"
-          from={747}
-          to={760}
-          symbol="dsl_pool_sync"
-          notes={[
-            {
-              from: 747,
-              to: 753,
-              text: `Every dirty dataset is written out before the sync tasks run, “so that … we won’t get confused about which blocks are part of the snapshot”. The tasks run <a href="${L.tasks}">at the end</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Two consequences, both in the figure. A block written in the same txg as a snapshot is in that snapshot: born in
-            txg T, held by the snapshot of txg T, which is why the test is strict. And a block killed in the txg of a
-            snapshot is not in it: the kill was decided against the previous snapshot. One snapshot of a dataset per txg:
-            a second one <a href={L.eagain}>is refused, <code>EAGAIN</code></a>.
-          </p>
-          <p><strong>A clone starts from a snapshot’s block pointer.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DS}
-          from={1213}
-          to={1227}
-          symbol="dsl_dataset_create_sync_dd"
-          notes={[
-            {
-              from: 1216,
-              to: 1218,
-              text: "The clone’s previous snapshot is its origin, and its <code>ds_prev_snap_txg</code> the origin’s creation txg.",
-            },
-            {
-              from: 1225,
-              to: 1227,
-              text: "Its <code>ds_bp</code> is the origin’s: like a snapshot, a clone starts as one copied block pointer.",
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Then the origin <a href={L.numChildren}>gains a child</a>, the clone’s deadlist
-            <a href={L.cloneDl}>starts with the keys below the origin’s txg</a>, and the origin is recorded
-            <a href={L.originObj}>in the clone’s directory</a> (in memory, <a href={L.ddOriginTxg}><code>dd_origin_txg</code></a>).
-            A write in the clone goes through the same <code>dsl_dataset_block_kill</code>, against the clone’s own
-            <code>ds_prev_snap_txg</code>: a block the clone wrote is born after the origin and freed when the clone lets
-            go of it; a block born at or before the origin is shared with it and goes on the clone’s deadlist. The clone
-            diverges by birth txg, and nothing is copied.
-          </p>
-          <p><strong>Destroying a snapshot.</strong></p>
-        </div>
-        <Excerpt
-          lang={lang}
-          path={DD}
-          from={387}
-          to={424}
-          symbol="dsl_destroy_snapshot_sync_impl"
-          notes={[
-            {
-              from: 387,
-              to: 391,
-              text: "The next dataset, the next snapshot or the head, inherits the destroyed snapshot’s previous snapshot and <code>ds_prev_snap_txg</code>.",
-            },
-            {
-              from: 395,
-              to: 397,
-              text: `Pools that predate keyed deadlists <a href="${L.oldFmt}">apply the same test to each block</a>. The figure follows the keyed path.`,
-            },
-            {
-              from: 399,
-              to: 413,
-              text: "Space accounting, not drawn.",
-            },
-            {
-              from: 415,
-              to: 418,
-              text: `Every entry of the next deadlist <a href="${L.moveBpobj}">at or above</a> the snapshot’s <code>ds_prev_snap_txg</code> goes to the pool’s free list. Those blocks were born after the snapshot before it and killed before the next one: only this snapshot held them. The keys alone say so. The sync thread <a href="${L.freeBpobj}">frees that list</a> in later txgs; the figure frees them at once.`,
-            },
-            {
-              from: 422,
-              to: 424,
-              text: `The snapshot’s own deadlist, blocks the snapshot before it still holds, joins the next one, <a href="${L.insertBpobj}">entry by entry</a>, and is then <a href="${L.dlFree}">freed</a>.`,
-            },
-          ]}
-        />
-        <div class="prose after">
-          <p>
-            Last, the key of the snapshot’s txg <a href={L.removeKey}>is removed, its entry merged into the one before</a>:
-            from the head <a href={L.headKey}>when the next dataset is a snapshot</a>, and, through
-            <a href={L.clonesKey}><code>dsl_dir_remove_clones_key</code></a>, from every clone
-            <a href={L.clonesKeyTest}>whose origin is younger than the snapshot</a>. A snapshot with a
-            clone has <a href={L.numChildrenField}>more than one child</a> and <a href={L.branch}>cannot be destroyed,
-            <code>EEXIST</code></a>: “Can’t delete a branch point”.
-          </p>
-          <p>
-            <strong>Which snapshot owns this block.</strong> Nothing in ZFS stores that answer: it follows from birth txgs.
-            A block of <code>fs</code> born in txg B and killed in txg K is held by the snapshots of <code>fs</code> taken from
-            txg B to txg K − 1: those taken before B were frozen before it existed, those taken in K or later after it was
-            gone. A block still live is held by every snapshot taken since B. The figure computes that range from the
-            numbers, and its tests check it against which dataset’s tree actually holds the block, over thousands of
-            random sequences.
-          </p>
-        </div>
+      <div class="step">
+        <h3>A snapshot copies one block pointer</h3>
+        <p class="prose">
+          <code>dsl_dataset_snapshot_sync_impl</code> creates the snapshot at the end of a txg. It writes one new record
+          for it, and the only thing it takes from the tree of blocks is the pointer to its root.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_dataset_snapshot_sync_impl</code>, dsl_dataset.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DS}
+            from={1782}
+            to={1784}
+            symbol="dsl_dataset_snapshot_sync_impl"
+            notes={[
+              {
+                from: 1783,
+                text: `The snapshot's <code>ds_bp</code>, the pointer to the root of the tree, is the filesystem's. Nothing below it is read or written. The snapshot also gets <a href="${L.crtxg}">this txg as its creation txg</a> and <a href="${L.handOff}">the filesystem's deadlist as it is</a>. The filesystem starts <a href="${L.newDl}">a new, empty deadlist with one more key</a> and <a href="${L.setPrev}">records this txg as its latest snapshot</a>. A second snapshot in the same txg <a href="${L.eagain}">is refused</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
       </div>
+
+      <div class="step">
+        <h3>Where a kept block goes</h3>
+        <p class="prose">
+          A deadlist is split into entries, each keyed by the txg of a snapshot. <code>dsl_deadlist_insert</code> puts a
+          block in the entry with the largest key below its birth, so the entry says between which two snapshots the
+          block was born.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_deadlist_insert</code>, dsl_deadlist.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DL}
+            from={487}
+            to={492}
+            symbol="dsl_deadlist_insert"
+            notes={[
+              {
+                from: 487,
+                to: 488,
+                text: `The block's birth is looked up among the keys, which are <a href="${L.zapKey}">stored on disk</a>. A key <a href="${L.notInclusive}">“is not inclusive”</a>: the entry &gt;&#8239;9 holds blocks born after txg 9.`,
+              },
+              { from: 489, to: 492, text: "With no exact match, it takes the nearest key below. With an exact match, it takes the key before that one. Either way, it is the largest key strictly below the birth." },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>Destroying a snapshot</h3>
+        <p class="prose">
+          <code>dsl_destroy_snapshot_sync_impl</code> uses those keys. The blocks that only the destroyed snapshot held
+          were born after the snapshot before it and let go of before the next snapshot was taken, so they fill whole entries of the
+          next dataset's deadlist.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_destroy_snapshot_sync_impl</code>, dsl_destroy.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DD}
+            from={415}
+            to={424}
+            symbol="dsl_destroy_snapshot_sync_impl"
+            notes={[
+              {
+                from: 415,
+                to: 418,
+                text: `Every entry of the next deadlist <a href="${L.moveBpobj}">at or above</a> the snapshot's <code>ds_prev_snap_txg</code> moves to the pool's free list, which <a href="${L.freeBpobj}">is freed in later txgs</a>. No block pointer is read to decide it. The figure frees those blocks at once.`,
+              },
+              { from: 419, to: 420, text: "Space accounting, not drawn." },
+              {
+                from: 422,
+                to: 424,
+                text: `The snapshot's own deadlist, blocks the snapshot before it still holds, <a href="${L.insertBpobj}">joins the next one, entry by entry</a>. Then its creation txg <a href="${L.removeKey}">is removed as a key</a> from the filesystem's deadlist, <a href="${L.headKey}">when the next dataset is a snapshot</a>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+
+      <div class="step">
+        <h3>A clone starts from a snapshot</h3>
+        <p class="prose">
+          <code>dsl_dataset_create_sync_dd</code>, given an origin snapshot, makes a clone the way a snapshot is made: by
+          copying one block pointer. It also gives the clone the origin as its latest snapshot, so the same test as above
+          keeps what the clone shares and frees what it wrote.
+        </p>
+        <SourceNote lang={lang}>
+          <Fragment slot="label"><code>dsl_dataset_create_sync_dd</code>, dsl_dataset.c</Fragment>
+          <Excerpt
+            lang={lang}
+            path={DS}
+            from={1213}
+            to={1227}
+            symbol="dsl_dataset_create_sync_dd"
+            notes={[
+              {
+                from: 1216,
+                to: 1218,
+                text: "The clone's latest snapshot is its origin, with the origin's creation txg. A block born at or before it is shared with the origin and goes on the clone's deadlist; a block the clone wrote is freed.",
+              },
+              {
+                from: 1225,
+                to: 1227,
+                text: `Its <code>ds_bp</code> is the origin's. The origin <a href="${L.numChildren}">gains a child</a>. With the dataset after it, that makes two, and a snapshot with more than one child <a href="${L.branch}">cannot be destroyed</a>, <code>EEXIST</code>.`,
+              },
+            ]}
+          />
+        </SourceNote>
+      </div>
+      <SourcePanel lang={lang} />
     </section>
 
     <section class="section simplified" aria-labelledby="simplified">
       <h2 id="simplified">What the figure leaves out</h2>
       <p class="prose muted">
-        The figure runs the functions above over one filesystem with four data blocks and up to four snapshots, and one
-        clone that cannot itself be snapshotted or destroyed. The objset, dnodes and indirect blocks are one root block.
-        Deferred frees of gang, dedup and cloned blocks, space accounting, and the clone’s
-        <a href={L.livelist}>livelist</a> are left out; none changes whether a block is freed or kept. Blocks on the pool’s
-        free list are drawn as freed at once. Holds, deferred destroy and old-format deadlists are not shown. Bookmarks
-        (<code>dsl_bookmark.c</code>) and <code>zfs promote</code>, which <a href={L.promote}>swaps a clone and its
-        origin’s filesystem</a>, are other rooms’ business.
+        The figure runs the functions above over one filesystem with room for four data blocks and up to four snapshots, and one
+        clone that cannot itself be snapshotted or destroyed. The root block stands for the objset, the dnodes and the
+        indirect blocks, which are let go of by the same rule. Gang blocks, dedup blocks and blocks shared by block cloning, which ZFS frees later
+        rather than at once, are freed at once here, and so are the blocks of a destroyed snapshot. Space accounting
+        (the used and referenced sizes) is not drawn, nor is the clone's livelist, a list of the blocks it wrote that
+        makes destroying a clone fast; neither changes whether a block is freed or kept. Holds, deferred destroy, pools
+        older than keyed deadlists, bookmarks and <code>zfs promote</code>, which swaps a clone with the filesystem of
+        its origin, are left out.
       </p>
     </section>
   </article>
@@ -398,7 +263,7 @@ const L = {
     margin-top: var(--space-3);
     max-width: 18ch;
   }
-  .problem {
+  .answer {
     margin-top: var(--space-6);
   }
   h2 .n {
@@ -407,10 +272,10 @@ const L = {
     color: var(--accent);
     margin-right: 0.3em;
   }
-  .depth {
+  .step {
     margin-top: var(--space-6);
   }
-  .depth h3 {
+  .step h3 {
     margin-bottom: var(--space-3);
     font-family: var(--font-caption);
     font-style: italic;
@@ -418,8 +283,5 @@ const L = {
     font-size: var(--step-2);
     color: var(--accent);
     letter-spacing: 0;
-  }
-  .after {
-    margin-top: var(--space-5);
   }
 </style>

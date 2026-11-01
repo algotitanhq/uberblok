@@ -13,18 +13,28 @@ test("an unknown or malformed cookie falls back to the browser", () => {
   assert.equal(pickLang("lang=esp", "en"), "en");
 });
 
-test("French if listed at all, else Spanish, else English", () => {
-  assert.equal(pickLang(null, "en-US,en;q=0.9,fr;q=0.3"), "fr");
-  assert.equal(pickLang(null, "en-US,es-419;q=0.8"), "es");
+test("the first of en, fr, es in the browser's order of preference, else English", () => {
+  assert.equal(pickLang(null, "en-US,en;q=0.9,fr;q=0.3"), "en");
+  assert.equal(pickLang(null, "en-CA,fr-CA;q=0.9"), "en");
+  assert.equal(pickLang(null, "fr-CA,fr;q=0.9,en;q=0.8"), "fr");
+  assert.equal(pickLang(null, "en-US,es-419;q=0.8"), "en");
+  assert.equal(pickLang(null, "de-DE,es-419;q=0.8,en;q=0.7"), "es");
   assert.equal(pickLang(null, "FR-ca"), "fr");
   assert.equal(pickLang(null, "de-DE,de;q=0.9"), "en");
   assert.equal(pickLang(null, null), "en");
   assert.equal(pickLang(null, "*"), "en");
 });
 
+test("q-values rank the languages, ties keep the order listed", () => {
+  assert.equal(pickLang(null, "fr;q=0.5,es;q=0.9"), "es");
+  assert.equal(pickLang(null, "en;q=0.4,fr;q=0.6"), "fr");
+  assert.equal(pickLang(null, "es,fr"), "es");
+  assert.equal(pickLang(null, "fr;q=0.8,en;q=0.8"), "fr");
+});
+
 test("a language refused with q=0 does not count", () => {
   assert.equal(pickLang(null, "en, fr;q=0"), "en");
-  assert.equal(pickLang(null, "en, fr;q=0.0, es;q=0.5"), "es");
+  assert.equal(pickLang(null, "de, fr;q=0.0, es;q=0.5"), "es");
 });
 
 test("a tag that only starts with the letters is not the language", () => {

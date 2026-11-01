@@ -3043,3 +3043,20 @@ in both languages. Slugs: `tree`, `arbre` (D1.4).
   transitions rather than read them. Telling `frameAt` the action's kind instead of reading it
   from its events: only `sync()` starts with a `sync` event and only `mount()` emits `destroy`,
   and the comment says so.
+
+### D32.1 The root follows the browser's order of preference
+
+- **Context.** The root's rule (D1.4, kept by D20.1) sent a visitor to French whenever the
+  browser listed French at all, even after English: a browser set to English then French,
+  common in Canada, landed on `/fr/`. The owner asked for English as the default language and
+  for the browser's order to decide.
+- **Choice.** The language chosen with the switch (the `lang` cookie, or `localStorage` in the
+  fallback page) still wins. Otherwise the root takes the first of English, French and Spanish
+  in the browser's own order: the Worker ranks `Accept-Language` by q-value, ties in the order
+  listed, a language refused with `q=0` not counting; the fallback page reads
+  `navigator.languages`, already in that order. Neither lists one of the three: English.
+  `worker/root-lang.js`, the inline script of `src/pages/index.astro` (its hash in
+  `public/_headers`), `scripts/test/root-lang.test.mjs`.
+- **Rejected.** Keeping French first (the owner's call). Matching regional variants beyond
+  the primary subtag (`fr-CA` and `fr` are the same site).
+

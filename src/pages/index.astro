@@ -1,6 +1,6 @@
 ---
-// The root picks a language: the one chosen before (switch), else French or Spanish
-// when the browser lists it, else English. In production the Worker answers `/` first
+// The root picks a language: the one chosen before (switch), else the first of English,
+// French and Spanish in the browser's order of preference, else English (D32.1). In production the Worker answers `/` first
 // with a 302 (worker/index.js, DECISIONS.md D20.1), which keeps the Referer; this page
 // is the fallback (`astro preview`, a build served without the Worker), with every link
 // visible for no-JS visitors.
@@ -24,9 +24,9 @@ import Analytics from "../components/Analytics.astro";
         let lang = null;
         try { lang = localStorage.getItem("lang"); } catch {}
         if (lang !== "fr" && lang !== "en" && lang !== "es") {
-          // French if the browser lists French at all (as in v1), else Spanish if it lists Spanish, else English.
-          const has = (re) => (navigator.languages || [navigator.language]).some((l) => re.test(l));
-          lang = has(/^fr\b/i) ? "fr" : has(/^es\b/i) ? "es" : "en";
+          // The first of English, French and Spanish in the browser's order of preference, else English.
+          const prefs = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language];
+          lang = prefs.map((l) => String(l || "").toLowerCase().split("-")[0]).find((l) => l === "en" || l === "fr" || l === "es") || "en";
         }
         location.replace("/" + lang + "/");
       })();
